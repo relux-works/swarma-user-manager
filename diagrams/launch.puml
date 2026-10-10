@@ -6,19 +6,36 @@ participant "Dispatcher\n(unprivileged, configured caller)" as D
 participant "sudo" as S
 participant "swarma-user-launcher\n(root, no arguments)" as L
 database "Ledger + policy\n(root-owned)" as R
-participant "Executor\n(agent account, uid 612)" as E
-participant "Broker" as B
+participant "curator-run\n(agent account, uid 30412)" as E
+participant "swarma-credential-broker" as B
+participant "swarma-user-manager\n(root, no arguments)" as M
 
 D -> D: close broker connections (no descriptor may cross)
-D -> S: sudo /opt/swarma/libexec/swarma-user-launcher\n(stdin: launch-op/1 {generation, execution_id, epoch, executor, plan})
+D -> S: sudo /opt/swarma/libexec/swarma-user-launcher\n(stdin: swarma-user-manager launch-op/1)
+note over D, L: Schema sketch: v:1, op:launch.start, request_id:launch effect ID,\ngeneration:g-0193, execution_id, epoch, executor:curator-run, plan\nRequest <= 80 KiB; plan <= 64 KiB base64 / 48 KiB decoded; stdin within 5 s
 S -> L: exec as root (SUDO_UID = dispatcher)
 L -> R: shared lock; g-0193 active, kind agent, created by this dispatcher?
 L -> R: executor id → approved path + SHA-256
 L -> L: open the executable without following links; verify the digest
-L -> L: start receipt; setsid; home as cwd
-L -> L: close descriptors > 2; plan → pipe → descriptor 3;\nfixed environment; clear groups; set GID, UID; root cannot be regained
-L -> E: exec the verified executor as uid 612
-E -> E: read the plan; resolve the protected credential binding
+L -> L: home as cwd; close descriptors > 2;\nplan → pipe → descriptor 3; fixed bootstrap environment
+L -> L: refuse an existing execution receipt; setsid;\nwrite atomic root-owned start receipt BEFORE privilege drop
+L -> L: clear supplementary groups; set GID, UID;\nverify root cannot be regained
+L -> E: exec the verified executor as uid 30412
+E -> E: verify immutable caller-composed plan and digested PATH;\nresolve protected credential binding (no profile composition)
 E -> B: fresh connection; lease.request (broker lease-at-launch)
-note over S, E: sudo stays the parent and relays signals:\nthe dispatcher owns the process lifetime
+note over S, E: Dispatcher owns the execution lifetime; sudo is never a signal relay
+
+== Authorised stop (helper specification §4.7) ==
+D -> S: sudo /opt/swarma/libexec/swarma-user-manager\n(stdin: swarma-user-manager helper-op/1, exec.stop)
+note over D, M: Schema sketch: v:1, op:exec.stop, request_id:stop effect ID,\nargs:{generation:g-0193, execution_id, grace_seconds:10}; request <= 16 KiB\nStop and launch use distinct effect IDs; each retry reuses its own ID
+S -> M: exec as root (SUDO_UID = dispatcher)
+M -> R: shared lock; active, caller-owned generation;\nread matching root-owned execution receipt
+M -> M: verify UID, pid, start_time, boot_id, session_id\nbefore signalling; refuse reused process identity
+M -> E: SIGTERM to verified process session; grace period; SIGKILL
+M -> M: verify no remaining execution processes, including escaped descendants
+alt Absence confirmed
+  M --> D: stop receipt, remaining:0
+else Processes remain or observation unknown
+  M --> D: no success receipt; caller must not infer absence
+end
 @enduml

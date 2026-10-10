@@ -1,8 +1,12 @@
 # swarma-user-manager: specification
 
-- **Status:** draft v0.3 (2026-10-10). Nothing is implemented.
+- **Status:** draft v0.4 (2026-10-11). Nothing is implemented.
 - **Normative language:** MUST, MUST NOT, SHOULD and MAY are used as in RFC 2119.
 - **Companions:** [swarma-credential-broker](https://github.com/relux-works/swarma-credential-broker) (binds the OS accounts this helper creates), [curator-network-profiles](https://github.com/relux-works/curator-network-profiles) (the egress an agent may use).
+
+### Revision 0.4
+
+R-UM1 contract alignment: separate correlation and effect IDs (§5), collect message bounds (§2), make receipt-before-drop and authorised stop explicit (§7), and retain archive/delete while the operator-only `keep` request remains an open owner question (§4.4.1). Owner decisions of 2026-10-11 place donor provisioning in a separate component (§1.1), name versioned wire objects after the repository (§2), and constrain agent-side `curator-run` to execution of a caller-composed plan (§7). Identity revocation remains separate from account retirement (§4.4).
 
 ### Revision 0.3
 
@@ -26,6 +30,7 @@ Both run as root for one operation at a time, are invoked through `sudo` by conf
 - They do not decide who may start an agent (the dispatcher does) and do not hold credentials (the broker does).
 - The helper never starts processes; the launcher never creates accounts or rules.
 - Neither accepts free-form commands, paths, shell fragments or environment.
+- Donor provisioning and removal belong to a **separate donor-side provisioning component**, with its own short specification, rules, removal contract, binary and privileges (D-DONOR-PROVISIONING). It MAY share UID and path-checking libraries, but is not a helper operation. Neither `create-worker` nor `remove-worker` is supported by this helper, and `user.create`/`user.retire` are not substitutes for donor provisioning. Donor variant B stays disabled until that component is specified.
 
 ## 2. Invocation
 
@@ -33,22 +38,35 @@ Both run as root for one operation at a time, are invoked through `sudo` by conf
 - The sudoers rule allows a configured caller to run exactly that path **with no arguments**, using the empty argument specification, for example `swarma-dispatcher ALL=(root) NOPASSWD: /opt/swarma/libexec/swarma-user-manager ""`. The binaries also refuse any argument (`argv_not_allowed`).
 - The binary refuses unless its effective UID is 0 (`not_root`) and `SUDO_UID` is present and a plain decimal number (`not_invoked_by_sudo`). `SUDO_UID` is the caller's identity only because sudo set it during a trusted transition; it is not proof of the caller's executable, and root callers are outside this boundary.
 - The binary clears its environment, sets a fixed `PATH`, working directory and umask, and calls operating-system tools only by absolute path, never through a shell.
-- The request is exactly one JSON document on stdin, read within 5 seconds: at most 16 KiB for `helper-op/1` and 80 KiB for `launch-op/1` (`request_too_large`, `request_timeout`). Duplicate keys, unknown members, a trailing document, strings longer than their declared bound and arrays longer than theirs are refused (`request_invalid`).
+- The request is exactly one JSON document on stdin, read within 5 seconds: at most 16 KiB for `swarma-user-manager helper-op/1` and 80 KiB for `swarma-user-manager launch-op/1` (`request_too_large`, `request_timeout`). Duplicate keys, unknown members, a trailing document, strings longer than their declared bound and arrays longer than theirs are refused (`request_invalid`).
 - The answer is one JSON document on stdout; diagnostics go to the audit log.
 
 ```
-helper-op/1
+swarma-user-manager helper-op/1
 { v: 1,
   op:         "user.create" | "user.retire" | "user.list" | "exec.stop" | "archive.sweep" | "fw.apply" | "fw.remove",
-  request_id: string (≤ 64),           // idempotency key, §4.4
+  request_id: string (≤ 64),           // caller-scoped effect idempotency key, §§4.6, 5
   args:       { … per operation … } }
 
-helper-result/1
+swarma-user-manager helper-result/1
 { request_id, ok: true, result: { … }, state: current state of the target }
 | { request_id, ok: false, error: { code, message } }
 ```
 
 A `grants` member is refused until v2 (`grants_unsupported`), so an ignored grant can never look verified.
+
+Versioned wire identifiers follow `swarma-<component> <object>/<n>`, using the **repository** name (D-WIRE-NAMES). Both binaries belong to `swarma-user-manager`; their request kinds above and the result kind therefore use that prefix. Nothing has shipped, so no migration is needed. These schema identifiers do not define a signed-request domain or signature grammar (§9).
+
+| Message or payload | Maximum size | Intake / owner |
+|---|---|---|
+| Helper request (`swarma-user-manager helper-op/1`) | 16 KiB | One JSON document on stdin, 5 seconds; this section |
+| Launcher request (`swarma-user-manager launch-op/1`) | 80 KiB | One JSON document on stdin, 5 seconds; §§2, 7 |
+| Plan within launcher request | 48 KiB decoded; 64 KiB base64 | Delivered decoded on descriptor 3; §7 |
+| Dispatcher v0 request | 96 KiB | Stdin, 5 seconds; dispatcher §10 |
+| Dispatcher v1 frame | 128 KiB | Dispatcher §10 |
+| Broker frame | 64 KiB | Broker §13.1 |
+
+The dispatcher MUST refuse a payload exceeding the smallest bound on its launch path before provisioning. The larger dispatcher limits do not enlarge the launcher's request or plan bounds.
 
 ## 3. Policy
 
@@ -71,7 +89,7 @@ Requests outside the caller's role are refused (`caller_role_not_permitted`, `ta
   libexec/                   root 0755: swarma-user-manager, swarma-user-launcher, swarma-dispatcher
   etc/                       root 0755: user-manager.json (policy, ranges, archive), approved-executors.json
   lib/user-manager/                root: ledger.json (0644), receipts/ (0644 files), applied-state/ (0644), journal/ and lock (0700)
-  run/                       socket directories of the services (broker/, dispatcher/), 0755
+  run/                       socket directories of the services (credential-broker/, dispatcher/), 0755
   services/<account>/        homes of service accounts, 0700
   workers/<account>/         homes of agent accounts, 0700 (work/, tmp/ and harness state inside)
   quarantine/                root 0700: homes moved here at retirement
@@ -129,6 +147,8 @@ result: { username, generation, state: "removed", archive?: path }
 5. Move the home into `quarantine/` on the same file system, then archive or delete it with a descriptor-relative walk (§6) according to §4.4.1. Remove the account's files in the system temporary directories and its per-user temporary area.
 6. Remove the account and group, then the firewall rules, and persist `removed`.
 
+Account retirement does not revoke an agent identity. For a one-shot worker, the dispatcher performs identity revocation as a **separate operation after account retirement**, only for identities it registered with a recorded one-shot flag. For standing agents (including orchestrators and fixed team roles), retirement leaves the identity intact; only the operator may revoke it, with a signed record (D-IDENTITY). Binding cleanup, account removal and identity revocation are distinct operations.
+
 #### 4.4.1 Archive policy
 
 The `archive` block of `etc/user-manager.json`:
@@ -139,12 +159,12 @@ The `archive` block of `etc/user-manager.json`:
   "dir": "/opt/swarma/archive",
   "format": "tar.zst",
   "retention": { "max_age": "7d", "max_total": "20GiB", "max_per_archive": "2GiB" },
-  "exclude": ["**/node_modules", "**/.cache", "**/DerivedData", "**/target", "**/.build", "**/go-build"],
-  "keep_requires": "operator"
+  "exclude": ["**/node_modules", "**/.cache", "**/DerivedData", "**/target", "**/.build", "**/go-build"]
 }
 ```
 
-- `user.retire { home: "archive" | "delete" | "keep" }` overrides the default; `keep` (no expiry) requires an operator caller.
+- `user.retire { home: "archive" | "delete" }` overrides the configured default. The default is `archive`; the retention values above are configurable policy defaults, not immutable platform limits.
+- **OWNER DECISION NEEDED — unified retirement fate set (contract P7):** (a) admit `keep` (no expiry) as an operator-only request value, aligning §4.4 and the policy with `keep_requires: "operator"`; or (b) remove `keep` from the policy and retain archive/delete only. The earlier operator-only keep policy did not add it to the closed request schema. Until the owner chooses, `keep` is not admitted and its policy setting is not active. Neither option extends dispatcher or installer authority.
 - An archive is named `<account>-<generation>-<date>.tar.zst`, owned by root, mode 0600; links are archived as links (§6).
 - A home larger than `max_per_archive` after exclusions is deleted and the audit log says so.
 - `archive.sweep` (at every retirement and from a daily root timer) removes archives older than `max_age`, then the oldest ones until the total is under `max_total`.
@@ -167,11 +187,35 @@ args:   { generation: "g-0193", execution_id: "EX-…", grace_seconds: 10 }
 result: { execution_id, stopped_at, receipt: { signalled, killed, remaining: 0 } }
 ```
 
-Allowed to the dispatcher for generations it created. The helper reads the execution's start receipt (§7), sends SIGTERM to the execution's process session, waits up to the grace period, sends SIGKILL, and then verifies that no process of the account that started at or after the receipt remains (escaped descendants included; v0 allows one execution per generation, so every such process belongs to it). It returns the receipt only when the count is zero (`processes_remain` otherwise, and the call may be repeated with the same request id). It never signals by an unqualified UID: the generation must be active and match the receipt.
+Allowed to the dispatcher for generations it created. Under the shared lock, the helper checks the active, caller-owned generation and reads the execution's root-owned start receipt (§7). Before signalling, it matches the requested generation and `execution_id` to the receipt, then verifies the live target's UID and process identity (`pid`, `start_time`, `boot_id`, `session_id`); a reused PID or UID is never authority. It sends SIGTERM to the verified execution's process session, waits up to the grace period, sends SIGKILL, and then verifies that no process of the account that started at or after the receipt remains (escaped descendants included; v0 allows one execution per generation, so every such process belongs to it). It returns the receipt only when the count is zero (`processes_remain` otherwise, and the call may be repeated with the same effect request id). It never signals by an unqualified UID or PID: the generation must be active and match the receipt. Unknown or failed process observations do not establish absence. sudo is only the invocation boundary, never a signal relay.
 
 ## 5. Cross-component reconciliation
 
-A dispatcher's request id ties together the helper's `user.create`, the broker's `bind` and the launcher's `launch.start`. After a failure between them, the dispatcher repeats the same request ids: each component returns its recorded result, and the dispatcher completes the missing step or retires the generation.
+The root caller's `request_id` correlates one caller-scoped dispatcher request. It is distinct from each downstream effect's idempotency key. The dispatcher derives a separate effect ID for every create, bind, launch, stop, unbind and retire operation: the first 32 hexadecimal characters of SHA-256 over `swarma-dispatcher effect/1` plus CCJ-1 `{caller principal, request_id, record id, component, operation, attempt}` (dispatcher §4.5; no newline is added to this formula).
+
+| Effect | Receiver | Received `request_id` |
+|---|---|---|
+| `user.create` | Helper | Create effect ID |
+| `bind` | Broker | Bind effect ID |
+| `launch.start` | Launcher | Launch effect ID |
+| `exec.stop` | Helper | Stop effect ID |
+| `unbind` | Broker | Unbind effect ID |
+| `user.retire` | Helper | Retire effect ID |
+
+Retries of the same effect reuse its ID; different operations MUST NOT reuse one ID. After a failure between components, the dispatcher repeats the relevant effect IDs, each receiver returns its recorded result under its own idempotency contract, and the dispatcher performs the missing effect or retires the generation. The helper also returns the target's current state (§4.6). Root correlation stays in the dispatcher's effect table, not in an invented extra member of the closed helper/launcher schemas.
+
+| Identifier | Meaning |
+|---|---|
+| Account `generation` | Never-reused account instance; distinguishes UID reuse |
+| Dispatcher `agent_id` | Allocation record |
+| Dispatcher `run_id` | Execution record |
+| `execution_id` | Execution claim and start-receipt identity |
+| Launch `epoch` | Execution/launch fencing value; not the account generation or a session controller epoch |
+| Broker `binding_id` | Never-reused broker binding identity |
+| Broker `launch_id` | Correlation only (plan digest or run ID), never authority |
+| Board run/attempt IDs | Separate optional client handles, not dispatcher execution IDs |
+
+The contract does not freeze a `run_id` to `execution_id` construction; integrations preserve their distinct roles rather than inventing an equality.
 
 ## 6. File operations
 
@@ -186,15 +230,15 @@ A dispatcher's request id ties together the helper's `user.create`, the broker's
 The launcher is the narrow transition from a dispatcher into an agent account that the platform design calls for: it starts one approved executor, and nothing else, under one active agent generation.
 
 ```
-launch-op/1
+swarma-user-manager launch-op/1
 { v: 1,
   op:         "launch.start",
-  request_id: string (≤ 64),
+  request_id: string (≤ 64),                 // launch effect idempotency key, §5
   generation:   "g-0193",
   execution_id: "EX-…",                      // from the dispatcher's execution claim
   epoch:        3,
   executor:     "curator-run",     // an id from the approved list
-  plan:         base64 (decoded ≤ 48 KiB) }  // delivered to the executor on descriptor 3; request ≤ 80 KiB
+  plan:         base64 (encoded ≤ 64 KiB; decoded ≤ 48 KiB) }  // delivered on descriptor 3; request ≤ 80 KiB
 ```
 
 1. Under the shared lock, read the ledger: the generation is `active`, of kind agent, and created by the calling dispatcher (`generation_not_active`, `target_not_owned`).
@@ -202,11 +246,15 @@ launch-op/1
 3. Use the agent's home as the working directory, opened without following links; the executor prepares `work/` and `tmp/` inside it under the agent's own UID.
 4. Close every descriptor above 2, then create a pipe, write `plan` into it and place its read end at descriptor 3. Standard input, output and error are the caller's (its pipes or terminal); no other descriptor crosses the transition.
 5. Build the environment from a fixed set (`HOME`, `USER`, `LOGNAME`, `PATH`, `LANG`, `TMPDIR` inside the home); nothing is inherited.
-6. Refuse if a start receipt for this `execution_id` already exists (`execution_already_started`); otherwise write the **start receipt** `lib/user-manager/receipts/<generation>/<execution_id>.json` (`{ execution_id, epoch, pid, start_time, boot_id, session_id }`, mode 0644, atomic), then start a new session (`setsid`) so the execution is one process session.
+6. Refuse if a start receipt for this `execution_id` already exists (`execution_already_started`); otherwise start a new session (`setsid`) so the execution is one process session, then, **while still root and before the privilege drop**, write the atomic, root-owned **start receipt** `lib/user-manager/receipts/<generation>/<execution_id>.json` (`{ execution_id, epoch, pid, start_time, boot_id, session_id }`, mode 0644).
 7. Set the supplementary groups to none, then the GID, then the UID (real, effective and saved), and verify that root cannot be regained (`privilege_drop_failed`).
 8. Exec the verified executable (on Linux by descriptor with `execveat`; on macOS by its path in the root-owned directory).
 
 The execution's lifetime belongs to the dispatcher: it stops an execution only through `exec.stop` (§4.7). sudo may or may not remain a parent, depending on its policy, and is never relied on to relay signals (it cannot forward SIGKILL). The executor is trusted platform code: it reads the plan, resolves the protected credential binding, obtains its lease from the broker on a fresh connection and execs the harness (broker §12.2). Arbitrary `sudo -u` or a general command runner is never a substitute for the launcher.
+
+D-EXECUTOR authorises a versioned, narrow agent-account one-shot mode for `curator-run`: it only verifies and executes an immutable plan composed on the caller's side, never composes or resolves profiles under the agent account, and has no network access except to the broker. It shares a launch library with `swarma-session-runner`; a separate minimal executor binary remains a later option. `curator-run` under the agent account is the first broker consumer. The board runner and session host ask the dispatcher to launch through it; they do not embed broker clients. The executor's versioned intake and Decision 0021 amendment remain publication work owned by R-LR1/R-CS2; this helper's FD3 transport does not claim that amendment is implemented.
+
+The caller-composed plan records the resolved PATH and covers it with the plan digest (D-PATH): (1) this launch's protected tool directory (CIP-0007), (2) the user's admitted base PATH in its existing order, (3) one protected manager dispatcher directory, through which project commands run only after checks. The executor verifies and uses that plan; a repository `.agents/bin` is never executed in a managed launch. This launch PATH is distinct from the launcher's fixed bootstrap environment in step 5.
 
 ## 8. Firewall per account (v1)
 
@@ -225,6 +273,8 @@ fw.remove args: { generation }
 ## 9. Grant verification (v2)
 
 In the platform design the helper is a handler process that independently limits authority. v2 checks, for every request, a grant chain to a configured root that authorises the action on the concrete target in the current time window and is not revoked, and verifies that the caller is the grant's subject (for example by a signature of the subject key over the request). A valid chain presented by someone else is not authority. The role policy of §3 remains as defence in depth.
+
+**OWNER DECISION NEEDED — v2 signed requests (contract W3):** adopt an explicit component-specific format, or a versioned shared adapter; then publish the signed domain/version and canonical bytes. D-WIRE-NAMES supplies the naming rule, not a signature grammar. No concrete signed-request tag is specified here; v0/v1 continue to authenticate the configured sudo caller and refuse grants.
 
 ## 10. How it fits
 
@@ -261,11 +311,13 @@ Tests that create accounts, start processes under them or change firewall rules 
 
 ## 14. Open questions
 
-1. Home roots, and whether a parent orchestrator gets read access to its children's homes (ACL) in v0 or v2.
-2. Archive or delete homes by default on retirement.
-3. UID and GID ranges per OS.
+1. The unified retirement fate set: operator-only `keep`, or archive/delete only (§4.4.1). The archive default is already specified.
+2. The v2 signed-request domain/version and canonical bytes: component-specific format or versioned shared adapter (§9).
+3. SH2 launch-ticket signature domain/version and host-role schema (contract I4): jointly version and activate the dispatcher-issued, once-redeemed ticket gate, or leave the SH2 backend disabled. The target payload is `{generation, execution_id, epoch, executor, plan_digest, expires_at}`. D-WIRE-NAMES governs its eventual name but does not publish the grammar or grant the host launch authority. The current caller policy has no host role.
 4. The restriction for traffic outside pf's TCP and UDP matching on macOS (§8).
 5. Windows (later).
+
+Home layout, UID/GID ranges and the archive default are specified in §§4.0–4.4.1. Parent read access to a child's home is absent by default; opt-in ACL delegation belongs to v2 (§13).
 
 ## Appendix A. Error codes
 

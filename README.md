@@ -9,7 +9,7 @@ Two minimal privileged components for agent systems. Each runs as root for one o
 
 ## Principles
 
-- Closed operation schemas read from stdin (`helper-op/1`, `launch-op/1`), never free-form arguments, commands or environment.
+- Closed operation schemas read from stdin (`swarma-user-manager helper-op/1`, `swarma-user-manager launch-op/1`), never free-form arguments, commands or environment.
 - Per-caller policy: installers manage service accounts, dispatchers manage only the agents they created.
 - The helper chooses account names and UIDs from its own ranges; every creation gets a generation that is never reused.
 - It acts only on accounts it created (a root-owned ledger), never on pre-existing accounts, and works on files through descriptors without following links.
