@@ -1,0 +1,65 @@
+@startuml receipt-archive-states
+title M-UM3: receipt evidence and archive fate (v0 design; no implementation claim)
+hide empty description
+
+state "Start receipt / execution evidence (§§4.7, 7)" as Receipt {
+  state "No start receipt yet" as NoReceipt
+  state "Root start receipt exists\nwritten before privilege drop / exec" as Recorded
+  state "Stop absence confirmed\nresult receipt: remaining = 0" as Absent
+  [*] --> NoReceipt
+  NoReceipt --> Recorded : launcher: setsid, atomic root write\nthen clear groups / GID / UID / exec
+  Recorded --> Recorded : launch with existing execution_id refuses\nexecution_already_started
+  Recorded --> Recorded : helper stop refuses receipt / live identity mismatch\nor processes_remain / unknown observation
+  Recorded --> Absent : helper exec.stop verifies active owned generation,\nreceipt + live identity; TERM / grace / KILL;\nno remaining processes incl. escaped descendants
+  Absent --> Absent : receipt persistence/deletion rule unspecified\nno second-launch permission inferred
+}
+note right of Recorded
+  Process: swarma-user-launcher, root until UID drop.
+  Root-owned mode 0644 start receipt:
+  execution_id, epoch, pid, start_time, boot_id, session_id.
+  Location binds generation and execution_id (§7).
+  Process: swarma-user-manager, root, owns exec.stop.
+  Execution: curator-run -> harness under agent UID;
+  dispatcher service UID owns execution lifetime.
+  Unknown/failed observation is not known absence (§4.7).
+  Post-receipt/pre-exec failure recovery and receipt deletion:
+  unspecified in spec §§4.6, 7.
+end note
+note right of Absent
+  Evidence condition, not a new persisted account state.
+  Stop result receipt storage / retention: unspecified in spec §4.7.
+  An existing start receipt still refuses another start (§7).
+end note
+
+state "Home fate after retiring commit and verified quiescence (§4.4.1)" as Archive {
+  state "Home in quarantine\nsame-filesystem move; root-controlled" as Quarantined
+  state "Archive retained\nroot-owned 0600 tar.zst" as Retained
+  state "Home deleted" as Deleted
+  state "Archive swept" as Swept
+  [*] --> Quarantined : manager user.retire; account quiescent
+  Quarantined --> Deleted : explicit home=delete\nno-follow descriptor walk
+  Quarantined --> Deleted : home=archive exceeds max_per_archive\nafter exclusions; audit deletion
+  Quarantined --> Retained : home=archive within bound\nlinks stored as links
+  Retained --> Swept : archive.sweep: older than max_age\nthen oldest until max_total satisfied
+}
+note right of Quarantined
+  Process: swarma-user-manager, root; installer/operator/dispatcher
+  caller roles apply (§3); dispatcher only its own agents.
+  Home content was account-owned; quarantine is root 0700 (§4.0).
+  Journal recovery resumes retirement forward (§4.6).
+  Quarantine disposal after archive: unspecified in spec §4.4.1.
+  keep request refuses today: not in closed schema (§4.4.1).
+  Operator-only keep/no-expiry is an OPEN owner choice, not a state.
+end note
+note right of Retained
+  Manager owns archive and audit; root configuration owns retention policy.
+  Configurable defaults: archive; max_age 7d; max_total 20GiB;
+  max_per_archive 2GiB after configured exclusions (§4.4.1).
+  Sweep at every retirement and daily root timer.
+  Timer identity beyond root / retry on sweep failure:
+  unspecified in spec §4.4.1.
+end note
+note "Defining spec: [[../spec/helper.md#7-the-launcher-swarma-user-launcher §7 start receipt]],\n[[../spec/helper.md#47-execstop §4.7 stop evidence]], [[../spec/helper.md#441-archive-policy §4.4.1 archive]].\nThese are two independent views, not a receipt-to-archive transition.\nCurrent repository: nothing implemented. v1 retains egress until account/group removal (§8).\nv2 grant grammar open (§9); SH1/SH2 receipt/archive variants unspecified in spec §§4.4.1, 7;\nSH2 host-role/ticket gate open (§14)." as Scope
+Scope .. Receipt
+Scope .. Archive
+@enduml

@@ -21,6 +21,19 @@ Two minimal privileged components for agent systems. Each runs as root for one o
 - [swarma-dispatcher](https://github.com/relux-works/swarma-dispatcher), under its own service account, creates an agent's account with the helper, binds that account's generation in swarma-credential-broker, and starts the agent's executor through the launcher; the executor then obtains its credential lease from the broker itself.
 - swarma-credential-broker runs under a service account the helper creates, and reads the helper's ledger to check generations.
 
+## Diagrams
+
+PlantUML sources map the current [specification](spec/helper.md#appendix-b-diagrams). All figures show unimplemented design phases, process identities, state owners and refusal/recovery boundaries. Visible notes preserve unspecified behavior and open decisions; SH2 launch authority is not activated.
+
+| Audit row | Figure | Spec |
+|---|---|---|
+| M-UM1 | [Privileged components](diagrams/components.puml) | [§1](spec/helper.md#1-purpose), §§2–3, 4.6, 6–9 |
+| M-UM2 | [Launch and authorised stop](diagrams/launch.puml) | [§7](spec/helper.md#7-the-launcher-swarma-user-launcher), §4.7 |
+| M-UM2 | [Provision, retire and recovery](diagrams/provision-retire-recovery.puml) | [§4.3](spec/helper.md#43-usercreate), §§4.4–4.6 |
+| M-UM3 | [Account lifecycle](diagrams/account-lifecycle.puml) | [§4.2](spec/helper.md#42-lifecycle), §4.6 |
+| M-UM3 | [Receipt evidence and archive fate](diagrams/receipt-archive-states.puml) | [§4.4.1](spec/helper.md#441-archive-policy), §§4.7, 7 |
+| M-UM4 | [Storage layout and owners](diagrams/storage-layout.puml) | [§4.0](spec/helper.md#40-layout), §§6–7, 11 |
+
 ## License
 
 Apache License 2.0 — see [LICENSE](LICENSE) and [NOTICE](NOTICE). Authors: Ivan Oparin and Alexey Grigorev.

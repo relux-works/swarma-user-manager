@@ -18,6 +18,8 @@ An architecture review on 2026-10-09 kept the closed, root-owned design and aske
 
 ## 1. Purpose
 
+Figure [M-UM1: privileged components and process boundaries](../diagrams/components.puml) maps the responsibilities below; it describes the design, not implemented components.
+
 An agent system gets a real boundary between agents on one machine by running each agent under its own OS account: processes of different accounts cannot read each other's files or memory, and kernel firewalls can match traffic by account. Creating accounts, starting processes under them and installing firewall rules need root. This repository holds the only components with that power, and each holds it narrowly:
 
 - **swarma-user-manager** creates, lists and retires accounts and (v1) applies per-account firewall rules;
@@ -84,6 +86,8 @@ Requests outside the caller's role are refused (`caller_role_not_permitted`, `ta
 
 ### 4.0 Layout
 
+Figure [M-UM4: storage layout and owners](../diagrams/storage-layout.puml) expands this tree, including OS records and the launcher descriptor boundary.
+
 ```
 /opt/swarma/                 root 0755
   libexec/                   root 0755: swarma-user-manager, swarma-user-launcher, swarma-dispatcher
@@ -108,6 +112,8 @@ The root is chosen at installation (for example on a separate volume); every pat
 
 ### 4.2 Lifecycle
 
+Figure [M-UM3: account lifecycle](../diagrams/account-lifecycle.puml) shows the creation rollback and retirement commit point. The sequences are in [M-UM2: provision, retire and recovery](../diagrams/provision-retire-recovery.puml).
+
 ```
 creating → active → retiring → removed
     └─ (failure) → rolled back
@@ -119,6 +125,8 @@ creating → active → retiring → removed
 - `removed`: the generation stays in the ledger forever.
 
 ### 4.3 `user.create`
+
+Figure [M-UM2: provision, retire and recovery](../diagrams/provision-retire-recovery.puml) shows allocation, creation and rollback boundaries.
 
 ```
 args:   { kind: "agent" | "service", label: "dev-7f3" }
@@ -135,6 +143,8 @@ Qualification verifies the result on each OS: authentication disabled, no elevat
 
 ### 4.4 `user.retire`
 
+Figure [M-UM2: provision, retire and recovery](../diagrams/provision-retire-recovery.puml) shows forward recovery, the quiescence gate and egress cleanup last.
+
 ```
 args:   { generation: "g-0193", home: "archive" | "delete" }
 result: { username, generation, state: "removed", archive?: path }
@@ -150,6 +160,8 @@ result: { username, generation, state: "removed", archive?: path }
 Account retirement does not revoke an agent identity. For a one-shot worker, the dispatcher performs identity revocation as a **separate operation after account retirement**, only for identities it registered with a recorded one-shot flag. For standing agents (including orchestrators and fixed team roles), retirement leaves the identity intact; only the operator may revoke it, with a signed record (D-IDENTITY). Binding cleanup, account removal and identity revocation are distinct operations.
 
 #### 4.4.1 Archive policy
+
+Figure [M-UM3: receipt evidence and archive fate](../diagrams/receipt-archive-states.puml) shows archive/delete, oversize deletion and retention sweep; it preserves the unresolved `keep` decision below.
 
 The `archive` block of `etc/user-manager.json`:
 
@@ -175,12 +187,16 @@ The ledger is a root-owned, world-readable file with one record per generation: 
 
 ### 4.6 Lock, journal and idempotency
 
+Figure [M-UM2: provision, retire and recovery](../diagrams/provision-retire-recovery.puml) distinguishes creation rollback from retirement recovery and effect replay.
+
 - One durable lock (an exclusive lock on a root-owned file) serialises every operation of both binaries, including recovery and allocation.
 - Every operation writes generation-scoped journal records of planned and completed steps before acting. Recovery runs first in every invocation and compares the actual operating-system objects with the journal before each action: an interrupted creation is rolled back, an interrupted retirement is resumed.
 - `request_id` is scoped to the caller's principal. A repeated `(caller, request_id)` with the same operation and canonical arguments returns the recorded result together with the target's **current** state, so an old success never looks like a live account; different arguments are refused (`request_id_conflict`).
 - Every operation appends one line to a root-owned audit log: time, caller, operation, arguments, result.
 
 ### 4.7 `exec.stop`
+
+Figures [M-UM2: launch and authorised stop](../diagrams/launch.puml) and [M-UM3: receipt evidence and archive fate](../diagrams/receipt-archive-states.puml) distinguish a start receipt from confirmed process absence.
 
 ```
 args:   { generation: "g-0193", execution_id: "EX-…", grace_seconds: 10 }
@@ -219,6 +235,8 @@ The contract does not freeze a `run_id` to `execution_id` construction; integrat
 
 ## 6. File operations
 
+Figure [M-UM4: storage layout and owners](../diagrams/storage-layout.puml) maps the protected paths and no-follow boundary.
+
 - Control paths (configuration, ledger, journal, audit, quarantine, archive, the homes' roots) are root-owned directories that are not writable by others; a control path that is a symbolic link refuses (`path_is_link`).
 - All operations work relative to trusted directory descriptors and never follow links: on Linux through `openat2` with `RESOLVE_BENEATH` and `RESOLVE_NO_SYMLINKS`; on macOS through a per-component `openat` walk with `O_NOFOLLOW` (`O_NOFOLLOW_ANY` where available). Every opened object is checked with `fstat` for type, owner and device where it matters.
 - Homes are created with `mkdirat`, `fchown` and `fchmod` on the descriptor. The helper never runs a recursive `chown` over content an agent controls.
@@ -226,6 +244,8 @@ The contract does not freeze a `run_id` to `execution_id` construction; integrat
 - Destructive walks start only after the account is quiescent (§4.4) and the home has been moved into quarantine, so no process of the account can swap a directory during the walk.
 
 ## 7. The launcher (`swarma-user-launcher`)
+
+Figure [M-UM2: launch and authorised stop](../diagrams/launch.puml) shows the root receipt write before privilege drop, refusal branches and authorised stop. [M-UM1: privileged components](../diagrams/components.puml) shows the launcher as a separate process.
 
 The launcher is the narrow transition from a dispatcher into an agent account that the platform design calls for: it starts one approved executor, and nothing else, under one active agent generation.
 
@@ -257,6 +277,8 @@ D-EXECUTOR authorises a versioned, narrow agent-account one-shot mode for `curat
 The caller-composed plan records the resolved PATH and covers it with the plan digest (D-PATH): (1) this launch's protected tool directory (CIP-0007), (2) the user's admitted base PATH in its existing order, (3) one protected manager dispatcher directory, through which project commands run only after checks. The executor verifies and uses that plan; a repository `.agents/bin` is never executed in a managed launch. This launch PATH is distinct from the launcher's fixed bootstrap environment in step 5.
 
 ## 8. Firewall per account (v1)
+
+Figures [M-UM1: privileged components](../diagrams/components.puml) and [M-UM2: provision, retire and recovery](../diagrams/provision-retire-recovery.puml) label the v1 adapter, evidence refusal and denial lifetime.
 
 ```
 fw.apply  args: { generation, profile_ref, profile_digest, proxy: { port } }
@@ -325,4 +347,15 @@ Home layout, UID/GID ranges and the archive default are specified in §§4.0–4
 
 ## Appendix B. Diagrams
 
-PlantUML sources in [`diagrams/`](../diagrams/): `account-lifecycle.puml`, `launch.puml`.
+These PlantUML sources describe draft v0.4. Current implementation status is **nothing implemented**; v0/v1/v2 annotations name design phases. SH1 details are outside this spec; SH2 host-role/ticket activation stays open (§14). Each source links its defining section and visibly labels unspecified behavior rather than adding a contract. No rendered copies are maintained here.
+
+| Audit row | Figure | Defining sections |
+|---|---|---|
+| M-UM1 | [Privileged components](../diagrams/components.puml) | §§1–3, 4.6, 6–9 |
+| M-UM2 | [Launch and authorised stop](../diagrams/launch.puml) | §§2–3, 4.6–4.7, 5, 7 |
+| M-UM2 | [Provision, retire and recovery](../diagrams/provision-retire-recovery.puml) | §§4.1–4.6, 5–6, 8 |
+| M-UM3 | [Account lifecycle](../diagrams/account-lifecycle.puml) | §§4.1–4.4, 4.6, 7–8 |
+| M-UM3 | [Receipt evidence and archive fate](../diagrams/receipt-archive-states.puml) | §§4.4–4.4.1, 4.6–4.7, 7 |
+| M-UM4 | [Storage layout and owners](../diagrams/storage-layout.puml) | §§4.0, 4.3–4.6, 6–8, 11 |
+
+The row identifiers come from [the platform documentation audit, B4](https://github.com/relux-works/curator/blob/48789217/.research/261010_platform-docs-audit.md#b4-missing-or-insufficient-module-diagrams--exact-proposed-files). The current spec governs the figures; historical audit gaps do not authorise new behavior.

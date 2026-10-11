@@ -1,0 +1,84 @@
+@startuml components
+title M-UM1: component view within privileged process boundaries (unimplemented design)
+left to right direction
+
+actor "Configured caller\ninstaller / dispatcher / operator UID" as Caller
+component "sudo\ntrusted root transition; exact path, no args" as Sudo
+package "swarma-user-manager process\nroot; one helper-op/1 invocation (v0)" {
+  component "Sudo entry validation\neffective UID + SUDO_UID + argv" as MEntry
+  component "Closed helper decoder\n16 KiB / 5 s" as MDecode
+  component "Caller policy\nrole / ownership / quota" as MPolicy
+  component "Lock, journal and recovery\ncreate rollback / retire forward" as Recovery
+  component "OS account backend\nmacOS dscl / Linux groupadd, useradd" as Accounts
+  component "Descriptor-safe file operations\ntrusted directory descriptors; no-follow" as Files
+  component "Retirement / archive / sweep\nquiescence before destructive walk" as Archive
+  component "Egress adapter (v1)\npf / nftables; evidence matrix" as Firewall
+  component "Authorised exec.stop\nreceipt + live identity; TERM / KILL" as Stop
+}
+package "swarma-user-launcher process\nroot until privilege drop; one launch-op/1 invocation (v0)" {
+  component "Sudo entry + closed decoder\n80 KiB / 5 s" as LEntry
+  component "Launch validation\ncaller / generation / executor / home" as Launch
+  component "Descriptor-safe executable / home opens\nno-follow; type / owner checks" as LFiles
+  component "Receipt writer\natomic write before GID/UID drop" as Receipt
+  component "Descriptor/environment reset\nFD3 plan; setsid; privilege drop; exec" as Exec
+}
+database "Root-owned configuration\nroles, ranges, archive policy, approved digests\nInstaller places it (§11)" as Config
+database "Root-owned manager control state\nledger + allocation cursor; lock; journal; audit\nlauncher-written start receipts; v1 applied state" as State
+database "OS directory service\naccount / primary-group records\nmanager-created; backend storage" as OS
+folder "Account-owned homes\nroot-controlled home roots\nRoot quarantine + archives" as Homes
+component "Kernel egress rules (v1)\nhelper-owned pf anchor / nftables table" as Kernel
+component "curator-run -> harness\nagent account UID; immutable plan only" as Agent
+component "swarma-credential-broker\nservice account; owns credentials / bindings / leases" as Broker
+component "Profile proxy (v1)\ntrusted service account; verified listener" as Proxy
+
+Caller --> Sudo : operation JSON on stdin
+Sudo --> MEntry
+Sudo --> LEntry
+MEntry --> MDecode
+MDecode --> MPolicy
+MPolicy --> Config
+MPolicy --> Recovery
+Recovery --> State : one exclusive lock; journal before actions
+Recovery --> Accounts
+Recovery --> Archive
+Recovery --> Firewall
+Recovery --> Stop
+Accounts --> OS
+Accounts --> Files
+Archive --> Files
+Files --> Homes
+Archive --> Broker : end generation binding
+Firewall --> Kernel
+Firewall --> Proxy : verify listener owner
+Firewall --> State : publish applied state after successful apply
+Stop --> State : matching root start receipt
+Stop --> Agent : only verified process identity; success after absence
+LEntry --> Launch
+Launch --> Config
+Launch --> State : same exclusive lock + recovery; active owned generation
+Launch --> LFiles : no-follow executable / home
+LFiles --> Homes : opened home as cwd
+Launch --> Receipt
+Receipt --> State
+Receipt --> Exec
+Exec --> Agent : verified exec; only standard FDs + FD3 plan
+Agent --> Broker : fresh connection; lease
+Broker --> State : reads ledger / v1 applied state; readability is not authority
+
+note bottom of Recovery
+  Refusal: invalid invocation/schema, role, ownership, quota, unmanaged objects,
+  request_id conflict, unsafe path (§§2-6). Repeated same effect returns recorded
+  result plus current state; next invocation recovers interrupted create/retire.
+end note
+note bottom of Launch
+  Refusal: inactive/wrong-owner generation, unapproved executor, digest mismatch,
+  existing execution receipt, failed privilege drop (§7).
+  Post-receipt/pre-exec crash resolution and receipt retention: unspecified in spec §7.
+end note
+note bottom of Firewall
+  v1: refuse unsupported tuple; never report enforcement without whole-matrix evidence.
+  Denial before first launch; retain until account/group removal (§8).
+end note
+note "Defining spec: [[../spec/helper.md#1-purpose §1 process split]], [[../spec/helper.md#2-invocation §§2-3 invocation/policy]],\n[[../spec/helper.md#46-lock-journal-and-idempotency §4.6 recovery]], [[../spec/helper.md#6-file-operations §6 paths]],\n[[../spec/helper.md#7-the-launcher-swarma-user-launcher §7 launcher]], [[../spec/helper.md#8-firewall-per-account-v1 §8 egress]].\nBoxes are conceptual responsibilities within binaries, not implemented classes or extra processes.\nCurrent: nothing implemented; v0 accounts/launcher, v1 egress, v2 grants (§13).\nv0/v1 refuse grants; v2 subject-bound chain checks target/time/revocation (§9); signature grammar open.\nSH1 internals: unspecified in spec §7; SH2 host-role/ticket gate open (§14), no host caller admitted.\nDonor provisioning is a separate component; variant B disabled pending its spec (§1.1)." as Scope
+Scope .. MEntry
+@enduml

@@ -1,0 +1,77 @@
+@startuml storage-layout
+title M-UM4: protected layout, owners and descriptor boundary (unimplemented design)
+left to right direction
+
+package "Platform root chosen at installation (§4.0)\nexample /opt/swarma; root 0755" {
+  folder "libexec/ - root 0755\nmanager, launcher, dispatcher binaries\nfixed protected release paths" as Binaries
+  folder "etc/ - root 0755\nuser-manager.json: roles/ranges/archive\napproved-executors.json: paths/digests" as Config
+  package "lib/user-manager/ - root control state" {
+    file "ledger.json - root 0644\nall generations forever; allocation cursor" as Ledger
+    folder "receipts/ - root\nstart files 0644\n<generation>/<execution_id>.json" as Receipts
+    folder "applied-state/ - root 0644 (§4.0)\nv1 per-generation enforcement metadata" as Applied
+    folder "journal/ and lock - root 0700 (§4.0)\nplanned/completed steps; exclusive durable lock" as Journal
+  }
+  folder "run/ - 0755\ncredential-broker/ and dispatcher/\nservice socket directories" as Runtime
+  folder "services/<account>/ - account owner 0700\nservice home" as ServiceHomes
+  folder "workers/<account>/ - account owner 0700\nagent home: work/, tmp/, harness state" as AgentHomes
+  folder "quarantine/ - root 0700\nretiring homes moved on same filesystem" as Quarantine
+  folder "archive/ - root 0700\n<account>-<generation>-<date>.tar.zst\narchive file root 0600" as Archives
+}
+database "OS directory service\naccount and primary group; manager-created\nmacOS local node / Linux records" as OS
+file "Audit log - root-owned\ntime/caller/op/args/result\nexact path unspecified in spec §§4.0, 4.6, 11" as Audit
+component "Platform installer\nconfigured installer caller UID; sudo to root" as Installer
+component "swarma-user-manager\nroot; one operation / recovery" as M
+component "swarma-user-launcher\nroot until groups/GID/UID drop" as L
+component "swarma-dispatcher\nservice account swarma-dispatcher" as D
+component "swarma-credential-broker\nits service UID; credential state owned by broker" as Broker
+component "curator-run -> harness\nagent UID; account-owned content" as Agent
+component "Kernel firewall (v1)\nhelper-owned pf parent/account anchors\nor nftables table" as Firewall
+
+Installer --> Binaries : install protected binaries
+Installer --> Config : install policy and approved list
+Installer --> Journal : install state directories / sudoers (§11)
+M --> Ledger : atomic replace: temp / flush / rename / directory flush
+M --> Journal : serialise; recover before actions
+M --> Audit : append one operation line
+M --> Applied : publish after successful v1 apply
+M --> OS : create / remove account and group
+M --> ServiceHomes : descriptor-relative create; fchown / fchmod
+M --> AgentHomes : descriptor-relative create; no recursive chown
+M --> Quarantine : only after verified quiescence
+Quarantine --> Archives : archive with exclusions; links stored as links
+M --> Archives : delete oversize home; sweep age then total
+M --> Firewall : denial before first launch; cleanup after account/group
+L --> Config : approved path + digest; caller policy
+L --> Ledger : active agent generation / caller owner
+L --> Journal : same exclusive lock; recovery first
+L --> Receipts : atomic root receipt BEFORE privilege drop
+L --> Audit : operation audit (§4.6)
+L --> AgentHomes : home opened no-follow as cwd
+D --> M : sudo; closed helper stdin (effect IDs)
+D --> L : sudo; closed launch stdin (launch effect ID)
+L --> Agent : standard FDs 0-2; new pipe FD3 carries decoded plan only
+Agent --> AgentHomes : prepare work/ and tmp/ as agent UID
+Agent --> Broker : fresh broker connection; no inherited connection
+Broker --> Ledger : direct read; generation check
+Broker --> Applied : direct v1 read; never agent enforcement claim
+note bottom of Runtime
+  Service socket names, owner/group and socket modes:
+  unspecified in spec §4.0; service contracts define them.
+  Helper creates service accounts, not broker credential storage (§1.1).
+end note
+note bottom of Archives
+  Exclusions are configured build/cache patterns (§4.4.1), not a credential detector.
+  Broker credentials are outside helper ownership (§1.1).
+  General secret-exclusion policy for home archives: unspecified in spec §4.4.1.
+  archive/delete admitted; operator keep unresolved and not admitted.
+  Quarantine disposal after successful archive: unspecified in spec §4.4.1.
+end note
+note bottom of Journal
+  Refusal: control path symlink; opened object type/owner/device checked (§6).
+  Linux openat2 BENEATH/NO_SYMLINKS; macOS component openat O_NOFOLLOW.
+  Recovery compares actual OS objects: create rollback / retire forward (§4.6).
+  Start receipt retention/deletion: unspecified in spec §7.
+end note
+note "Defining spec: [[../spec/helper.md#40-layout §4.0 layout]], [[../spec/helper.md#45-userlist-and-the-ledger §4.5 ledger]],\n[[../spec/helper.md#441-archive-policy §4.4.1 archives]], [[../spec/helper.md#6-file-operations §6 file safety]],\n[[../spec/helper.md#7-the-launcher-swarma-user-launcher §7 descriptor crossing]], [[../spec/helper.md#11-installation §11 install]].\nCurrent: nothing implemented; v0 accounts/launcher, v1 applied state/egress, v2 grants/opt-in ACL (§13).\nOnly explicit spec modes shown; unspecified file/directory modes and group owners remain unspecified (§4.0).\nOS record storage paths/modes: unspecified in spec §4.3 (owned by OS backend).\nSH1/SH2 storage variants unspecified in spec §4.0; SH2 host-role/ticket decision open (§14).\nNo default parent read ACL (§13); no donor provisioning operation (§1.1)." as Scope
+Scope .. Ledger
+@enduml

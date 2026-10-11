@@ -1,0 +1,117 @@
+@startuml provision-retire-recovery
+title M-UM2: provision, retire and crash recovery (v0 design; v1 egress annotations)
+
+participant "Configured caller\ninstaller / dispatcher / operator UID" as C
+participant "sudo\ntrusted root transition" as S
+participant "swarma-user-manager\nroot; one invocation; no arguments" as M
+database "Root-owned state\npolicy, ledger/cursor, lock, journal, audit\nv1 applied state" as R
+participant "OS account backend / kernel\nmacOS or Linux; root operations" as O
+database "Homes (account-owned)\nquarantine / archive (root-controlled)" as H
+participant "swarma-credential-broker\nservice UID; owns bindings / leases" as B
+participant "swarma-user-launcher\nroot; separate invocation" as L
+
+note over C,L
+  [[../spec/helper.md#43-usercreate Defining spec §4.3 create]], [[../spec/helper.md#44-userretire §4.4 retire]],
+  [[../spec/helper.md#441-archive-policy §4.4.1 archive]], [[../spec/helper.md#46-lock-journal-and-idempotency §4.6 recovery]].
+  Current: unimplemented; v0 accounts, v1 firewall, v2 grant verification (§13).
+  SH1/SH2 recovery variants: unspecified in spec §4.6; host role remains open (§14).
+  Each helper request <= 16 KiB, one JSON document in 5 s (§2).
+end note
+
+== Before each invocation: intake, exclusive lock and recovery (§§2-3, 4.6) ==
+C -> S: exact helper path; no args; helper-op/1 on stdin
+S -> M: root; decimal trusted SUDO_UID identifies caller
+break Invalid intake / role / ownership / quota; grants in v0/v1
+  M --> C: refuse; closed operation schema
+end
+M -> R: acquire exclusive durable lock (shared by both binaries)
+M -> R: read pending journal; compare actual OS objects before each action
+alt Interrupted creation
+  M -> O: roll back creation steps
+  M -> H: roll back creation steps
+else Interrupted retirement
+  M -> M: resume forward from recorded steps (retirement sequence below)
+end
+M -> R: check (caller principal, request_id) and canonical operation/args
+break Same effect and same arguments
+  M --> C: recorded result + target CURRENT state; do not repeat effect
+end
+break Same ID, different arguments
+  M --> C: request_id_conflict
+end
+note over M,R: Sequences below describe a new effect or pending recovery, not a duplicate replay.
+
+== user.create (§§4.1-4.3) ==
+M -> R: choose round-robin UID/GID; new NEVER-REUSED generation
+M -> O: check directory service and ledger availability;
+M -> O: before UID reuse check platform and temporary areas for owned files
+break Dirty UID / unmanaged name or home / exhausted range
+  M --> C: uid_not_clean / user_exists_unmanaged / home_exists_unmanaged / range_exhausted
+end
+M -> R: journal planned/completed steps before acting; state creating
+M -> O: create account + same-name primary group; no supplementary groups;
+M -> O: locked password, no login shell, hidden; exact UID/GID/home
+M -> H: descriptor-relative empty home; account owner; mode 0700
+opt v1 profile requires enforcement
+  M -> O: install denial before activation / first launch
+  note over M,O: Whole matrix without evidence refuses fw_unsupported (§8); creation failure rolls back.
+end
+alt Creation fails or crashes at a step boundary
+  note over M,R: Crash stops invocation; next invocation recovers first (§4.6).
+  M -> O: roll back creation, comparing OS objects with journal
+  M -> H: roll back creation
+  note over M,H: Exact per-step rollback order / firewall rollback details: unspecified in spec §§4.3, 4.6, 8.
+else Creation succeeds
+  M -> R: persist active; record result and audit line
+  M --> C: username, UID/GID, home, generation, state active
+end
+
+== user.retire (§4.4): forward recovery only ==
+note over C,M
+  Dispatcher normally unbinds before retirement (§10).
+  Create/bind/launch/stop/unbind/retire have distinct effect IDs;
+  retry each effect with its same ID (§5).
+  home admits archive/delete only; operator keep unresolved (§4.4.1).
+end note
+M -> R: journal steps; persist retiring FIRST (commit point)
+note over L,B: Launcher refuses new starts; broker refuses leases for retiring generation.
+M -> B: ask to end generation binding where present
+M -> O: stop per-user service domain where available;
+M -> O: terminate every UID process; verify quiet period
+break Processes remain or quiescence not established
+  M --> C: processes_remain for remaining processes; stay retiring; retry later
+  note over M,O: Unknown/failed observation cannot establish absence (§4.7);\nexact retirement observation error / quiet-period duration: unspecified in spec §4.4.
+end
+note over M,O: v1 denial remains in place throughout home and account cleanup.
+M -> H: same-filesystem move into quarantine; no-follow destructive walk
+alt home = delete
+  M -> H: descriptor-relative delete; unlink symlinks without following
+else home = archive (configured default)
+  M -> H: apply configured exclusions; measure remaining size
+  alt Exceeds configured max_per_archive
+    M -> H: delete rather than archive
+    M -> R: audit oversize deletion
+  else Within bound
+    M -> H: tar.zst; root-owned mode 0600; links stored as links
+  end
+end
+M -> O: remove owned files from system and per-user temporary areas
+M -> O: remove account and group
+opt v1
+  M -> O: remove firewall rules LAST
+end
+M -> R: persist removed (generation retained forever); result + audit
+note over M,H
+  archive.sweep at every retirement and from daily root timer: age, then oldest until total bound.
+  Installer/operator authority (§§3, 4.4.1).
+  Exact sweep position in retirement, timer process details and quarantine disposal
+  after successful archive: unspecified in spec §4.4.1.
+end note
+M --> C: removed; optional archive path
+note over M,R: Crash after retiring commit: next invocation compares OS objects to journal\nand resumes forward; no rollback to active (§§4.2, 4.6).
+note over C,B
+  Account retirement is separate from identity revocation (§4.4).
+  Dispatcher may revoke only recorded one-shot identities after retirement;
+  standing identities remain; only operator may revoke with signed record.
+end note
+@enduml

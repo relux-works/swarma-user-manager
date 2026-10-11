@@ -1,41 +1,79 @@
 @startuml launch
-!theme plain
-title Starting an executor under an agent account through the launcher
+title M-UM2: launch and authorised stop (v0 design; nothing implemented)
 
-participant "Dispatcher\n(unprivileged, configured caller)" as D
-participant "sudo" as S
+participant "swarma-dispatcher\n(service account swarma-dispatcher)" as D
+participant "sudo\n(trusted root transition)" as S
 participant "swarma-user-launcher\n(root, no arguments)" as L
-database "Ledger + policy\n(root-owned)" as R
-participant "curator-run\n(agent account, uid 30412)" as E
-participant "swarma-credential-broker" as B
+database "Policy, ledger, lock, journal, audit, receipts\n(root-owned control state)" as R
+participant "curator-run -> harness\n(agent worker-dev-7f3, UID/GID 30412 example)" as E
+participant "swarma-credential-broker\n(its service account; owns credentials/bindings/leases)" as B
 participant "swarma-user-manager\n(root, no arguments)" as M
 
-D -> D: close broker connections (no descriptor may cross)
+note over D,M
+  [[../spec/helper.md#7-the-launcher-swarma-user-launcher Defining spec §7 launcher]],
+  [[../spec/helper.md#47-execstop §4.7 stop]], [[../spec/helper.md#5-cross-component-reconciliation §5 effect IDs]].
+  Current repository: unimplemented design; v1 adds egress, v2 grants (§13).
+  SH1 internals unspecified in spec §7; SH2 host-role/ticket gate remains open (§14).
+  Executor intake / Decision 0021 amendment is publication work (§7), not implemented here.
+  Manager owns ledger/journal/audit; launcher writes root-owned start receipts.
+  Agent owns home content; broker owns credentials/bindings/leases; dispatcher owns execution lifetime.
+end note
 D -> S: sudo /opt/swarma/libexec/swarma-user-launcher\n(stdin: swarma-user-manager launch-op/1)
 note over D, L: Schema sketch: v:1, op:launch.start, request_id:launch effect ID,\ngeneration:g-0193, execution_id, epoch, executor:curator-run, plan\nRequest <= 80 KiB; plan <= 64 KiB base64 / 48 KiB decoded; stdin within 5 s
 S -> L: exec as root (SUDO_UID = dispatcher)
-L -> R: shared lock; g-0193 active, kind agent, created by this dispatcher?
+break Invalid invocation, closed schema, bounds, role or grants in v0/v1 (§§2-3)
+  L --> D: refuse; no launch
+end
+L -> R: exclusive durable lock shared by both binaries; recovery FIRST (§4.6)
+note over L,R: Compare OS objects with journal: interrupted creation rolls back; retirement resumes forward.
+L -> R: g-0193 active, kind agent, created by this dispatcher?
+break Inactive / retiring generation or wrong owner
+  L --> D: generation_not_active / target_not_owned
+end
 L -> R: executor id → approved path + SHA-256
 L -> L: open the executable without following links; verify the digest
+break Unapproved executor or digest mismatch
+  L --> D: executor_not_approved / executable_digest_mismatch
+end
+L -> L: open agent home without following links as cwd
+break Invalid home
+  L --> D: cwd_invalid
+end
 L -> L: home as cwd; close descriptors > 2;\nplan → pipe → descriptor 3; fixed bootstrap environment
-L -> L: refuse an existing execution receipt; setsid;\nwrite atomic root-owned start receipt BEFORE privilege drop
+L -> R: check for existing execution_id start receipt
+break Receipt already exists
+  L --> D: execution_already_started; no second start
+end
+L -> L: setsid
+L -> R: atomic root-owned start receipt BEFORE privilege drop\nexecution_id, epoch, pid, start_time, boot_id, session_id; mode 0644
+note over L,R: Receipt retention and post-receipt/pre-exec crash resolution: unspecified in spec §§4.6, 7.
 L -> L: clear supplementary groups; set GID, UID;\nverify root cannot be regained
+break Privilege drop fails
+  L --> D: privilege_drop_failed
+end
 L -> E: exec the verified executor as uid 30412
 E -> E: verify immutable caller-composed plan and digested PATH;\nresolve protected credential binding (no profile composition)
 E -> B: fresh connection; lease.request (broker lease-at-launch)
+note over E,B: Lease refusal/recovery details unspecified in this spec §7; broker contract owns them.\nExecutor prepares work/ and tmp/ as agent UID, then execs harness; no profile composition.
 note over S, E: Dispatcher owns the execution lifetime; sudo is never a signal relay
 
 == Authorised stop (helper specification §4.7) ==
 D -> S: sudo /opt/swarma/libexec/swarma-user-manager\n(stdin: swarma-user-manager helper-op/1, exec.stop)
 note over D, M: Schema sketch: v:1, op:exec.stop, request_id:stop effect ID,\nargs:{generation:g-0193, execution_id, grace_seconds:10}; request <= 16 KiB\nStop and launch use distinct effect IDs; each retry reuses its own ID
 S -> M: exec as root (SUDO_UID = dispatcher)
-M -> R: shared lock; active, caller-owned generation;\nread matching root-owned execution receipt
+M -> R: exclusive shared lock; recovery first; active caller-owned generation;\nread matching generation/execution root-owned start receipt
 M -> M: verify UID, pid, start_time, boot_id, session_id\nbefore signalling; refuse reused process identity
+break Receipt / generation mismatch or reused identity
+  M --> D: refuse signalling (§4.7)
+end
 M -> E: SIGTERM to verified process session; grace period; SIGKILL
-M -> M: verify no remaining execution processes, including escaped descendants
+M -> M: verify no account process started at/after receipt remains,\nincluding escaped descendants (one execution/generation in v0)
 alt Absence confirmed
   M --> D: stop receipt, remaining:0
-else Processes remain or observation unknown
+else Processes remain
+  M --> D: processes_remain; retry with same stop effect ID
+else Observation unknown or failed
   M --> D: no success receipt; caller must not infer absence
+  note over M,D: Exact observation-error code: unspecified in spec §4.7.
 end
 @enduml
