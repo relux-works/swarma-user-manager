@@ -18,28 +18,34 @@ note over C,L
   Each helper request <= 16 KiB, one JSON document in 5 s (§2).
 end note
 
-== Before each invocation: intake, exclusive lock and recovery (§§2-3, 4.6) ==
+== Before each invocation: intake, transition lock and dependency recovery (§§2-3, 4.6) ==
 C -> S: exact helper path; no args; helper-op/1 on stdin
 S -> M: root; decimal trusted SUDO_UID identifies caller
 break Invalid intake / role / ownership / quota; grants in v0/v1
   M --> C: refuse; closed operation schema
 end
 M -> R: acquire exclusive durable lock (shared by both binaries)
-M -> R: read pending journal; compare actual OS objects before each action
+M -> R: validate shared integrity, ALL UID reservations and accounting
+M -> R: recover only operation prerequisites within finite budget; compare OS objects
 alt Interrupted creation
   M -> O: roll back creation steps
   M -> H: roll back creation steps
-else Interrupted retirement
-  M -> M: resume forward from recorded steps (retirement sequence below)
+else Interrupted stop / retirement prerequisite
+  M -> M: continue same admitted effect; bounded forward batches
+else Safely classified unrelated retirement
+  M -> M: keep reservation/fence; requested control can proceed
 end
 M -> R: for mutations: check (caller principal, request_id) and canonical operation/args
-break Mutation: same effect and same arguments
-  M --> C: recorded result + target CURRENT state; do not repeat effect
+break Mutation: TERMINAL same effect and same arguments
+  M --> C: recorded result + target CURRENT state; never repeat terminal action
 end
 break Mutation: same ID, different arguments
   M --> C: request_id_conflict
 end
 note over M,R
+  R-OUTCOME: pre-admission refusal has no intent; retry needs fresh authority.
+  Pending stop/retire continues same ID/canonical args; never terminal refusal replay.
+  Transport uncertainty alone never proves pending intent.
   Mutation sequences below describe new effects or pending recovery.
   effect.observe is a separate read-only invocation, outside the mutation replay/create path.
 end note
@@ -47,7 +53,7 @@ end note
 == Read-only effect.observe (R-OBS, §§2, 4.5-4.6) ==
 C -> S: effect.observe helper-op/1; original effect request_id,\noperation and canonical-argument digest (exact encoding unpublished)
 S -> M: root; trusted SUDO_UID identifies observing caller
-M -> R: acquire same exclusive lock; recovery first; authenticate original caller or operator;\nserialize observation with receiver journal and recovery
+M -> R: acquire same exclusive lock; dependency recovery first; authenticate original caller or operator;\nserialize observation with receiver journal and recovery
 break Observing principal is neither original caller nor operator
   M --> C: refuse observation; no private journal exposure
 end
@@ -60,11 +66,12 @@ note over C,R
   concrete bounds and authoritative-coverage rule unpublished (§14 question 8).
   Observation never creates/relaunches; rolled_back/not_recorded do not authorise new create.
   Dispatcher maps recorded by current state; rolled_back/not_recorded -> known absent for effect only;
-  pending/unavailable -> unknown; contradictory -> contradictory (§5).
+  Pending is admitted effect handling, never terminal refusal; target/process liveness may be unknown.
+  pending/unavailable -> unknown liveness; contradictory -> contradictory (§5).
 end note
 
 == user.create (§§4.1-4.3) ==
-M -> R: choose round-robin UID/GID; new NEVER-REUSED generation
+M -> R: choose round-robin UID/GID; fresh random 128-bit generation (R-GEN), never counter/reused
 M -> O: check directory service and ledger availability;
 M -> O: before UID reuse check platform and temporary areas for owned files
 break Dirty UID / unmanaged name or home / exhausted range
@@ -72,14 +79,16 @@ break Dirty UID / unmanaged name or home / exhausted range
 end
 M -> R: journal planned/completed steps before acting; state creating
 M -> O: create account + same-name primary group; no supplementary groups;
-M -> O: locked password, no login shell, hidden; exact UID/GID/home
+M -> O: locked password, hidden; exact UID/GID/home; no supplementary groups
+note over M,O: Agent/service no-login shell; deny cron/at and qualify per-OS persistence denial.\nWorkplace fixed root relay shell requires joint backend and helper v1; service executor outside UID.
 M -> H: descriptor-relative empty home; account owner; mode 0700
-opt v1 profile requires enforcement
-  M -> O: install denial before activation / first launch
+opt v1 enforced profile (MANDATORY for workplace)
+  M -> O: denial + verified fw.apply applied state before activation / first launch
+  note over M,O: Workplace loopback hard row; R-NETBIND served policy digest, not owner alone.\nService rows use installer/operator; R-SVC-EGRESS schedule/DNS qualification (§8).
   note over M,O: Whole matrix without evidence refuses fw_unsupported (§8); creation failure rolls back.
 end
 alt Creation fails or crashes at a step boundary
-  note over M,R: Crash stops invocation; next invocation recovers first (§4.6).
+  note over M,R: Crash stops invocation; next dependent invocation recovers within budget (§4.6).
   M -> O: roll back creation, comparing OS objects with journal
   M -> H: roll back creation
   note over M,H: Exact per-step rollback order / firewall rollback details: unspecified in spec §§4.3, 4.6, 8.
@@ -90,7 +99,10 @@ end
 
 == user.retire (§4.4): forward recovery only ==
 note over C,M
-  Dispatcher normally unbinds before retirement (§10).
+  Dispatcher confirms broker unbind before retirement (§10).
+  Direct operator retirement needs no broker; unconfirmed binding cleanup stays durable
+  at dispatcher/operator boundary, never a helper unbind receipt (F-12).
+  R-TIME: expiry destruction also needs boot-inclusive monotonic lifetime; explicit retirement works.
   Create/bind/launch/stop/unbind/retire have distinct effect IDs;
   retry each effect with its same ID (§5).
   Retirement deletes the home; no archive/delete/keep selector (§4.4.1).
@@ -98,9 +110,9 @@ note over C,M
 end note
 M -> R: journal steps; persist retiring FIRST (commit point)
 note over L,B: Launcher refuses new starts; broker refuses leases for retiring generation.
-M -> B: ask to end generation binding where present
 M -> O: stop per-user service domain where available;
-M -> O: terminate every UID process; verify quiet period
+M -> O: TERM every generation UID process; grace; KILL remaining; verify ZERO over quiet period
+note over M,O: Same termination set as exec.stop; no session or receipt-time window.
 break Processes remain or quiescence not established
   M --> C: processes_remain for remaining processes; stay retiring; retry later
   note over M,O: Unknown/failed observation cannot establish absence (§4.7);\nexact retirement observation error / quiet-period duration: unspecified in spec §4.4.
@@ -114,8 +126,15 @@ break Key destruction failed or unknown
   M --> C: retirement pending; no walk
 end
 note over M,H: Recovery confirms destruction or prior absence before continuing.\nDeclared paths / format unpublished (§14 question 6); never follow links.
-M -> H: descriptor-relative delete ALL home content/names/links;\nunlink symlinks without following them
-break Required deletion failed, partial or unknown
+loop Finite cleanup quantum; serialized batches, not full walk under one lock
+  M -> R: revalidate generation, journal, trusted descriptors, quiescence and keys
+  M -> H: bounded no-follow deletion batch; unlink links, never follow
+  M -> R: persist batch evidence; retain retiring/UID/quota reservation
+  M -> R: release shared lock; unrelated controls and cleanup receive fair progress
+  M -> R: reacquire for next admitted quantum; compare protected state again
+end
+note over M,H: Remaining batches are R-OUTCOME pending under original retire effect.\nNumeric budgets/fairness/resume proof unpublished (§14 question 10).\nOnly verified FULL home cleanup permits next step; daily timer stays metadata-only.
+break Required deletion incomplete, failed, partial or unknown (including remaining batches)
   M -> R: audit outcome without secrets; remain retiring
   M --> C: retirement pending; unreadability is not absence
 end
@@ -125,7 +144,10 @@ opt Closed metadata schema and provenance published and qualified (§14 question
   note over M,H: No agent-controlled strings/names/links/bodies; no copying/scanning home.\nUnknown provenance/schema failure prevents export publication (§4.4.1).
 end
 M -> R: audit quiescence, key destruction, deletion and export outcomes; no secrets
-M -> O: remove owned files from system and per-user temporary areas
+M -> O: bounded batches remove owned files from system/per-user temporary areas; yield lock
+break Temporary cleanup incomplete / failed / unknown
+  M --> C: retirement pending; retain UID/quota and evidence
+end
 M -> O: remove account and group
 opt v1
   M -> O: remove firewall rules LAST
@@ -139,10 +161,16 @@ note over M,H
   Timer process details beyond root / sweep retry unspecified in spec §4.4.1.
 end note
 M --> C: username, generation, state removed
-note over M,R: Crash after retiring commit: next invocation compares OS objects to journal\nand resumes forward; no rollback to active (§§4.2, 4.6).
+note over M,R: Crash after retiring commit: next invocation compares OS objects to journal\nand resumes bounded forward batches by dependency; no rollback to active (§§4.2, 4.6).
 note over C,B
   Account retirement is separate from identity revocation (§4.4).
   Dispatcher may revoke only recorded one-shot identities after retirement;
   standing identities remain; only operator may revoke with signed record.
+end note
+note over M,R
+  R-GEN restore: external mark closes broker, launcher, dispatcher and host BEFORE bytes visible.
+  Reader epoch floors reject ledger rollback; reconcile surviving inventory/tombstones/receipts.
+  Never restore retiring/removed to active; pre-restore coverage unavailable, never not_recorded.
+  Epoch/restore formats unpublished; whole-machine rollback not locally detectable (§4.6.1).
 end note
 @enduml

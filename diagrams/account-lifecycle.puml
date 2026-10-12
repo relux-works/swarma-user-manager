@@ -4,12 +4,12 @@ hide empty description
 
 [*] --> creating : user.create\n(under the helper lock: allocate UID/GID,\nledger entry, journal)
 creating --> active : account, group and home created\n(v1 enforcement required: denial before activation / first launch)
-state "creation rolled back\n(generation never reused)" as rolled_back
+state "creation rolled back\n(fresh random 128-bit generation never reused)" as rolled_back
 creating --> rolled_back : failure or crash →\nmanager compares OS objects with journal, rolls back
 rolled_back --> [*]
 active --> active : launch.start (launcher)\nfw.apply (v1)
 active --> retiring : user.retire\n(commit point: persisted first)
-retiring --> retiring : processes_remain → later retry\ncrash → next invocation resumes forward
+retiring --> retiring : processes_remain → later retry\ncrash → dependency recovery continues same effect; bounded batches yield lock
 retiring --> removed : processes stopped and verified; home quarantined;\ndeclared keys destroyed before walk; home deleted;\nonly closed-schema service-generated metadata export; temporary files removed;\naccount and group removed; v1 rules removed last; persist removed
 note right of removed: Generation stays in root ledger forever (§4.2).
 note left of creating
@@ -18,23 +18,29 @@ note left of creating
   [[../spec/helper.md#46-lock-journal-and-idempotency §4.6 recovery]].
   Root swarma-user-manager owns ledger/cursor, lock, journal, audit.
   OS backend stores account/group records; account owns home content.
-  One exclusive durable lock serialises both binaries.
+  One durable lock protects both binaries; bounded retirement batches yield it.
   Invalid role/ownership/quota refuses before creation (§3).
   Unmanaged name/home and dirty reused UID refuse (§§4.1, 4.3).
-  Generation never reused even when UID or label is reused.
+  Fresh random 128-bit generation (R-GEN); never reused with UID or label.
 end note
 note right of active
-  Root swarma-user-launcher starts curator-run -> harness under agent UID (§7).
+  Root launcher starts approved executor under agent or qualified workplace UID (§7).
+  Workplace always needs helper v1 applied state incl. loopback; relay/backend publication gate.
+  swarma-rb-exec controls run under service principal, never workplace UID.
+  F-13 persistence denial qualifies per OS; idle UID has zero processes.
   swarma-dispatcher service UID owns execution lifetime.
-  Broker under its service UID owns bindings/leases; active account may be bound.
+  Broker service UID owns bindings/leases; admitted active agent may be bound.
   Refused launch/stop/fw.apply does not change account state.
 end note
 note right of retiring
   [[../spec/helper.md#44-userretire Defining spec §4.4]].
   Launcher refuses new starts; broker refuses leases.
-  Manager asks broker to end binding where present.
+  No manager-to-broker call; dispatcher/operator owns unbind obligation (F-12).
   Unknown/failed observation does not prove quiescence (§4.7);
   exact retirement observation error: unspecified in spec §4.4.
+  TERM/KILL and verification cover the same generation UID set as exec.stop (§4.7).
+  Bounded cleanup batches yield shared lock; keep UID/quota reservation and pending evidence.
+  Recovery validates shared accounting then requested dependencies, not full unrelated cleanup.
   Root controls quarantine and owns metadata exports; no-follow walks (§6).
   Declared keys destroyed before home deletion.
   Failed/unknown destruction or deletion keeps retiring; unreadable is not absent.
@@ -45,4 +51,10 @@ note right of retiring
 end note
 note "Current: nothing implemented; v0 accounts/launcher; v1 egress; v2 grants (§13).\nSH2+ joint admission gate I4 remains closed; dispatcher alone invokes the launcher (§§7, 14).\nSeparate explicit operator home retention: confidentiality not guaranteed; format unpublished (§4.4.1)." as Phase
 Phase .. retiring
+note bottom of removed
+  R-OUTCOME: pending stop/retire continues same effect/arguments; terminal result replays.
+  R-GEN restore: fence all readers externally; reconcile surviving evidence and epoch floors.
+  Never restore retiring/removed to active; lost coverage unavailable, never not_recorded.
+  R-TIME: expiry deletion needs boot-inclusive monotonic lifetime, not wall clock alone.
+end note
 @enduml

@@ -20,8 +20,12 @@ note over D,M
 end note
 note over L,R
   R-START / I4: session host requests dispatcher host_start; no privileged host call.
-  Dispatcher owns durable host admission permit bound to
-  (logical_session_id, execution_id, controller_epoch, op_id).
+  R-SESSION: host admission permit is session-scoped for one logical_session_id.
+  Successors require session lifecycle authorisation (member unpublished),
+  previous claim confirmed absent and idempotency per (logical_session_id, op_id).
+  Each physical start keeps (execution_id, controller_epoch, op_id) claim/fence/receipt.
+  host_stop: session-host principal only, execution under permit, journaled E-stop;
+  host-requested, distinct from owner cancel; no start authority.
   Fence change withdraws/reconciles permit; cancel before call prevents launch.
   Ambiguous call uses SAME effect/receipt; stop if required, never a second launch.
   Runner opens fresh authenticated host channel; current-epoch registration/readiness
@@ -30,18 +34,19 @@ note over L,R
   These values add no fields to launch-op/1; no helper host role or host sudo authority.
 end note
 D -> S: sudo /opt/swarma/libexec/swarma-user-launcher\n(stdin: swarma-user-manager launch-op/1)
-note over D, L: Schema sketch: v:1, op:launch.start, request_id:launch effect ID,\ngeneration:g-0193, execution_id, epoch, executor:curator-run, plan\nRequest <= 80 KiB; plan <= 64 KiB base64 / 48 KiB decoded; stdin within 5 s
+note over D, L: Schema sketch: v:1, op:launch.start, request_id:launch effect ID,\ngeneration:9ac67d3418e04b0aafe89c6d72b54103, execution_id, epoch, executor:curator-run, plan\nRequest <= 80 KiB; plan <= 64 KiB base64 / 48 KiB decoded; stdin within 5 s
 S -> L: exec as root (SUDO_UID = dispatcher)
 break Invalid invocation, closed schema, bounds, role or grants in v0/v1 (§§2-3)
   L --> D: refuse; no launch
 end
 L -> L: scrub untrusted inherited FDs > 2 FIRST; keep caller-owned 0-2\nthen reserve read-only FD3 without clobbering internal handles
-L -> R: exclusive durable lock shared by both binaries; recovery FIRST (§4.6)
-note over L,R: Compare OS objects with journal: creation rolls back; retirement resumes.\nRetain generation lock through root receipt and completed verified UID/GID drop (R-FD3).
-L -> R: g-0193 active, kind agent, created by this dispatcher?
+L -> R: shared transition lock; validate integrity, UID reservations, accounting;\nrecover only operation dependencies within budget (§4.6)
+note over L,R: Compare OS objects with journal: dependency recovery: create rolls back; stop/retire continue.\nRetain generation lock through root receipt and completed verified UID/GID drop (R-FD3).
+L -> R: 9ac67d3418e04b0aafe89c6d72b54103 active, kind agent (workplace only after separate gate), caller owner?
 break Inactive / retiring generation or wrong owner
   L --> D: generation_not_active / target_not_owned
 end
+note over L,R: Before new physical start: zero UID processes; no unresolved prior execution/stop.
 L -> R: executor id → approved path + SHA-256
 L -> L: open executable no-follow; verify digest; retain verified handle THROUGH exec
 break Unapproved executor or digest mismatch
@@ -88,21 +93,30 @@ note over S, E: Dispatcher owns the execution lifetime; sudo is never a signal r
 
 == Authorised stop (helper specification §4.7) ==
 D -> S: sudo /opt/swarma/libexec/swarma-user-manager\n(stdin: swarma-user-manager helper-op/1, exec.stop)
-note over D, M: Schema sketch: v:1, op:exec.stop, request_id:stop effect ID,\nargs:{generation:g-0193, execution_id, grace_seconds:10}; request <= 16 KiB\nStop and launch use distinct effect IDs; each retry reuses its own ID
+note over D, M: Schema sketch: v:1, op:exec.stop, request_id:stop effect ID,\nargs:{generation:9ac67d3418e04b0aafe89c6d72b54103, execution_id, grace_seconds:10}; request <= 16 KiB\nStop and launch use distinct effect IDs; each retry reuses its own ID
 S -> M: exec as root (SUDO_UID = dispatcher)
-M -> R: exclusive shared lock; recovery first; active caller-owned generation;\nread matching generation/execution root-owned start receipt
-M -> M: verify UID, pid, start_time, boot_id, session_id\nbefore signalling; refuse reused process identity
+M -> R: shared lock; integrity/accounting and bounded dependency recovery
+break Terminal stop result exists
+  M --> D: replay result + current state WITHOUT signalling, including after successor
+end
+M -> R: unfinished/new stop: active caller-owned generation; LATEST start receipt
+M -> M: pending continues same effect ID and ALL canonical arguments
+M -> M: receipt authenticates target, never bounds process set;
+M -> M: verify current generation/latest receipt and any live root identity
+note over M,R: Absent root requires authoritative evidence; failed read is not absent.
 break Receipt / generation mismatch or reused identity
   M --> D: refuse signalling (§4.7)
 end
-M -> E: SIGTERM to verified process session; grace period; SIGKILL
-M -> M: verify no account process started at/after receipt remains,\nincluding escaped descendants (one execution/generation in v0)
+M -> M: stop per-user service domain where available
+M -> E: TERM EVERY current-generation UID process; same grace; KILL remaining
+M -> M: re-enumerate/revalidate identities; verify ZERO UID processes over quiet period
+note over M,E: Same scope as retirement: escaped sessions, OS and pre-receipt processes included.\nNo wall-clock start-time filter; old receipt never signals a later execution.
 alt Absence confirmed
   M --> D: stop receipt, remaining:0
 else Processes remain
-  M --> D: processes_remain; retry with same stop effect ID
+  M --> D: processes_remain; R-OUTCOME pending; continue same effect ID/args
 else Observation unknown or failed
-  M --> D: no success receipt; caller must not infer absence
+  M --> D: no success receipt; admitted work pending; caller cannot infer absence
   note over M,D: Exact observation-error code: unspecified in spec §4.7.
 end
 note over M,E
@@ -110,5 +124,13 @@ note over M,E
   Before reopen/resume, host recovery requires a fresh runner under agent UID
   to check the native lock under a closed fence and report to the host.
   Unknown native-lock result keeps session parked (session-host §3.5).
+end note
+note over D,E
+  R-FATE table owned by §7 beside R-FD3: fate follows qualified kill domains, not setsid.
+  Supervisor backend: daemon loss -> lost and journaled stop; no live adoption.
+  SH2+ survival across controller-only restart requires qualified separate containment.
+  Every old-daemon supervisor write is fenced by durable daemon-instance epoch.
+  A service swap confirms absence for every affected execution; unit configs unpublished.
+  F-16: cross-account workspace has standalone private Git administration, no linked worktree.
 end note
 @enduml

@@ -9,9 +9,9 @@ state "Start receipt / execution evidence (§§4.7, 7)" as Receipt {
   [*] --> NoReceipt
   NoReceipt --> Recorded : launcher: setsid, atomic root write\nthen clear groups / GID / UID / exec
   Recorded --> Recorded : launch with existing execution_id refuses\nexecution_already_started
-  Recorded --> Recorded : helper stop refuses receipt / live identity mismatch\nor processes_remain / unknown observation
-  Recorded --> Absent : helper exec.stop verifies active owned generation,\nreceipt + live identity; TERM / grace / KILL;\nno remaining processes incl. escaped descendants
-  Absent --> Absent : effect/receipt evidence retained for reconciliation\nno second-launch permission inferred
+  Recorded --> Recorded : stop identity/latest-receipt mismatch refuses signalling;\nprocesses_remain / unknown -> pending same effect
+  Recorded --> Absent : helper exec.stop verifies active owned generation,\nlatest receipt + live identity; TERM / grace / KILL ALL UID processes;\nverify same set incl. escaped/OS/pre-receipt processes over quiet period
+  Absent --> Absent : effect/receipt evidence retained for reconciliation\nterminal stop replays WITHOUT signalling; no second-launch permission
 }
 note right of Recorded
   Process: swarma-user-launcher, root until UID drop.
@@ -44,13 +44,13 @@ state "Home fate after retiring commit and verified quiescence (§4.4.1)" as Ret
   [*] --> Quarantined : manager user.retire; account quiescent
   Quarantined --> Quarantined : key destruction failed/unknown\nno walk; remain retiring; audit
   Quarantined --> KeysDestroyed : destroy declared keys; journal under shared lock\nrecovery confirms destruction or prior absence
-  KeysDestroyed --> KeysDestroyed : deletion failed/partial/unknown\nremain retiring; audit; unreadable is not absent
-  KeysDestroyed --> Deleted : no-follow descriptor deletion\nunlink all home content/names/links
+  KeysDestroyed --> KeysDestroyed : bounded batches yield lock; remaining/failed/unknown deletion\nretains retiring, UID/quota and pending effect; unreadable is not absent
+  KeysDestroyed --> Deleted : verified FULL no-follow batch deletion\nall home content/names/links absent
 }
 note right of Quarantined
   swarma-user-manager, root; caller roles apply (§3).
-  Dispatcher only its own agents; quarantine root 0700 (§4.0).
-  Journal recovery resumes retirement forward (§4.6).
+  Dispatcher only own agents/qualified workplaces; quarantine root 0700 (§4.0).
+  Dependency recovery resumes same retirement effect in bounded batches (§4.6).
   Labels illustrate sequence, not new persisted ledger states.
   Declared paths and audit encoding unpublished (§14 question 6).
   No arbitrary-home secret classifier; no archive/delete/keep selector.
@@ -80,4 +80,7 @@ note "Defining spec: [[../spec/helper.md#7-the-launcher-swarma-user-launcher §7
 Scope .. Receipt
 Scope .. Retirement
 Scope .. Metadata
+note "R-FATE (§7) owns process-class fate beside R-FD3; service swaps verify affected-set absence.\nOld-daemon supervisor writes fenced by durable instance epoch; no live adoption.\nR-GEN fenced restore cannot resurrect retiring/removed; lost coverage unavailable.\nR-TIME expiry deletion requires boot-inclusive monotonic lifetime (§4.4.1).\nR-OUTCOME (§4.6.2) maps four operation tables onto these same six R-OBS states." as Wave4
+Wave4 .. Receipt
+Wave4 .. Retirement
 @enduml

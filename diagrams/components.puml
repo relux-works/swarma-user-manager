@@ -8,13 +8,13 @@ package "swarma-user-manager process\nroot; one helper-op/1 invocation (v0)" {
   component "Sudo entry validation\neffective UID + SUDO_UID + argv" as MEntry
   component "Closed helper decoder\n16 KiB / 5 s" as MDecode
   component "Caller policy\nrole / ownership / quota" as MPolicy
-  component "Lock, journal and recovery\ncreate rollback / retire forward" as Recovery
+  component "Lock, journal and recovery\ndependency recovery / bounded retire batches" as Recovery
   component "OS account backend\nmacOS dscl / Linux groupadd, useradd" as Accounts
   component "Descriptor-safe file operations\ntrusted directory descriptors; no-follow" as Files
   component "Retirement / metadata sweep\nquiescence; keys destroyed before deletion\nclosed-schema service-generated export only" as Archive
   component "Egress adapter (v1)\npf / nftables; evidence matrix" as Firewall
   component "Read-only effect.observe\noriginal caller / operator; six evidence states" as Observe
-  component "Authorised exec.stop\nreceipt + live identity; TERM / KILL\nproves process absence ONLY" as Stop
+  component "Authorised exec.stop\nreceipt + live identity; TERM / KILL\naccount-wide absence ONLY; latest-receipt fence" as Stop
 }
 package "swarma-user-launcher process\nroot until privilege drop; one launch-op/1 invocation (v0)" {
   component "Sudo entry + closed decoder\n80 KiB / 5 s" as LEntry
@@ -39,7 +39,7 @@ MEntry --> MDecode
 MDecode --> MPolicy
 MPolicy --> Config
 MPolicy --> Recovery
-Recovery --> State : one exclusive lock; journal before actions
+Recovery --> State : shared transition lock; journal before actions; bounded batches yield
 Recovery --> Accounts
 Recovery --> Archive
 Recovery --> Firewall
@@ -50,15 +50,14 @@ Accounts --> OS
 Accounts --> Files
 Archive --> Files
 Files --> Homes
-Archive --> Broker : end generation binding
 Firewall --> Kernel
-Firewall --> Proxy : verify listener owner
+Firewall --> Proxy : verify owner/generation AND served digest; no shared lock across query
 Firewall --> State : publish applied state after successful apply
 Stop --> State : matching root start receipt
-Stop --> Agent : only verified process identity; success after absence
+Stop --> Agent : latest receipt/current generation; TERM/KILL same UID set; quiet absence
 LEntry --> Launch
 Launch --> Config
-Launch --> State : same exclusive lock + recovery; active owned generation
+Launch --> State : same transition lock + bounded dependency recovery; active owned generation
 Launch --> LFiles : no-follow executable / home
 LFiles --> Homes : opened home as cwd
 Launch --> Receipt
@@ -70,8 +69,11 @@ Broker --> State : reads ledger / v1 applied state; readability is not authority
 
 note bottom of Recovery
   Refusal: invalid invocation/schema, role, ownership, quota, unmanaged objects,
-  request_id conflict, unsafe path (§§2-6). Repeated same effect returns recorded
-  result plus current state; next invocation recovers interrupted create/retire.
+  request_id conflict, unsafe path (§§2-6). Terminal same effect replays recorded
+  result plus current state; admitted stop/retire pending continues same effect.
+  Recovery validates shared integrity/accounting, then dependencies, not all retirements.
+  Bounded cleanup batches yield lock; reservations/fences remain until full cleanup.
+  R-LOCK: no synchronous platform-service call under state lock; per-record in-flight marker.
 end note
 note bottom of Launch
   Refusal: inactive/wrong-owner generation, unapproved executor, digest mismatch,
@@ -84,6 +86,8 @@ note bottom of Launch
   I4 joint admission/permit/fence publication remains gated (§14 question 3).
 end note
 note bottom of Stop
+  TERM/KILL and verification cover every current-generation UID process, including escaped/OS starts.
+  Latest receipt fence on every continuation; terminal stop replay never signals.
   No harness native-lock attestation (§4.7).
   Session-host recovery: fresh agent-UID runner checks native lock under closed fence;
   unknown result keeps parked (session-host §3.5).
@@ -102,9 +106,21 @@ note bottom of Observe
   Evidence retained until permanent inadmissibility; exact bounds/coverage open (§14 question 8).
 end note
 note bottom of Firewall
+  R-NETBIND: root-owned binding beside user-manager.json; dispatcher pins at prepare.
+  Verify served digest; re-apply existing allocations flushes kernel/old proxy sessions.
+  R-SVC-EGRESS: dispatcher/host deny-all, broker via own proxy; resolver sandbox qualified.
+  Installer owns start-time and periodic service-policy checks; lapse drops readiness.
+  R-WORKPLACE: helper v1 enforced activation incl. loopback; rb-exec under service UID.
   v1: refuse unsupported tuple; never report enforcement without whole-matrix evidence.
   Denial before first launch; retain until account/group removal (§8).
 end note
 note "Defining spec: [[../spec/helper.md#1-purpose §1 process split]], [[../spec/helper.md#2-invocation §§2-3 invocation/policy]],\n[[../spec/helper.md#46-lock-journal-and-idempotency §4.6 recovery]], [[../spec/helper.md#6-file-operations §6 paths]],\n[[../spec/helper.md#7-the-launcher-swarma-user-launcher §7 launcher]], [[../spec/helper.md#8-firewall-per-account-v1 §8 egress]].\nBoxes are conceptual responsibilities within binaries, not implemented classes or extra processes.\nCurrent: nothing implemented; v0 accounts/launcher, v1 egress, v2 grants (§13).\nv0/v1 refuse grants; v2 subject-bound chain checks target/time/revocation (§9); signature grammar open.\nSH2+ joint admission remains gated by I4 publication (§§7, 14); dispatcher alone invokes the launcher.\nDonor provisioning is a separate component; variant B disabled pending its spec (§1.1)." as Scope
 Scope .. MEntry
+note bottom of State
+  R-GEN: fresh random 128-bit generations, ledger store epoch and reader floors.
+  External restore mark closes every consumer before restored bytes; surviving evidence reconciled.
+  No retirement resurrection; lost coverage unavailable, never not_recorded (§4.6.1).
+  R-FATE process table at §7: selected kill domains / affected sets qualify before activation.
+  Every supervisor write checks durable daemon-instance epoch; no live adoption.
+end note
 @enduml
