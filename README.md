@@ -14,12 +14,15 @@ Two minimal privileged components for agent systems. Each runs as root for one o
 - The helper chooses account names and UIDs from its own ranges; every creation gets a generation that is never reused.
 - It acts only on accounts it created (a root-owned ledger), never on pre-existing accounts, and works on files through descriptors without following links.
 - One lock serialises everything; creation rolls back on failure, retirement moves forward from its commit point; every operation leaves an audit line naming the caller.
+- Retirement archives never receive secrets: mandatory exclusions cannot be overridden, declared keys are destroyed before the walk, and unknown classification means deletion ([§4.4.1](spec/helper.md#441-archive-policy)).
+- `exec.stop` proves process absence only; the session host's recovery owns the separate harness native-lock check ([§4.7](spec/helper.md#47-execstop)).
 - Later: it re-verifies the signed grant behind each request instead of trusting the configured policy alone.
 
 ## How it fits
 
 - [swarma-dispatcher](https://github.com/relux-works/swarma-dispatcher), under its own service account, creates an agent's account with the helper, binds that account's generation in swarma-credential-broker, and starts the agent's executor through the launcher; the executor then obtains its credential lease from the broker itself.
 - swarma-credential-broker runs under a service account the helper creates, and reads the helper's ledger to check generations.
+- In the gated SH2+ design, an authenticated session host presents a dispatcher-issued ticket to `swarma-user-launcher`, which redeems it once under the shared lock and journal. This route remains disabled until I4 is published ([§7](spec/helper.md#7-the-launcher-swarma-user-launcher)).
 
 ## Diagrams
 

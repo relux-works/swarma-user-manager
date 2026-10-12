@@ -13,10 +13,18 @@ note over D,M
   [[../spec/helper.md#7-the-launcher-swarma-user-launcher Defining spec §7 launcher]],
   [[../spec/helper.md#47-execstop §4.7 stop]], [[../spec/helper.md#5-cross-component-reconciliation §5 effect IDs]].
   Current repository: unimplemented design; v1 adds egress, v2 grants (§13).
-  SH1 internals unspecified in spec §7; SH2 host-role/ticket gate remains open (§14).
+  SH1 internals unspecified in spec §7; SH2+ launcher ticket redemption disabled until I4 publication (§14).
   Executor intake / Decision 0021 amendment is publication work (§7), not implemented here.
   Manager owns ledger/journal/audit; launcher writes root-owned start receipts.
   Agent owns home content; broker owns credentials/bindings/leases; dispatcher owns execution lifetime.
+end note
+note over L,R
+  SH2+ future route ONLY after I4 publication (§7; session-host §3.3):
+  dispatcher issues ticket; authenticated session host presents it to swarma-user-launcher.
+  Launcher redeems once under shared lock/journal, atomically with launch intent/receipt;
+  lost reply uses same effect ID/receipt, never a second start.
+  Ticket signature/schema/canonical bytes, host role and cancel interlock unpublished (§14 question 3).
+  This note does not add a caller or fields to the v0/v1 sequence below.
 end note
 D -> S: sudo /opt/swarma/libexec/swarma-user-launcher\n(stdin: swarma-user-manager launch-op/1)
 note over D, L: Schema sketch: v:1, op:launch.start, request_id:launch effect ID,\ngeneration:g-0193, execution_id, epoch, executor:curator-run, plan\nRequest <= 80 KiB; plan <= 64 KiB base64 / 48 KiB decoded; stdin within 5 s
@@ -76,4 +84,10 @@ else Observation unknown or failed
   M --> D: no success receipt; caller must not infer absence
   note over M,D: Exact observation-error code: unspecified in spec §4.7.
 end
+note over M,E
+  exec.stop proves process absence ONLY; no harness native-lock absence (§4.7).
+  Before reopen/resume, host recovery requires a fresh runner under agent UID
+  to check the native lock under a closed fence and report to the host.
+  Unknown native-lock result keeps session parked (session-host §3.5).
+end note
 @enduml

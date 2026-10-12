@@ -3,7 +3,7 @@ title M-UM4: protected layout, owners and descriptor boundary (unimplemented des
 left to right direction
 
 package "Platform root chosen at installation (§4.0)\nexample /opt/swarma; root 0755" {
-  folder "libexec/ - root 0755\nmanager, launcher, dispatcher binaries\nfixed protected release paths" as Binaries
+  folder "libexec/ - root 0755\nswarma-user-manager: v0 accounts, v1 egress\nswarma-user-launcher: v0, SH2+ I4-gated tickets\nswarma-dispatcher: v0 command, v1 daemon\nswarma-credential-broker: v0 daemon / CLI\nswarma-session-host: SH2+ service-account host\nswarma-session-runner: SH2+ agent-account runner\nfixed protected release paths" as Binaries
   folder "etc/ - root 0755\nuser-manager.json: roles/ranges/archive\napproved-executors.json: paths/digests" as Config
   package "lib/user-manager/ - root control state" {
     file "ledger.json - root 0644\nall generations forever; allocation cursor" as Ledger
@@ -11,7 +11,7 @@ package "Platform root chosen at installation (§4.0)\nexample /opt/swarma; root
     folder "applied-state/ - root 0644 (§4.0)\nv1 per-generation enforcement metadata" as Applied
     folder "journal/ and lock - root 0700 (§4.0)\nplanned/completed steps; exclusive durable lock" as Journal
   }
-  folder "run/ - 0755\ncredential-broker/ and dispatcher/\nservice socket directories" as Runtime
+  folder "run/ - 0755\ncredential-broker/ (v0), dispatcher/ (v1)\nsession-host/ (SH2+ activation gated)\nservice socket directories" as Runtime
   folder "services/<account>/ - account owner 0700\nservice home" as ServiceHomes
   folder "workers/<account>/ - account owner 0700\nagent home: work/, tmp/, harness state" as AgentHomes
   folder "quarantine/ - root 0700\nretiring homes moved on same filesystem" as Quarantine
@@ -38,7 +38,8 @@ M --> OS : create / remove account and group
 M --> ServiceHomes : descriptor-relative create; fchown / fchmod
 M --> AgentHomes : descriptor-relative create; no recursive chown
 M --> Quarantine : only after verified quiescence
-Quarantine --> Archives : archive with exclusions; links stored as links
+Quarantine --> Archives : declared keys destroyed BEFORE walk; mandatory secret exclusion;\nonly positively non-secret objects incl. link metadata
+M --> Quarantine : delete secret / unknown objects; failure prevents archive publication
 M --> Archives : delete oversize home; sweep age then total
 M --> Firewall : denial before first launch; cleanup after account/group
 L --> Config : approved path + digest; caller policy
@@ -60,9 +61,12 @@ note bottom of Runtime
   Helper creates service accounts, not broker credential storage (§1.1).
 end note
 note bottom of Archives
-  Exclusions are configured build/cache patterns (§4.4.1), not a credential detector.
+  Mandatory secret exclusion cannot be overridden; config adds only (§4.4.1).
+  Destroy declared keys before walk; unknown/unreadable/partial classification deletes.
+  Key destruction or required deletion failure: remain retiring; no archive.
+  Audit exclusion/destruction/deletions/fate without secret contents.
+  Declared paths, declaration/classification formats and audit encoding unpublished (§14 question 6).
   Broker credentials are outside helper ownership (§1.1).
-  General secret-exclusion policy for home archives: unspecified in spec §4.4.1.
   archive/delete admitted; operator keep unresolved and not admitted.
   Quarantine disposal after successful archive: unspecified in spec §4.4.1.
 end note
@@ -72,6 +76,6 @@ note bottom of Journal
   Recovery compares actual OS objects: create rollback / retire forward (§4.6).
   Start receipt retention/deletion: unspecified in spec §7.
 end note
-note "Defining spec: [[../spec/helper.md#40-layout §4.0 layout]], [[../spec/helper.md#45-userlist-and-the-ledger §4.5 ledger]],\n[[../spec/helper.md#441-archive-policy §4.4.1 archives]], [[../spec/helper.md#6-file-operations §6 file safety]],\n[[../spec/helper.md#7-the-launcher-swarma-user-launcher §7 descriptor crossing]], [[../spec/helper.md#11-installation §11 install]].\nCurrent: nothing implemented; v0 accounts/launcher, v1 applied state/egress, v2 grants/opt-in ACL (§13).\nOnly explicit spec modes shown; unspecified file/directory modes and group owners remain unspecified (§4.0).\nOS record storage paths/modes: unspecified in spec §4.3 (owned by OS backend).\nSH1/SH2 storage variants unspecified in spec §4.0; SH2 host-role/ticket decision open (§14).\nNo default parent read ACL (§13); no donor provisioning operation (§1.1)." as Scope
+note "Defining spec: [[../spec/helper.md#40-layout §4.0 layout]], [[../spec/helper.md#45-userlist-and-the-ledger §4.5 ledger]],\n[[../spec/helper.md#441-archive-policy §4.4.1 archives]], [[../spec/helper.md#6-file-operations §6 file safety]],\n[[../spec/helper.md#7-the-launcher-swarma-user-launcher §7 descriptor crossing]], [[../spec/helper.md#11-installation §11 install]].\nCurrent: nothing implemented; v0 accounts/launcher, v1 applied state/egress, v2 grants/opt-in ACL (§13).\nOnly explicit spec modes shown; unspecified file/directory modes and group owners remain unspecified (§4.0).\nOS record storage paths/modes: unspecified in spec §4.3 (owned by OS backend).\nSH1 extraction does not activate SH2+ host/runner placement; ticket gate I4 closed (§§7, 14).\nCompanion components own their binaries/socket contracts; helper installer scope remains §11.\nNo default parent read ACL (§13); no donor provisioning operation (§1.1)." as Scope
 Scope .. Ledger
 @enduml

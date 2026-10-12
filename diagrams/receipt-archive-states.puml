@@ -5,7 +5,7 @@ hide empty description
 state "Start receipt / execution evidence (§§4.7, 7)" as Receipt {
   state "No start receipt yet" as NoReceipt
   state "Root start receipt exists\nwritten before privilege drop / exec" as Recorded
-  state "Stop absence confirmed\nresult receipt: remaining = 0" as Absent
+  state "Process absence confirmed ONLY\nresult receipt: remaining = 0" as Absent
   [*] --> NoReceipt
   NoReceipt --> Recorded : launcher: setsid, atomic root write\nthen clear groups / GID / UID / exec
   Recorded --> Recorded : launch with existing execution_id refuses\nexecution_already_started
@@ -27,19 +27,28 @@ note right of Recorded
 end note
 note right of Absent
   Evidence condition, not a new persisted account state.
+  No harness native-lock absence attested by exec.stop (§4.7).
+  Host recovery: fresh runner under agent UID checks native lock
+  under closed fence; unknown result keeps session parked (session-host §3.5).
   Stop result receipt storage / retention: unspecified in spec §4.7.
   An existing start receipt still refuses another start (§7).
 end note
 
 state "Home fate after retiring commit and verified quiescence (§4.4.1)" as Archive {
   state "Home in quarantine\nsame-filesystem move; root-controlled" as Quarantined
+  state "Declared keys destroyed\nbefore any archive/delete walk" as KeysDestroyed
+  state "Positively non-secret remainder\nmandatory exclusion + fail-closed classification" as Classified
   state "Archive retained\nroot-owned 0600 tar.zst" as Retained
   state "Home deleted" as Deleted
   state "Archive swept" as Swept
   [*] --> Quarantined : manager user.retire; account quiescent
-  Quarantined --> Deleted : explicit home=delete\nno-follow descriptor walk
-  Quarantined --> Deleted : home=archive exceeds max_per_archive\nafter exclusions; audit deletion
-  Quarantined --> Retained : home=archive within bound\nlinks stored as links
+  Quarantined --> Quarantined : key destruction failed/unknown\nno walk or archive; remain retiring; audit
+  Quarantined --> KeysDestroyed : destroy declared keys; journal under shared lock\nrecovery confirms destruction or prior absence
+  KeysDestroyed --> Deleted : explicit home=delete\nno-follow descriptor walk
+  KeysDestroyed --> KeysDestroyed : secret/unknown deletion failed\nno archive publication; remain retiring; audit
+  KeysDestroyed --> Classified : home=archive; mandatory secret exclusion\nconfig may add only; delete secrets and\nunknown/unreadable/partially classified objects
+  Classified --> Deleted : exceeds max_per_archive\nafter exclusions/classification; audit deletion
+  Classified --> Retained : within bound; content/names/link metadata non-secret\nlinks stored as links; audit outcome
   Retained --> Swept : archive.sweep: older than max_age\nthen oldest until max_total satisfied
 }
 note right of Quarantined
@@ -47,19 +56,26 @@ note right of Quarantined
   caller roles apply (§3); dispatcher only its own agents.
   Home content was account-owned; quarantine is root 0700 (§4.0).
   Journal recovery resumes retirement forward (§4.6).
+  Home-fate labels illustrate the sequence, not new persisted ledger states.
+  Key destruction and classification are mandatory (§4.4.1).
+  Declared paths, declaration/classification formats and audit encoding
+  unpublished (§14 question 6); no invented schema or error code.
   Quarantine disposal after archive: unspecified in spec §4.4.1.
   keep request refuses today: not in closed schema (§4.4.1).
   Operator-only keep/no-expiry is an OPEN owner choice, not a state.
 end note
 note right of Retained
   Manager owns archive and audit; root configuration owns retention policy.
+  Archive root 0700; files 0600; secrets never admitted.
+  Audit exclusion decision, key destruction, secret/unknown deletions and fate;
+  record failure/unknown outcomes without secret contents (§4.4.1).
   Configurable defaults: archive; max_age 7d; max_total 20GiB;
-  max_per_archive 2GiB after configured exclusions (§4.4.1).
+  max_per_archive 2GiB after mandatory + configured exclusions and classification (§4.4.1).
   Sweep at every retirement and daily root timer.
   Timer identity beyond root / retry on sweep failure:
   unspecified in spec §4.4.1.
 end note
-note "Defining spec: [[../spec/helper.md#7-the-launcher-swarma-user-launcher §7 start receipt]],\n[[../spec/helper.md#47-execstop §4.7 stop evidence]], [[../spec/helper.md#441-archive-policy §4.4.1 archive]].\nThese are two independent views, not a receipt-to-archive transition.\nCurrent repository: nothing implemented. v1 retains egress until account/group removal (§8).\nv2 grant grammar open (§9); SH1/SH2 receipt/archive variants unspecified in spec §§4.4.1, 7;\nSH2 host-role/ticket gate open (§14)." as Scope
+note "Defining spec: [[../spec/helper.md#7-the-launcher-swarma-user-launcher §7 start receipt]],\n[[../spec/helper.md#47-execstop §4.7 stop evidence]], [[../spec/helper.md#441-archive-policy §4.4.1 archive]].\nThese are two independent views, not a receipt-to-archive transition.\nCurrent repository: nothing implemented. v1 retains egress until account/group removal (§8).\nv2 grant grammar open (§9); SH1 receipt variants unspecified in spec §7;\nSH2+ launcher ticket redemption disabled until I4 publication (§§7, 14)." as Scope
 Scope .. Receipt
 Scope .. Archive
 @enduml

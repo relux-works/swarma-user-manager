@@ -11,9 +11,9 @@ package "swarma-user-manager process\nroot; one helper-op/1 invocation (v0)" {
   component "Lock, journal and recovery\ncreate rollback / retire forward" as Recovery
   component "OS account backend\nmacOS dscl / Linux groupadd, useradd" as Accounts
   component "Descriptor-safe file operations\ntrusted directory descriptors; no-follow" as Files
-  component "Retirement / archive / sweep\nquiescence before destructive walk" as Archive
+  component "Retirement / archive / sweep\nquiescence; keys destroyed before walk\nmandatory secret exclusion; unknowns deleted" as Archive
   component "Egress adapter (v1)\npf / nftables; evidence matrix" as Firewall
-  component "Authorised exec.stop\nreceipt + live identity; TERM / KILL" as Stop
+  component "Authorised exec.stop\nreceipt + live identity; TERM / KILL\nproves process absence ONLY" as Stop
 }
 package "swarma-user-launcher process\nroot until privilege drop; one launch-op/1 invocation (v0)" {
   component "Sudo entry + closed decoder\n80 KiB / 5 s" as LEntry
@@ -74,11 +74,26 @@ note bottom of Launch
   Refusal: inactive/wrong-owner generation, unapproved executor, digest mismatch,
   existing execution receipt, failed privilege drop (§7).
   Post-receipt/pre-exec crash resolution and receipt retention: unspecified in spec §7.
+  SH2+: dispatcher issues ticket; authenticated host presents it;
+  this launcher redeems once under shared lock/journal, atomically with intent/receipt.
+  Disabled until I4 publication; host role and ticket grammar unpublished (§§7, 14).
+end note
+note bottom of Stop
+  No harness native-lock attestation (§4.7).
+  Session-host recovery: fresh agent-UID runner checks native lock under closed fence;
+  unknown result keeps parked (session-host §3.5).
+end note
+note bottom of Archive
+  Configuration may add exclusions, never remove the mandatory secret class (§4.4.1).
+  Destroy declared keys before any walk; failure/unknown prevents archive publication.
+  Delete secret and unknown objects; required deletion failure keeps retiring.
+  Archive only positively non-secret content/names/link metadata; root 0700, file 0600.
+  Audit decisions/outcomes without secrets; unpublished formats in §14 question 6.
 end note
 note bottom of Firewall
   v1: refuse unsupported tuple; never report enforcement without whole-matrix evidence.
   Denial before first launch; retain until account/group removal (§8).
 end note
-note "Defining spec: [[../spec/helper.md#1-purpose §1 process split]], [[../spec/helper.md#2-invocation §§2-3 invocation/policy]],\n[[../spec/helper.md#46-lock-journal-and-idempotency §4.6 recovery]], [[../spec/helper.md#6-file-operations §6 paths]],\n[[../spec/helper.md#7-the-launcher-swarma-user-launcher §7 launcher]], [[../spec/helper.md#8-firewall-per-account-v1 §8 egress]].\nBoxes are conceptual responsibilities within binaries, not implemented classes or extra processes.\nCurrent: nothing implemented; v0 accounts/launcher, v1 egress, v2 grants (§13).\nv0/v1 refuse grants; v2 subject-bound chain checks target/time/revocation (§9); signature grammar open.\nSH1 internals: unspecified in spec §7; SH2 host-role/ticket gate open (§14), no host caller admitted.\nDonor provisioning is a separate component; variant B disabled pending its spec (§1.1)." as Scope
+note "Defining spec: [[../spec/helper.md#1-purpose §1 process split]], [[../spec/helper.md#2-invocation §§2-3 invocation/policy]],\n[[../spec/helper.md#46-lock-journal-and-idempotency §4.6 recovery]], [[../spec/helper.md#6-file-operations §6 paths]],\n[[../spec/helper.md#7-the-launcher-swarma-user-launcher §7 launcher]], [[../spec/helper.md#8-firewall-per-account-v1 §8 egress]].\nBoxes are conceptual responsibilities within binaries, not implemented classes or extra processes.\nCurrent: nothing implemented; v0 accounts/launcher, v1 egress, v2 grants (§13).\nv0/v1 refuse grants; v2 subject-bound chain checks target/time/revocation (§9); signature grammar open.\nSH1 internals: unspecified in spec §7; SH2+ launcher ticket gate closed until I4 publication (§§7, 14).\nDonor provisioning is a separate component; variant B disabled pending its spec (§1.1)." as Scope
 Scope .. MEntry
 @enduml

@@ -14,7 +14,7 @@ note over C,L
   [[../spec/helper.md#43-usercreate Defining spec §4.3 create]], [[../spec/helper.md#44-userretire §4.4 retire]],
   [[../spec/helper.md#441-archive-policy §4.4.1 archive]], [[../spec/helper.md#46-lock-journal-and-idempotency §4.6 recovery]].
   Current: unimplemented; v0 accounts, v1 firewall, v2 grant verification (§13).
-  SH1/SH2 recovery variants: unspecified in spec §4.6; host role remains open (§14).
+  SH1 internals: unspecified in spec §4.6; SH2+ launcher ticket gate I4 remains closed (§§7, 14).
   Each helper request <= 16 KiB, one JSON document in 5 s (§2).
 end note
 
@@ -83,18 +83,32 @@ break Processes remain or quiescence not established
   note over M,O: Unknown/failed observation cannot establish absence (§4.7);\nexact retirement observation error / quiet-period duration: unspecified in spec §4.4.
 end
 note over M,O: v1 denial remains in place throughout home and account cleanup.
-M -> H: same-filesystem move into quarantine; no-follow destructive walk
+M -> H: same-filesystem move into quarantine
+M -> R: journal declared-key destruction under shared lock
+M -> H: destroy declared keys through trusted descriptors BEFORE walk
+break Key destruction failed or unknown
+  M -> R: audit outcome without secrets; remain retiring
+  M --> C: no archive; retirement pending
+end
+note over M,H: Recovery confirms destruction or prior absence before continuing.\nDeclared paths / format unpublished (§14 question 6); never follow links.
 alt home = delete
   M -> H: descriptor-relative delete; unlink symlinks without following
 else home = archive (configured default)
-  M -> H: apply configured exclusions; measure remaining size
+  M -> H: enforce mandatory secret exclusion; config may only add exclusions
+  M -> H: classify content, names and link metadata;\ndelete secret and unknown/unreadable/partially classified objects
+  break Required deletion fails
+    M -> R: audit outcome without secrets; remain retiring
+    M --> C: no archive; retirement pending
+  end
+  M -> H: measure positively non-secret remainder only
   alt Exceeds configured max_per_archive
     M -> H: delete rather than archive
     M -> R: audit oversize deletion
   else Within bound
-    M -> H: tar.zst; root-owned mode 0600; links stored as links
+    M -> H: secret-filtered tar.zst; root file 0600 in archive root 0700;\npositively non-secret links stored as links
   end
 end
+M -> R: audit exclusion decision, key destruction, secret/unknown deletions\nand archive/delete outcome; no secret contents (§4.4.1)
 M -> O: remove owned files from system and per-user temporary areas
 M -> O: remove account and group
 opt v1
