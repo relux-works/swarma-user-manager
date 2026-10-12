@@ -30,6 +30,10 @@ note right of active
   F-13 persistence denial qualifies per OS; idle UID has zero processes.
   swarma-dispatcher service UID owns execution lifetime.
   Broker service UID owns bindings/leases; admitted active agent may be bound.
+  Protected service-class swarma-operator and swarma-observer never host a harness or launch.
+  Only configured installer or operator creates them; dispatcher cannot (§4.3).
+  Operator SSH: operator device key only; forced operator command; no interactive shell.
+  Narrow OS entry/sshd settings remain publication gates (§14 question 17).
   Refused launch/stop/fw.apply does not change account state.
 end note
 note right of retiring
@@ -49,7 +53,7 @@ note right of retiring
   v1 rules removed AFTER account/group; no rollback to active.
   Retirement is separate from identity revocation (§4.4).
 end note
-note "Current: nothing implemented; v0 accounts/launcher; v1 egress; v2 grants (§13).\nSH2+ joint admission gate I4 remains closed; dispatcher alone invokes the launcher (§§7, 14).\nSeparate explicit operator home retention: confidentiality not guaranteed; format unpublished (§4.4.1)." as Phase
+note "Current: nothing implemented; v0 accounts/launcher; v1 egress; v2 grants (§13).\nSH2+ joint admission gate I4 remains closed; dispatcher alone invokes the launcher (§§7, 14).\nSeparate explicit swarma-operator home retention: authentication + exact-content confirmation; refused inside agent sessions; confidentiality not guaranteed; format unpublished (§4.4.1)." as Phase
 Phase .. retiring
 note bottom of removed
   R-OUTCOME: pending stop/retire continues same effect/arguments; terminal result replays.

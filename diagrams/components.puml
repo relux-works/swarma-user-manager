@@ -2,7 +2,7 @@
 title M-UM1: component view within privileged process boundaries (unimplemented design)
 left to right direction
 
-actor "Configured caller\ninstaller / dispatcher / operator UID" as Caller
+actor "Configured caller\ninstaller / dispatcher UID" as Caller
 component "sudo\ntrusted root transition; exact path, no args" as Sudo
 package "swarma-user-manager process\nroot; one helper-op/1 invocation (v0)" {
   component "Sudo entry validation\neffective UID + SUDO_UID + argv" as MEntry
@@ -32,6 +32,14 @@ component "curator-run -> harness\nagent account UID; immutable plan only" as Ag
 component "swarma-credential-broker\nservice account; owns credentials / bindings / leases" as Broker
 component "Profile proxy (v1)\ntrusted service account; verified listener" as Proxy
 
+actor "Operator phone\nsecure element; biometric gate" as Phone
+actor "Operator terminal\npassword fallback; no cached ticket" as Terminal
+component "operator command\nunder swarma-operator UID\nforced, narrow entry; no shell/harness" as Operator
+component "swarma-observer\nmandatory protected service; read-only\nno shell/harness; no mutation/launcher" as Observer
+Phone --> Operator : tailnet SSH; operator device key ONLY;\nsigned operator record over one act's canonical content
+Terminal --> Operator : authenticated sudo; password;\nno NOPASSWD; timestamp_timeout=0
+Operator --> Sudo : helper only; authenticated, non-cached rule
+Observer --> State : public ledger accounts read; no confirmation
 Caller --> Sudo : operation JSON on stdin
 Sudo --> MEntry
 Sudo --> LEntry : configured dispatcher ONLY
@@ -97,7 +105,8 @@ note bottom of Archive
   Delete all home content/names/links through descriptors; no classification.
   Export only closed-schema service-generated metadata; no agent-controlled strings/names/links/bodies.
   Export schema/provenance/naming/bounds and audit encoding open (§14 question 6).
-  Separate operator retention: confidentiality not guaranteed; format unpublished (§14 question 1).
+  Separate swarma-operator retention: authentication + exact-content confirmation;
+  refused inside agent sessions; confidentiality not guaranteed; format unpublished (§14 questions 1, 17).
 end note
 note bottom of Observe
   recorded + current state; pending; rolled_back; not_recorded; unavailable; contradictory (R-OBS).
@@ -122,5 +131,21 @@ note bottom of State
   No retirement resurrection; lost coverage unavailable, never not_recorded (§4.6.1).
   R-FATE process table at §7: selected kill domains / affected sets qualify before activation.
   Every supervisor write checks durable daemon-instance epoch; no live adoption.
+end note
+note bottom of Operator
+  swarma-operator: protected service; helper operator UID, broker operator/account owner,
+  holder of broker v0 root and operator signing authority; never a harness account.
+  Machine verifies act-bound signature against pinned phone key; no reuse for another act.
+  App shows who/actions/until; widening requires authentication + exact-content confirmation;
+  CLI refuses widening inside agent sessions. Revocation: one biometric confirmation.
+  Command binary/wire, signature domain/canonical bytes, exact sshd config,
+  OS entry and phone-to-helper authenticated transition unpublished (§14 question 17).
+  No signature-algorithm change mandated; root/device compatibility remains publication work.
+end note
+note bottom of Observer
+  Reads: status, grants, accounts, bindings without confirmation; interfaces unpublished.
+  No other principal's private effect.observe journal access (§§2-3, 14 question 17).
+  Installer or operator creates both protected service-class accounts; dispatcher cannot (§4.3).
+  NOPASSWD stays only for dispatcher helper/launcher rules; operator/installer authenticate.
 end note
 @enduml

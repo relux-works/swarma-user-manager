@@ -21,6 +21,8 @@ database "OS directory service\naccount and primary group; manager-created\nmacO
 file "Audit log - root-owned\ntime/caller/op/args/result\nexact path unspecified in spec §§4.0, 4.6, 11" as Audit
 component "Platform installer\nconfigured installer caller UID; sudo to root" as Installer
 component "swarma-user-manager\nroot; one operation / recovery" as M
+component "swarma-operator\nprotected service; operator UID\nbroker operator/account owner; signing authority" as Operator
+component "swarma-observer\nprotected service; read-only\nno mutation/launcher" as Observer
 component "swarma-user-launcher\nroot until groups/GID/UID drop" as L
 component "swarma-dispatcher\nservice account swarma-dispatcher" as D
 component "swarma-credential-broker\nits service UID; credential state owned by broker" as Broker
@@ -30,6 +32,9 @@ component "Kernel firewall (v1)\nhelper-owned pf parent/account anchors\nor nfta
 Installer --> Binaries : install protected binaries
 Installer --> Config : install policy and approved list
 Installer --> Journal : install state directories / sudoers (§11)
+Installer --> M : configured service creation for operator/observer (§4.3)
+Operator --> M : helper only; authenticated sudo; timestamp_timeout=0
+Observer --> Ledger : accounts read without confirmation
 M --> Ledger : atomic replace: temp / flush / rename / directory flush
 M --> Journal : serialise mutation/recovery/effect.observe; retain effect/removal evidence
 M --> Audit : append one operation line
@@ -64,7 +69,8 @@ note bottom of Archives
   Destroy declared keys before walk; failed/unknown destruction/deletion keeps retiring.
   Export never copies agent-controlled strings/names/links/bodies; service provenance required.
   Export schema/naming/bounds, declared paths and audit encoding open (§14 question 6).
-  Separate explicit operator home retention: confidentiality not guaranteed; format unpublished.
+  Separate explicit swarma-operator home retention: authentication + exact-content confirmation;
+  refused inside agent sessions; confidentiality not guaranteed; format unpublished (§14 questions 1, 17).
   Broker credentials are outside helper ownership (§1.1).
 end note
 note bottom of Journal
@@ -94,5 +100,17 @@ note bottom of Ledger
   Retiring/removed never becomes active; pre-restore coverage unavailable until proved.
   Restore mark/floor encoding unpublished; whole-machine rollback not locally detectable.
   F-16: cross-account repository has private standalone Git administration; no linked worktree.
+end note
+note bottom of Operator
+  Neither operator nor observer hosts a harness session; homes under services/, not workers/.
+  Installer naming services in policy or configured operator may create them; dispatcher cannot.
+  Phone key never leaves secure element; biometric gate; tailnet SSH key-only forced operator command.
+  Signed operator record bound to one act; machine verifies against pinned phone key.
+  Widening: authentication + exact-content confirmation; CLI refuses inside agent sessions.
+  Revocation: single biometric confirmation. Terminal fallback: password sudo, no cached ticket.
+  Operator/installer helper rules authenticate; NOPASSWD only dispatcher helper/launcher.
+  Read-only observer status/grants/accounts/bindings require no confirmation.
+  Other read interfaces, command binary/wire, canonical bytes/domain, exact sshd/OS entry,
+  phone-to-helper authenticated transition, key lifecycle and service egress rows unpublished (§14 question 17).
 end note
 @enduml

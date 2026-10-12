@@ -49,13 +49,15 @@ state "Home fate after retiring commit and verified quiescence (§4.4.1)" as Ret
 }
 note right of Quarantined
   swarma-user-manager, root; caller roles apply (§3).
+  Operator UID is protected swarma-operator, never a harness account (§3).
   Dispatcher only own agents/qualified workplaces; quarantine root 0700 (§4.0).
   Dependency recovery resumes same retirement effect in bounded batches (§4.6).
   Labels illustrate sequence, not new persisted ledger states.
   Declared paths and audit encoding unpublished (§14 question 6).
   No arbitrary-home secret classifier; no archive/delete/keep selector.
-  Separate explicit operator home retention: confidentiality not guaranteed;
-  format/ordering unpublished (§14 question 1), not admitted by user.retire.
+  Separate explicit swarma-operator home retention: authentication + exact-content confirmation;
+  refused inside agent sessions; confidentiality not guaranteed;
+  format/ordering unpublished (§14 questions 1, 17), not admitted by user.retire.
 end note
 
 state "Metadata export only (schema publication gate, §4.4.1)" as Metadata {

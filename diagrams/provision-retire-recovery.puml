@@ -1,7 +1,7 @@
 @startuml provision-retire-recovery
 title M-UM2: provision, retire and crash recovery (v0 design; v1 egress annotations)
 
-participant "Configured caller\ninstaller / dispatcher / operator UID" as C
+participant "Configured caller\ninstaller / dispatcher / swarma-operator UID" as C
 participant "sudo\ntrusted root transition" as S
 participant "swarma-user-manager\nroot; one invocation; no arguments" as M
 database "Root-owned state\npolicy, ledger/cursor, lock, journal, audit\nv1 applied state" as R
@@ -16,6 +16,19 @@ note over C,L
   Current: unimplemented; v0 accounts, v1 firewall, v2 grant verification (§13).
   SH2+ joint admission gate I4 remains closed; dispatcher alone invokes the launcher (§§7, 14).
   Each helper request <= 16 KiB, one JSON document in 5 s (§2).
+end note
+
+note over C,S
+  R-OPERATOR (§§2-3, 11): operator is protected swarma-operator UID, never a harness account.
+  Phone: hardware-backed biometric operator device key; tailnet SSH, forced operator command, no shell.
+  Machine verifies pinned-key signature over this act only; app shows exact who/actions/until.
+  Terminal: password sudo into operator, no NOPASSWD, timestamp_timeout=0.
+  Operator helper sudo authenticated and non-cached; NOPASSWD only dispatcher helper/launcher.
+  Widening: authentication + exact-content confirmation; refused inside agent sessions.
+  Narrowing: authentication only; revocation: one biometric confirmation.
+  Human status/grants/accounts/bindings reads via swarma-observer without confirmation.
+  Observer has no mutation/launcher or other principal's private effect.observe access.
+  Entry/signature/read interfaces and phone-to-helper transition unpublished (§14 question 17).
 end note
 
 == Before each invocation: intake, transition lock and dependency recovery (§§2-3, 4.6) ==
@@ -48,6 +61,14 @@ note over M,R
   Transport uncertainty alone never proves pending intent.
   Mutation sequences below describe new effects or pending recovery.
   effect.observe is a separate read-only invocation, outside the mutation replay/create path.
+end note
+
+note over M,O
+  user.create service: installer configured for these names or operator may create
+  protected swarma-operator and swarma-observer; dispatcher cannot (§4.3).
+  Neither hosts a harness session or has launcher authority.
+  Ordinary service non-login backend does not claim to admit forced SSH;
+  operator/observer narrow OS entry settings need publication/qualification (§14 question 17).
 end note
 
 == Read-only effect.observe (R-OBS, §§2, 4.5-4.6) ==
@@ -106,7 +127,8 @@ note over C,M
   Create/bind/launch/stop/unbind/retire have distinct effect IDs;
   retry each effect with its same ID (§5).
   Retirement deletes the home; no archive/delete/keep selector (§4.4.1).
-  Separate explicit operator home retention: confidentiality not guaranteed; format unpublished.
+  Separate explicit swarma-operator home retention: authentication + exact-content confirmation;
+  refused inside agent sessions; confidentiality not guaranteed; format unpublished (§14 questions 1, 17).
 end note
 M -> R: journal steps; persist retiring FIRST (commit point)
 note over L,B: Launcher refuses new starts; broker refuses leases for retiring generation.

@@ -90,6 +90,11 @@ E -> E: verify immutable caller-composed plan and digested PATH;\nresolve protec
 E -> B: fresh connection; lease.request (broker lease-at-launch)
 note over E,B: Lease refusal/recovery details unspecified in this spec §7; broker contract owns them.\nExecutor prepares work/ and tmp/ as agent UID, then execs harness; no profile composition.
 note over S, E: Dispatcher owns the execution lifetime; sudo is never a signal relay
+note over D,S
+  NOPASSWD is confined to dispatcher helper/launcher rules (§2).
+  swarma-operator and swarma-observer are protected services; neither hosts a harness or invokes launcher.
+  Operator helper sudo requires authentication and timestamp_timeout=0 (§§2-3, 11).
+end note
 
 == Authorised stop (helper specification §4.7) ==
 D -> S: sudo /opt/swarma/libexec/swarma-user-manager\n(stdin: swarma-user-manager helper-op/1, exec.stop)
