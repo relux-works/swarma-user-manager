@@ -13,18 +13,21 @@ note over D,M
   [[../spec/helper.md#7-the-launcher-swarma-user-launcher Defining spec §7 launcher]],
   [[../spec/helper.md#47-execstop §4.7 stop]], [[../spec/helper.md#5-cross-component-reconciliation §5 effect IDs]].
   Current repository: unimplemented design; v1 adds egress, v2 grants (§13).
-  SH1 internals unspecified in spec §7; SH2+ launcher ticket redemption disabled until I4 publication (§14).
+  SH2+ joint admission remains gated by I4 publication (§14); dispatcher is the only launcher caller.
   Executor intake / Decision 0021 amendment is publication work (§7), not implemented here.
   Manager owns ledger/journal/audit; launcher writes root-owned start receipts.
   Agent owns home content; broker owns credentials/bindings/leases; dispatcher owns execution lifetime.
 end note
 note over L,R
-  SH2+ future route ONLY after I4 publication (§7; session-host §3.3):
-  dispatcher issues ticket; authenticated session host presents it to swarma-user-launcher.
-  Launcher redeems once under shared lock/journal, atomically with launch intent/receipt;
-  lost reply uses same effect ID/receipt, never a second start.
-  Ticket signature/schema/canonical bytes, host role and cancel interlock unpublished (§14 question 3).
-  This note does not add a caller or fields to the v0/v1 sequence below.
+  R-START / I4: session host requests dispatcher host_start; no privileged host call.
+  Dispatcher owns durable host admission permit bound to
+  (logical_session_id, execution_id, controller_epoch, op_id).
+  Fence change withdraws/reconciles permit; cancel before call prevents launch.
+  Ambiguous call uses SAME effect/receipt; stop if required, never a second launch.
+  Runner opens fresh authenticated host channel; current-epoch registration/readiness
+  before delivery. Host failure retains claim and closed fence until reconciliation.
+  Joint authentication/permit/crash/readiness publication remains open (§14 question 3).
+  These values add no fields to launch-op/1; no helper host role or host sudo authority.
 end note
 D -> S: sudo /opt/swarma/libexec/swarma-user-launcher\n(stdin: swarma-user-manager launch-op/1)
 note over D, L: Schema sketch: v:1, op:launch.start, request_id:launch effect ID,\ngeneration:g-0193, execution_id, epoch, executor:curator-run, plan\nRequest <= 80 KiB; plan <= 64 KiB base64 / 48 KiB decoded; stdin within 5 s
@@ -32,14 +35,15 @@ S -> L: exec as root (SUDO_UID = dispatcher)
 break Invalid invocation, closed schema, bounds, role or grants in v0/v1 (§§2-3)
   L --> D: refuse; no launch
 end
+L -> L: scrub untrusted inherited FDs > 2 FIRST; keep caller-owned 0-2\nthen reserve read-only FD3 without clobbering internal handles
 L -> R: exclusive durable lock shared by both binaries; recovery FIRST (§4.6)
-note over L,R: Compare OS objects with journal: interrupted creation rolls back; retirement resumes forward.
+note over L,R: Compare OS objects with journal: creation rolls back; retirement resumes.\nRetain generation lock through root receipt and completed verified UID/GID drop (R-FD3).
 L -> R: g-0193 active, kind agent, created by this dispatcher?
 break Inactive / retiring generation or wrong owner
   L --> D: generation_not_active / target_not_owned
 end
 L -> R: executor id → approved path + SHA-256
-L -> L: open the executable without following links; verify the digest
+L -> L: open executable no-follow; verify digest; retain verified handle THROUGH exec
 break Unapproved executor or digest mismatch
   L --> D: executor_not_approved / executable_digest_mismatch
 end
@@ -47,19 +51,36 @@ L -> L: open agent home without following links as cwd
 break Invalid home
   L --> D: cwd_invalid
 end
-L -> L: home as cwd; close descriptors > 2;\nplan → pipe → descriptor 3; fixed bootstrap environment
+L -> L: home as cwd; close directory handle at last use
+L -> L: completely stage bounded immutable admitted plan on read-only FD3;
+L -> L: fixed bootstrap environment; staging and pre-exec path bounded
+break Interrupted / failed / unknown staging
+  L -> L: release internal handles and staging resources; preserve journal evidence
+  L --> D: no launch; unknown cleanup is not absence
+end
+note over L,R
+  R-FD3 (§7) owns the single descriptor lifecycle; agent launcher §10.1 references it.
+  Per-platform staging/deadline/close-on-exec mechanism open (§14 question 7).
+  Pipe allowed only with qualified capacity/feeder/deadline/cleanup order;
+  never wait for a reader unable to start; no path/stdin/network fallback.
+  EVERY failure branch releases internal handles/staging resources at safe last use,
+  retains durable effect/receipt evidence and never infers absence from failed cleanup.
+end note
 L -> R: check for existing execution_id start receipt
 break Receipt already exists
   L --> D: execution_already_started; no second start
 end
 L -> L: setsid
 L -> R: atomic root-owned start receipt BEFORE privilege drop\nexecution_id, epoch, pid, start_time, boot_id, session_id; mode 0644
-note over L,R: Receipt retention and post-receipt/pre-exec crash resolution: unspecified in spec §§4.6, 7.
+note over L,R: Keep lock and executable handle; close receipt/journal handles at last use.\nReceipt/effect evidence retained through reconciliation; exact bounds open (§14 question 8).
 L -> L: clear supplementary groups; set GID, UID;\nverify root cannot be regained
 break Privilege drop fails
-  L --> D: privilege_drop_failed
+  L -> L: release internal handles / staging resources; preserve receipt for reconciliation
+  L --> D: privilege_drop_failed; no permission for another start
 end
-L -> E: exec the verified executor as uid 30412
+L -> L: after verified receipt-matching UID/GID transition: release and close generation lock
+L -> E: exec verified executor as uid 30412; retain executable handle through kernel exec\ninternal handles close at last use or qualified close-on-exec\nexecutor receives only 0-2 and read-only FD3
+note over L,E: Exec failure: release handles/staging resources; preserve receipt/effect evidence.\nUnknown outcome reconciles SAME effect; never launches twice (§§4.6, 7).
 E -> E: verify immutable caller-composed plan and digested PATH;\nresolve protected credential binding (no profile composition)
 E -> B: fresh connection; lease.request (broker lease-at-launch)
 note over E,B: Lease refusal/recovery details unspecified in this spec §7; broker contract owns them.\nExecutor prepares work/ and tmp/ as agent UID, then execs harness; no profile composition.

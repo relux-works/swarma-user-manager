@@ -14,7 +14,9 @@ Two minimal privileged components for agent systems. Each runs as root for one o
 - The helper chooses account names and UIDs from its own ranges; every creation gets a generation that is never reused.
 - It acts only on accounts it created (a root-owned ledger), never on pre-existing accounts, and works on files through descriptors without following links.
 - One lock serialises everything; creation rolls back on failure, retirement moves forward from its commit point; every operation leaves an audit line naming the caller.
-- Retirement archives never receive secrets: mandatory exclusions cannot be overridden, declared keys are destroyed before the walk, and unknown classification means deletion ([§4.4.1](spec/helper.md#441-archive-policy)).
+- Retirement deletes the home after verified quiescence and declared-key cleanup; only a closed-schema service-generated metadata export may remain. Keeping a home is a separate explicit operator operation whose confidentiality is not guaranteed ([§4.4.1](spec/helper.md#441-retirement-deletion-and-metadata-export)).
+- `effect.observe` exposes six receiver-owned evidence states under the journal lock; expired or missing evidence is `unavailable`, never proof of absence ([§4.6](spec/helper.md#46-lock-journal-and-idempotency)).
+- The launcher preserves trusted handles through their last use and delivers completely staged bounded immutable bytes on read-only FD3; the per-platform mechanism remains publication work ([§7](spec/helper.md#7-the-launcher-swarma-user-launcher)).
 - `exec.stop` proves process absence only; the session host's recovery owns the separate harness native-lock check ([§4.7](spec/helper.md#47-execstop)).
 - Later: it re-verifies the signed grant behind each request instead of trusting the configured policy alone.
 
@@ -22,7 +24,7 @@ Two minimal privileged components for agent systems. Each runs as root for one o
 
 - [swarma-dispatcher](https://github.com/relux-works/swarma-dispatcher), under its own service account, creates an agent's account with the helper, binds that account's generation in swarma-credential-broker, and starts the agent's executor through the launcher; the executor then obtains its credential lease from the broker itself.
 - swarma-credential-broker runs under a service account the helper creates, and reads the helper's ledger to check generations.
-- In the gated SH2+ design, an authenticated session host presents a dispatcher-issued ticket to `swarma-user-launcher`, which redeems it once under the shared lock and journal. This route remains disabled until I4 is published ([§7](spec/helper.md#7-the-launcher-swarma-user-launcher)).
+- The dispatcher is a Unix-socket service from its first slice and calls the helper and launcher through sudo. It is the only launcher caller. In the gated SH2+ design, the session host requests `host_start` from the dispatcher; joint admission/permit/fence publication remains required ([§7](spec/helper.md#7-the-launcher-swarma-user-launcher)).
 
 ## Diagrams
 
@@ -34,9 +36,9 @@ PlantUML sources map the current [specification](spec/helper.md#appendix-b-diagr
 | M-UM2 | [Launch and authorised stop](diagrams/launch.puml) | [§7](spec/helper.md#7-the-launcher-swarma-user-launcher), §4.7 |
 | M-UM2 | [Provision, retire and recovery](diagrams/provision-retire-recovery.puml) | [§4.3](spec/helper.md#43-usercreate), §§4.4–4.6 |
 | M-UM3 | [Account lifecycle](diagrams/account-lifecycle.puml) | [§4.2](spec/helper.md#42-lifecycle), §4.6 |
-| M-UM3 | [Receipt evidence and archive fate](diagrams/receipt-archive-states.puml) | [§4.4.1](spec/helper.md#441-archive-policy), §§4.7, 7 |
+| M-UM3 | [Receipt evidence and retirement fate](diagrams/receipt-archive-states.puml) | [§4.4.1](spec/helper.md#441-retirement-deletion-and-metadata-export), §§4.7, 7 |
 | M-UM4 | [Storage layout and owners](diagrams/storage-layout.puml) | [§4.0](spec/helper.md#40-layout), §§6–7, 11 |
 
 ## License
 
-Apache License 2.0 — see [LICENSE](LICENSE) and [NOTICE](NOTICE). Authors: Ivan Oparin and Alexey Grigorev.
+Apache License 2.0 — see [LICENSE](LICENSE) and [NOTICE](NOTICE).

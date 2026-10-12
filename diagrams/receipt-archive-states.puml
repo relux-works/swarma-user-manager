@@ -1,5 +1,5 @@
 @startuml receipt-archive-states
-title M-UM3: receipt evidence and archive fate (v0 design; no implementation claim)
+title M-UM3: receipt evidence and retirement fate (v0 design; no implementation claim)
 hide empty description
 
 state "Start receipt / execution evidence (§§4.7, 7)" as Receipt {
@@ -11,7 +11,7 @@ state "Start receipt / execution evidence (§§4.7, 7)" as Receipt {
   Recorded --> Recorded : launch with existing execution_id refuses\nexecution_already_started
   Recorded --> Recorded : helper stop refuses receipt / live identity mismatch\nor processes_remain / unknown observation
   Recorded --> Absent : helper exec.stop verifies active owned generation,\nreceipt + live identity; TERM / grace / KILL;\nno remaining processes incl. escaped descendants
-  Absent --> Absent : receipt persistence/deletion rule unspecified\nno second-launch permission inferred
+  Absent --> Absent : effect/receipt evidence retained for reconciliation\nno second-launch permission inferred
 }
 note right of Recorded
   Process: swarma-user-launcher, root until UID drop.
@@ -22,60 +22,62 @@ note right of Recorded
   Execution: curator-run -> harness under agent UID;
   dispatcher service UID owns execution lifetime.
   Unknown/failed observation is not known absence (§4.7).
-  Post-receipt/pre-exec failure recovery and receipt deletion:
-  unspecified in spec §§4.6, 7.
+  Post-receipt/pre-exec failure resolves same effect/receipt; never launch twice.
+  Evidence retained until original identities permanently inadmissible (§4.6).
+  Exact retention bounds / coverage rule open (§14 question 8).
+  R-FD3: generation lock through root receipt and verified UID/GID drop;
+  verified executable handle through exec; executor only 0-2 and read-only FD3.
 end note
 note right of Absent
   Evidence condition, not a new persisted account state.
   No harness native-lock absence attested by exec.stop (§4.7).
   Host recovery: fresh runner under agent UID checks native lock
   under closed fence; unknown result keeps session parked (session-host §3.5).
-  Stop result receipt storage / retention: unspecified in spec §4.7.
+  Stop/effect evidence retention governed by §4.6; concrete encoding/bounds open (§14 question 8).
   An existing start receipt still refuses another start (§7).
 end note
 
-state "Home fate after retiring commit and verified quiescence (§4.4.1)" as Archive {
+state "Home fate after retiring commit and verified quiescence (§4.4.1)" as Retirement {
   state "Home in quarantine\nsame-filesystem move; root-controlled" as Quarantined
-  state "Declared keys destroyed\nbefore any archive/delete walk" as KeysDestroyed
-  state "Positively non-secret remainder\nmandatory exclusion + fail-closed classification" as Classified
-  state "Archive retained\nroot-owned 0600 tar.zst" as Retained
-  state "Home deleted" as Deleted
-  state "Archive swept" as Swept
+  state "Declared keys destroyed\nbefore deletion walk" as KeysDestroyed
+  state "Home deleted\nno agent content retained" as Deleted
   [*] --> Quarantined : manager user.retire; account quiescent
-  Quarantined --> Quarantined : key destruction failed/unknown\nno walk or archive; remain retiring; audit
+  Quarantined --> Quarantined : key destruction failed/unknown\nno walk; remain retiring; audit
   Quarantined --> KeysDestroyed : destroy declared keys; journal under shared lock\nrecovery confirms destruction or prior absence
-  KeysDestroyed --> Deleted : explicit home=delete\nno-follow descriptor walk
-  KeysDestroyed --> KeysDestroyed : secret/unknown deletion failed\nno archive publication; remain retiring; audit
-  KeysDestroyed --> Classified : home=archive; mandatory secret exclusion\nconfig may add only; delete secrets and\nunknown/unreadable/partially classified objects
-  Classified --> Deleted : exceeds max_per_archive\nafter exclusions/classification; audit deletion
-  Classified --> Retained : within bound; content/names/link metadata non-secret\nlinks stored as links; audit outcome
-  Retained --> Swept : archive.sweep: older than max_age\nthen oldest until max_total satisfied
+  KeysDestroyed --> KeysDestroyed : deletion failed/partial/unknown\nremain retiring; audit; unreadable is not absent
+  KeysDestroyed --> Deleted : no-follow descriptor deletion\nunlink all home content/names/links
 }
 note right of Quarantined
-  Process: swarma-user-manager, root; installer/operator/dispatcher
-  caller roles apply (§3); dispatcher only its own agents.
-  Home content was account-owned; quarantine is root 0700 (§4.0).
+  swarma-user-manager, root; caller roles apply (§3).
+  Dispatcher only its own agents; quarantine root 0700 (§4.0).
   Journal recovery resumes retirement forward (§4.6).
-  Home-fate labels illustrate the sequence, not new persisted ledger states.
-  Key destruction and classification are mandatory (§4.4.1).
-  Declared paths, declaration/classification formats and audit encoding
-  unpublished (§14 question 6); no invented schema or error code.
-  Quarantine disposal after archive: unspecified in spec §4.4.1.
-  keep request refuses today: not in closed schema (§4.4.1).
-  Operator-only keep/no-expiry is an OPEN owner choice, not a state.
+  Labels illustrate sequence, not new persisted ledger states.
+  Declared paths and audit encoding unpublished (§14 question 6).
+  No arbitrary-home secret classifier; no archive/delete/keep selector.
+  Separate explicit operator home retention: confidentiality not guaranteed;
+  format/ordering unpublished (§14 question 1), not admitted by user.retire.
 end note
-note right of Retained
-  Manager owns archive and audit; root configuration owns retention policy.
-  Archive root 0700; files 0600; secrets never admitted.
-  Audit exclusion decision, key destruction, secret/unknown deletions and fate;
-  record failure/unknown outcomes without secret contents (§4.4.1).
-  Configurable defaults: archive; max_age 7d; max_total 20GiB;
-  max_per_archive 2GiB after mandatory + configured exclusions and classification (§4.4.1).
-  Sweep at every retirement and daily root timer.
-  Timer identity beyond root / retry on sweep failure:
-  unspecified in spec §4.4.1.
+
+state "Metadata export only (schema publication gate, §4.4.1)" as Metadata {
+  state "Closed-schema service-generated export\nroot-owned 0600 in root 0700 archive directory" as Exported
+  state "Metadata swept" as Swept
+  [*] --> Exported : schema/provenance published and qualified;\ntrusted service records only
+  Exported --> Swept : archive.sweep: older than max_age\nthen oldest until max_total satisfied
+}
+note right of Exported
+  No agent-controlled strings, names, links or bodies; no home source.
+  Unknown provenance/schema failure prevents publication.
+  Schema/naming/bounds/audit encoding unpublished (§14 question 6).
+  Code/results/git/free-text logs have separate confidentiality policy.
+  Sweep only metadata, never live effect/receipt/removal evidence (§4.6).
+  Sweep at every retirement and daily root timer; timer details/retry unpublished.
 end note
-note "Defining spec: [[../spec/helper.md#7-the-launcher-swarma-user-launcher §7 start receipt]],\n[[../spec/helper.md#47-execstop §4.7 stop evidence]], [[../spec/helper.md#441-archive-policy §4.4.1 archive]].\nThese are two independent views, not a receipt-to-archive transition.\nCurrent repository: nothing implemented. v1 retains egress until account/group removal (§8).\nv2 grant grammar open (§9); SH1 receipt variants unspecified in spec §7;\nSH2+ launcher ticket redemption disabled until I4 publication (§§7, 14)." as Scope
+
+note "R-OBS (§§2, 4.5-4.6): original principal/operator observes under journal lock.\nExactly recorded (result + current state), pending, rolled_back, not_recorded, unavailable, contradictory.\nComplete authoritative evidence required for not_recorded; expired/missing/unreadable evidence = unavailable.\nObservation never authorises a new effect; concrete retention/coverage publication remains open (§14 question 8)." as Observation
+Observation .. Receipt
+
+note "Defining spec: [[../spec/helper.md#7-the-launcher-swarma-user-launcher §7 start receipt]],\n[[../spec/helper.md#47-execstop §4.7 stop evidence]], [[../spec/helper.md#441-retirement-deletion-and-metadata-export §4.4.1 deletion/export]].\nThese are independent evidence, deletion and export views, not a receipt-to-export transition.\nCurrent repository: nothing implemented. v1 retains egress until account/group removal (§8).\nv2 grant grammar open (§9); SH2+ joint admission remains I4-gated (§§7, 14).\nOnly the dispatcher invokes the launcher; FD3 platform mechanism open (§14 question 7)." as Scope
 Scope .. Receipt
-Scope .. Archive
+Scope .. Retirement
+Scope .. Metadata
 @enduml

@@ -10,7 +10,7 @@ rolled_back --> [*]
 active --> active : launch.start (launcher)\nfw.apply (v1)
 active --> retiring : user.retire\n(commit point: persisted first)
 retiring --> retiring : processes_remain → later retry\ncrash → next invocation resumes forward
-retiring --> removed : processes stopped and verified; home quarantined;\ndeclared keys destroyed before walk; secrets/unknowns deleted;\nnon-secret remainder archived or home deleted; temporary files removed;\naccount and group removed; v1 rules removed last; persist removed
+retiring --> removed : processes stopped and verified; home quarantined;\ndeclared keys destroyed before walk; home deleted;\nonly closed-schema service-generated metadata export; temporary files removed;\naccount and group removed; v1 rules removed last; persist removed
 note right of removed: Generation stays in root ledger forever (§4.2).
 note left of creating
   [[../spec/helper.md#42-lifecycle Defining spec §4.2]],
@@ -35,13 +35,14 @@ note right of retiring
   Manager asks broker to end binding where present.
   Unknown/failed observation does not prove quiescence (§4.7);
   exact retirement observation error: unspecified in spec §4.4.
-  Root controls quarantine and owns archives; no-follow walks (§6).
-  Mandatory secret exclusions cannot be narrowed; declared keys destroyed before walk.
-  Unknown classification deletes; failed destruction/deletion keeps retiring,
-  with no archive publication; secret-safe audit (§4.4.1).
+  Root controls quarantine and owns metadata exports; no-follow walks (§6).
+  Declared keys destroyed before home deletion.
+  Failed/unknown destruction or deletion keeps retiring; unreadable is not absent.
+  Export never copies agent-controlled strings/names/links/bodies (§4.4.1).
+  Export schema/provenance and audit encoding unpublished (§14 question 6).
   v1 rules removed AFTER account/group; no rollback to active.
   Retirement is separate from identity revocation (§4.4).
 end note
-note "Current: nothing implemented; v0 accounts/launcher; v1 egress; v2 grants (§13).\nSH1 internals unspecified in spec §4.2; SH2+ launcher ticket gate closed until I4 publication (§§7, 14).\nOperator-only keep unresolved and not admitted (§4.4.1)." as Phase
+note "Current: nothing implemented; v0 accounts/launcher; v1 egress; v2 grants (§13).\nSH2+ joint admission gate I4 remains closed; dispatcher alone invokes the launcher (§§7, 14).\nSeparate explicit operator home retention: confidentiality not guaranteed; format unpublished (§4.4.1)." as Phase
 Phase .. retiring
 @enduml

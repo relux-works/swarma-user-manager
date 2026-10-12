@@ -1,24 +1,16 @@
 # swarma-user-manager: specification
 
-- **Status:** draft v0.5 (2026-10-12). Nothing is implemented.
+- **Status:** draft v0.6 (2026-10-12). Nothing is implemented.
 - **Normative language:** MUST, MUST NOT, SHOULD and MAY are used as in RFC 2119.
 - **Companions:** [swarma-credential-broker](https://github.com/relux-works/swarma-credential-broker) (binds the OS accounts this helper creates), [curator-network-profiles](https://github.com/relux-works/curator-network-profiles) (the egress an agent may use).
 
-### Revision 0.5
+### Revision 0.6
 
-Closes the user-manager spec gaps: retirement archives exclude secrets through mandatory exclusions, declared-key destruction before the walk and fail-closed classification (§4.4.1); the platform layout includes the broker and SH2+ host/runner with their phases (§4.0); donor provisioning stays in its separate component (§13). The launcher redeems dispatcher tickets for authenticated session hosts only after I4 publication (§7), and `exec.stop` proves process absence only, leaving native-lock checks to session-host recovery (§4.7). The affected figures follow these boundaries; unpublished formats remain open questions (§14).
+Applies the accepted review findings: retirement deletes the home after quiescence and declared-key cleanup, retaining only a closed-schema service-generated metadata export (§4.4.1, F-1); only the dispatcher invokes the launcher, including session-host starts (§7, F-4); §7 owns the single descriptor-lifecycle contract and bounded immutable FD3 staging (R-FD3, F-6); `effect.observe` exposes receiver-owned evidence under the journal lock (§§2, 4.5–4.6, R-OBS, F-10); the dispatcher uses its service socket from the first slice (§§2, 4.0, F-5). All affected figures follow these contracts. Unpublished formats and platform mechanisms remain explicit questions (§14).
 
-### Revision 0.4
+### Earlier revisions
 
-R-UM1 contract alignment: separate correlation and effect IDs (§5), collect message bounds (§2), make receipt-before-drop and authorised stop explicit (§7), and retain archive/delete while the operator-only `keep` request remains an open owner question (§4.4.1). Owner decisions of 2026-10-11 place donor provisioning in a separate component (§1.1), name versioned wire objects after the repository (§2), and constrain agent-side `curator-run` to execution of a caller-composed plan (§7). Identity revocation remains separate from account retirement (§4.4).
-
-### Revision 0.3
-
-Owner decisions of 2026-10-10 and the dispatcher review: one platform root `/opt/swarma` with a fixed layout (§4.0); account names `swarma-<service>` for services and `worker-<label>` for agents; agent UIDs 30000–59999 allocated round-robin with cleanup before reuse (§4.1); retired homes archived with configured retention (§4.4.1); an authorised `exec.stop` for one execution (§4.7); launcher start receipts and execution ids, the agent home as the working directory, and a payload budget (§7).
-
-### Revision 0.2
-
-An architecture review on 2026-10-09 kept the closed, root-owned design and asked for tighter contracts. This revision adds a second binary, the **launcher**, which starts the executor under an agent's account (§7); without it an unprivileged dispatcher could create an account but never run anything as it. It also adds per-caller policy (§3), an account lifecycle with one lock and a retirement fence (§4, §5), descriptor-relative file operations (§6), an exact sudo and input contract (§2), and a firewall support matrix with trusted applied state (§8).
+Revisions 0.2–0.5 introduced the separate launcher, per-caller policy, account lifecycle and retirement fence, descriptor-relative file operations, exact sudo/input bounds, platform layout, execution receipts and authorised stop, firewall evidence, separate donor provisioning, wire naming and the caller-composed executor plan. Revision 0.6 supersedes their retirement and session-host launch policies and dispatcher transport phasing. Identity revocation remains separate from account retirement.
 
 ## 1. Purpose
 
@@ -29,7 +21,7 @@ An agent system gets a real boundary between agents on one machine by running ea
 - **swarma-user-manager** creates, lists and retires accounts and (v1) applies per-account firewall rules;
 - **swarma-user-launcher** starts one approved executable under one active agent account.
 
-Both run as root for one operation at a time, are invoked through `sudo` by configured callers, accept only operations from closed, versioned schemas, choose names and identifiers themselves, act only on what they manage, journal their steps, and serialise on one lock.
+Both run as root for one operation at a time, are invoked through `sudo` by configured callers (launcher: dispatchers only), accept only operations from closed, versioned schemas, choose names and identifiers themselves, act only on what they manage, journal their steps, and serialise on one lock.
 
 ### 1.1 Non-goals
 
@@ -41,7 +33,7 @@ Both run as root for one operation at a time, are invoked through `sudo` by conf
 ## 2. Invocation
 
 - Each binary is installed at a fixed root-owned path, is not setuid, and every directory on its path is root-owned and not writable by others.
-- The sudoers rule allows a configured caller to run exactly that path **with no arguments**, using the empty argument specification, for example `swarma-dispatcher ALL=(root) NOPASSWD: /opt/swarma/libexec/swarma-user-manager ""`. The binaries also refuse any argument (`argv_not_allowed`).
+- Each sudoers rule allows a configured caller (launcher: dispatchers only) to run exactly that path **with no arguments**, using the empty argument specification, for example `swarma-dispatcher ALL=(root) NOPASSWD: /opt/swarma/libexec/swarma-user-manager ""`. The binaries also refuse any argument (`argv_not_allowed`).
 - The binary refuses unless its effective UID is 0 (`not_root`) and `SUDO_UID` is present and a plain decimal number (`not_invoked_by_sudo`). `SUDO_UID` is the caller's identity only because sudo set it during a trusted transition; it is not proof of the caller's executable, and root callers are outside this boundary.
 - The binary clears its environment, sets a fixed `PATH`, working directory and umask, and calls operating-system tools only by absolute path, never through a shell.
 - The request is exactly one JSON document on stdin, read within 5 seconds: at most 16 KiB for `swarma-user-manager helper-op/1` and 80 KiB for `swarma-user-manager launch-op/1` (`request_too_large`, `request_timeout`). Duplicate keys, unknown members, a trailing document, strings longer than their declared bound and arrays longer than theirs are refused (`request_invalid`).
@@ -50,14 +42,27 @@ Both run as root for one operation at a time, are invoked through `sudo` by conf
 ```
 swarma-user-manager helper-op/1
 { v: 1,
-  op:         "user.create" | "user.retire" | "user.list" | "exec.stop" | "archive.sweep" | "fw.apply" | "fw.remove",
-  request_id: string (≤ 64),           // caller-scoped effect idempotency key, §§4.6, 5
+  op:         "user.create" | "user.retire" | "user.list" | "effect.observe" | "exec.stop" | "archive.sweep" | "fw.apply" | "fw.remove",
+  request_id: string (≤ 64),           // mutation: caller-scoped effect key; read: correlation, §§4.6, 5
   args:       { … per operation … } }
 
 swarma-user-manager helper-result/1
 { request_id, ok: true, result: { … }, state: current state of the target }
 | { request_id, ok: false, error: { code, message } }
 ```
+
+`effect.observe` is a read-only operation in `helper-op/1` (R-OBS). Its arguments identify the original effect's `request_id`, operation and digest of its canonical arguments; the outer `request_id` remains request correlation and does not admit a new effect. The exact argument/result member encoding and canonical digest bytes are unpublished (§14, question 8); no additional wire fields or refusal codes are assigned here. Its observation result is exactly one of:
+
+| Observation state | Evidence / result |
+|---|---|
+| `recorded` | Recorded result together with the target's current generation/state |
+| `pending` | The original effect is recorded but unresolved |
+| `rolled_back` | Authoritative journal evidence that this attempt was rolled back |
+| `not_recorded` | Complete authoritative evidence that this effect was never recorded |
+| `unavailable` | Evidence is missing, expired or unreadable; never evidence of absence |
+| `contradictory` | Authoritative evidence conflicts |
+
+Only the original caller principal and configured operators may observe an effect. Observation is serialized with the receiver journal (§§4.5–4.6), including launch/stop evidence held by this module. It neither renews mutation authority nor performs a new mutation; it remains available to that authenticated principal after its mutation grant expires. Evidence retention and the absence boundary are specified in §4.6.
 
 A `grants` member is refused until v2 (`grants_unsupported`), so an ignored grant can never look verified.
 
@@ -68,11 +73,10 @@ Versioned wire identifiers follow `swarma-<component> <object>/<n>`, using the *
 | Helper request (`swarma-user-manager helper-op/1`) | 16 KiB | One JSON document on stdin, 5 seconds; this section |
 | Launcher request (`swarma-user-manager launch-op/1`) | 80 KiB | One JSON document on stdin, 5 seconds; §§2, 7 |
 | Plan within launcher request | 48 KiB decoded; 64 KiB base64 | Delivered decoded on descriptor 3; §7 |
-| Dispatcher v0 request | 96 KiB | Stdin, 5 seconds; dispatcher §10 |
-| Dispatcher v1 frame | 128 KiB | Dispatcher §10 |
+| Dispatcher service frame | 128 KiB | Dispatcher §10 |
 | Broker frame | 64 KiB | Broker §13.1 |
 
-The dispatcher MUST refuse a payload exceeding the smallest bound on its launch path before provisioning. The larger dispatcher limits do not enlarge the launcher's request or plan bounds.
+The dispatcher MUST refuse a payload exceeding the smallest bound on its launch path before provisioning. The dispatcher frame limit does not enlarge the launcher's request or plan bounds.
 
 ## 3. Policy
 
@@ -80,11 +84,11 @@ A root-owned configuration lists callers by UID and gives each a role:
 
 | Role | May |
 |---|---|
-| `installer` | create and retire **service** accounts it names in the configuration; run `archive.sweep` |
-| `dispatcher` | create agent accounts up to its quota; retire, launch and apply rules only for agent accounts **it created** (`created_by` = its principal) |
-| `operator` | everything above, including retiring protected service accounts |
+| `installer` | create and retire **service** accounts it names in the configuration; run `archive.sweep`; observe its own effects |
+| `dispatcher` | create agent accounts up to its quota; retire, launch and apply rules only for agent accounts **it created** (`created_by` = its principal); stop its executions; observe its own effects |
+| `operator` | all helper operations, including retiring protected service accounts; observe effects from any principal; no launcher authority |
 
-Requests outside the caller's role are refused (`caller_role_not_permitted`, `target_not_owned`, `quota_exceeded`). Configured dispatchers are trusted administrators of their own agents; until v2 (§9) the policy is the authority.
+Requests outside the caller's role are refused (`caller_role_not_permitted`, `target_not_owned`, `quota_exceeded`). Only configured dispatchers may invoke `swarma-user-launcher`; installer, operator and session-host principals have no launch sudo rule or launcher role. Configured dispatchers are trusted administrators of their own agents; until v2 (§9) the policy is the authority.
 
 ## 4. Accounts
 
@@ -96,26 +100,26 @@ Figure [M-UM4: storage layout and owners](../diagrams/storage-layout.puml) expan
 /opt/swarma/                 root 0755
   libexec/                   root 0755: protected platform binaries
     swarma-user-manager      v0 accounts; v1 egress adapter
-    swarma-user-launcher     v0 one-shot launch; SH2+ ticket redemption gated by I4
-    swarma-dispatcher        v0 command; v1 daemon
+    swarma-user-launcher     v0 one-shot launch; dispatcher caller only
+    swarma-dispatcher        Unix-socket service from its first slice
     swarma-credential-broker v0 broker daemon / CLI
     swarma-session-host      SH2+ service-account host (activation gated)
     swarma-session-runner    SH2+ agent-account runner (activation gated)
-  etc/                       root 0755: user-manager.json (policy, ranges, archive), approved-executors.json
+  etc/                       root 0755: user-manager.json (policy, ranges, metadata retention), approved-executors.json
   lib/user-manager/                root: ledger.json (0644), receipts/ (0644 files), applied-state/ (0644), journal/ and lock (0700)
   run/                       service socket directories, 0755
     credential-broker/      v0
-    dispatcher/             v1
+    dispatcher/             first dispatcher slice
     session-host/           SH2+ (activation gated)
   services/<account>/        homes of service accounts, 0700
   workers/<account>/         homes of agent accounts, 0700 (work/, tmp/ and harness state inside)
-  quarantine/                root 0700: homes moved here at retirement
-  archive/                   root 0700: secret-filtered retired homes; archive files root 0600
+  quarantine/                root 0700: homes moved here for retirement deletion
+  archive/                   root 0700: closed-schema service-generated metadata exports; files root 0600
 ```
 
 The root is chosen at installation (for example on a separate volume); every path below is relative to it.
 
-These phases identify each component's platform placement, not a shared release number. SH1 extraction of the session host does not activate its SH2+ service-account layout. Companion components own their binaries and socket contracts; the helper/launcher installer scope remains §11.
+These phases identify each component's platform placement, not a shared release number. The dispatcher is an unprivileged Unix-socket service from its first slice, using the broker's connection/framing rules; its service entry point does not use stdin command requests. It still invokes the helper and launcher through sudo as their root-helper caller. SH1 extraction of the session host does not activate its SH2+ service-account layout. Companion components own their binaries and socket contracts; the helper/launcher installer scope remains §11.
 
 ### 4.1 Names and identifiers
 
@@ -161,61 +165,50 @@ Qualification verifies the result on each OS: authentication disabled, no elevat
 Figure [M-UM2: provision, retire and recovery](../diagrams/provision-retire-recovery.puml) shows forward recovery, the quiescence gate and egress cleanup last.
 
 ```
-args:   { generation: "g-0193", home: "archive" | "delete" }
-result: { username, generation, state: "removed", archive?: path }
+args:   { generation: "g-0193" }
+result: { username, generation, state: "removed" }
 ```
 
 1. Persist `retiring` (commit point). The launcher refuses new starts for the generation from now on.
 2. Ask the broker to end the generation's binding where one exists (the dispatcher normally unbinds first; the broker also refuses any retiring generation on its own, broker §4.2).
-3. Stop the account's per-user service domain where the OS has one, terminate every process of the UID and verify that none remain for a quiet period (`processes_remain` leaves the account in `retiring` for a later retry).
+3. Stop the account's per-user service domain where the OS has one, terminate every process of the UID and verify that none remain for a quiet period (`processes_remain` leaves the account in `retiring` for a later retry). Failed, partial or unknown process observations do not establish absence and also keep the account `retiring`.
 4. (v1) Keep the account's egress denial in place until step 6.
-5. Move the home into `quarantine/` on the same file system, destroy declared keys before the walk, then archive or delete it with a descriptor-relative walk (§6) according to §4.4.1. Remove the account's files in the system temporary directories and its per-user temporary area.
+5. Move the home into `quarantine/` on the same file system, destroy declared keys before the walk, then delete the home with a descriptor-relative walk (§6) according to §4.4.1. Remove the account's files in the system temporary directories and its per-user temporary area.
 6. Remove the account and group, then the firewall rules, and persist `removed`.
 
 Account retirement does not revoke an agent identity. For a one-shot worker, the dispatcher performs identity revocation as a **separate operation after account retirement**, only for identities it registered with a recorded one-shot flag. For standing agents (including orchestrators and fixed team roles), retirement leaves the identity intact; only the operator may revoke it, with a signed record (D-IDENTITY). Binding cleanup, account removal and identity revocation are distinct operations.
 
-#### 4.4.1 Archive policy
+#### 4.4.1 Retirement deletion and metadata export
 
-Figure [M-UM3: receipt evidence and archive fate](../diagrams/receipt-archive-states.puml) shows key destruction, mandatory secret exclusion and classification before archive admission, archive/delete, oversize deletion and retention sweep; it preserves the unresolved `keep` decision below.
+Figure [M-UM3: receipt evidence and retirement fate](../diagrams/receipt-archive-states.puml) shows declared-key cleanup, home deletion and metadata retention. The accepted owner decision of 2026-10-12 (F-1) makes home deletion the ordinary retirement path; `user.retire` has no archive/delete/keep selector.
 
-The `archive` block of `etc/user-manager.json`:
-
-```json
-"archive": {
-  "default_on_retire": "archive",
-  "dir": "/opt/swarma/archive",
-  "format": "tar.zst",
-  "retention": { "max_age": "7d", "max_total": "20GiB", "max_per_archive": "2GiB" },
-  "exclude": ["**/node_modules", "**/.cache", "**/DerivedData", "**/target", "**/.build", "**/go-build"]
-}
-```
-
-- `user.retire { home: "archive" | "delete" }` overrides the configured default. The default is `archive`; the retention values above are configurable policy defaults, not immutable platform limits.
-- **Secrets MUST never reach a retirement archive.** The helper enforces a mandatory, non-overridable secret exclusion class covering private keys (including an orchestrator's dispatcher caller key), harness credential files, SSH secret material, tokens and any copies or files containing credential material. The configured `exclude` list adds exclusions, including build caches; it MUST NOT remove, narrow or override the mandatory class. Neither a caller's home choice nor retention policy bypasses it.
-- **Declared keys are destroyed before the walk.** After verified quiescence and quarantine, under the shared lock and journal, the helper MUST destroy key material at every declared key path through trusted descriptors without following links, before any archive/delete walk. Recovery MUST establish successful destruction or confirmed prior absence before continuing; a failed or unknown destruction result leaves the generation `retiring` and MUST NOT produce an archive. The dispatcher defines the caller key's role and generation in dispatcher §§3.3, 5.2, but not its exact home-relative path; the trusted path declarations and their format remain unpublished (§14, question 6). No recursive search is a substitute for this prerequisite.
-- **Archive admission fails closed.** Only objects positively classified as non-secret may enter the archive, including their content, names and link metadata. A file or other object that cannot be classified, including an unreadable, failed or partial classification, MUST be excluded and deleted rather than archived. Filename patterns alone do not establish non-secret content. Failure to delete secret or unclassified material leaves retirement pending without publishing an archive. Apply the same rules before measuring `max_per_archive`; links may be stored as links only after classification, and are never followed (§6). The classification contract and source of declarations remain publication work (§14, question 6).
-- The retirement audit line MUST record the secret-exclusion decision, declared-key destruction outcome, secret and unclassified deletions, and archive/delete outcome, including failure or unknown results, without recording secret contents. These are audit requirements, not new wire members; the audit encoding remains unpublished (§14, question 6).
-- **OWNER DECISION NEEDED — unified retirement fate set (contract P7):** (a) admit `keep` (no expiry) as an operator-only request value, aligning §4.4 and the policy with `keep_requires: "operator"`; or (b) remove `keep` from the policy and retain archive/delete only. The earlier operator-only keep policy did not add it to the closed request schema. Until the owner chooses, `keep` is not admitted and its policy setting is not active. Neither option extends dispatcher or installer authority.
-- The archive root remains root-owned mode 0700. An archive is named `<account>-<generation>-<date>.tar.zst`, owned by root, mode 0600; only positively non-secret links are archived as links (§6).
-- A home larger than `max_per_archive` after exclusions is deleted and the audit log says so.
-- `archive.sweep` (at every retirement and from a daily root timer) removes archives older than `max_age`, then the oldest ones until the total is under `max_total`.
+- **Declared keys are destroyed before the walk.** After verified quiescence and quarantine, under the shared lock and journal, the helper MUST destroy key material at every declared key path through trusted descriptors without following links, before the deletion walk. Recovery MUST establish successful destruction or confirmed prior absence before continuing. A failed or unknown destruction result leaves the generation `retiring`. The dispatcher defines the caller key's role and generation in dispatcher §§3.3, 5.2; trusted home-relative path declarations and their format remain unpublished (§14, question 6). No recursive search is a substitute for this prerequisite.
+- **Delete the home.** The descriptor-relative walk deletes all home content, names and links, unlinking links without following them (§6). Successful deletion or confirmed prior absence is required before retirement can reach `removed`. Failed, partial or unknown deletion keeps the generation `retiring` and recovery resumes forward; unreadability is never absence. There is no positive classification of arbitrary agent-owned material.
+- **Only a service-generated metadata export remains.** The retirement export MUST use a closed schema with explicit service provenance checks. It MUST contain no agent-controlled strings, names, links or bodies; account names and labels from caller input are not exportable. It is generated from trusted service records, never by scanning or copying the home. The concrete schema, provenance checks and audit encoding are unpublished (§14, question 6), and export publication stays disabled until they are published and qualified. Unknown provenance or schema failure prevents export publication. Export absence does not excuse incomplete home deletion.
+- Code and results follow their separate git/acceptance and confidentiality policy. Git acceptance does not establish that content is secret-free, and those artifacts and free-text logs do not inherit the metadata export's confidentiality claim.
+- **Keeping a home is a separate explicit operator operation. Its confidentiality is not guaranteed.** This is not a `user.retire` option and grants no authority to a dispatcher or installer. Its operation format and ordering against retirement would need publication (§14, question 1); until then it is not admitted. There is no automatic retention of an arbitrary home.
+- The existing `archive/` directory and `archive.sweep` name now refer only to metadata exports. The directory remains root-owned mode 0700 and export files root-owned mode 0600. The existing `archive` configuration block retains its directory and `retention.max_age` / `retention.max_total` policy; the previous home default, tar format, exclusions and per-home archive bound are removed. The sweep removes metadata exports older than `max_age`, then the oldest until the total is under `max_total`, at every retirement and from a daily root timer. Sweep never removes ledger, effect or tombstone evidence whose retention obligation is still live (§4.6), and never retains or classifies a home. Concrete export naming and size limits would need publication (§14, question 6).
+- The retirement audit MUST record verified quiescence, declared-key destruction, home/temporary-file deletion and metadata export outcomes, including failed or unknown results, without secret contents. These are audit requirements, not new wire members (§14, question 6).
 
 ### 4.5 `user.list` and the ledger
 
-The ledger is a root-owned, world-readable file with one record per generation: `{ generation, username, uid, gid, kind, label, state, created_at, created_by, retired_at? }`. It contains no secrets. It is replaced atomically (temporary file, flush, rename, directory flush) in a root-owned directory. Other components (the broker, the launcher) read it directly; `user.list` returns the same records. Readability is not authority.
+The ledger is a root-owned, world-readable file with one record per generation: `{ generation, username, uid, gid, kind, label, state, created_at, created_by, retired_at? }`. It contains no secrets. It is replaced atomically (temporary file, flush, rename, directory flush) in a root-owned directory. Other components (the broker, the launcher) read it directly; `user.list` returns the same records. Readability is not authority. The ledger alone does not establish whether an effect was recorded: `effect.observe` consults the receiver-owned caller/effect journal mapping under the shared lock (§4.6), never infers absence from a missing reusable UID or label.
 
 ### 4.6 Lock, journal and idempotency
 
 Figure [M-UM2: provision, retire and recovery](../diagrams/provision-retire-recovery.puml) distinguishes creation rollback from retirement recovery and effect replay.
 
 - One durable lock (an exclusive lock on a root-owned file) serialises every operation of both binaries, including recovery and allocation.
-- Every operation writes generation-scoped journal records of planned and completed steps before acting. Recovery runs first in every invocation and compares the actual operating-system objects with the journal before each action: an interrupted creation is rolled back, an interrupted retirement is resumed.
-- `request_id` is scoped to the caller's principal. A repeated `(caller, request_id)` with the same operation and canonical arguments returns the recorded result together with the target's **current** state, so an old success never looks like a live account; different arguments are refused (`request_id_conflict`).
+- Every mutating operation writes caller/effect- and generation-scoped journal records of planned and completed steps before acting. Recovery runs first in every invocation and compares the actual operating-system objects with the journal before each action: an interrupted creation is rolled back, an interrupted retirement is resumed.
+- `request_id` is scoped to the caller's principal. A repeated mutating `(caller, request_id)` with the same operation and canonical arguments returns the recorded result together with the target's **current** state, so an old success never looks like a live account; different arguments are refused (`request_id_conflict`).
+- `effect.observe` reads the caller/effect mapping, canonical-argument digest, recorded result, rollback/removal evidence and current target state under the same lock as mutation and recovery. Observation is read-only: receiver-owned recovery may resolve existing journal work, but observation never creates, relaunches or stops a replacement effect. Missing, partial, failed or unreadable journal/target reads cannot establish `not_recorded`; incompatible evidence is `contradictory`, unavailable evidence is `unavailable`.
+- Retain effect identity, canonical-argument digest, result/current-state linkage and rollback/removal tombstones for the full retry/reconciliation admission lifetime. Evidence may be discarded only when the corresponding original identities are permanently inadmissible. Expired or lost results/evidence yield `unavailable`, never `not_recorded`; neither a metadata sweep nor a ledger entry substitutes for that evidence. `not_recorded` requires complete authoritative coverage of the original caller/effect and its admission interval. The concrete retention bounds, permanent-inadmissibility rule and coverage proof would need publication before activation (§14, question 8); no retention duration or freshness field is invented here.
+- A lost launch reply or failure after the root start receipt is resolved through the same effect ID and receipt. `recorded` includes the current execution evidence, not a readiness assertion. Unknown process/receipt outcomes retain the claim until reconciliation and never permit a second launch (§§4.7, 7).
 - Every operation appends one line to a root-owned audit log: time, caller, operation, arguments, result.
 
 ### 4.7 `exec.stop`
 
-Figures [M-UM2: launch and authorised stop](../diagrams/launch.puml) and [M-UM3: receipt evidence and archive fate](../diagrams/receipt-archive-states.puml) distinguish a start receipt from confirmed process absence.
+Figures [M-UM2: launch and authorised stop](../diagrams/launch.puml) and [M-UM3: receipt evidence and retirement fate](../diagrams/receipt-archive-states.puml) distinguish a start receipt from confirmed process absence.
 
 ```
 args:   { generation: "g-0193", execution_id: "EX-…", grace_seconds: 10 }
@@ -228,7 +221,7 @@ Allowed to the dispatcher for generations it created. Under the shared lock, the
 
 ## 5. Cross-component reconciliation
 
-The root caller's `request_id` correlates one caller-scoped dispatcher request. It is distinct from each downstream effect's idempotency key. The dispatcher derives a separate effect ID for every create, bind, launch, stop, unbind and retire operation: the first 32 hexadecimal characters of SHA-256 over `swarma-dispatcher effect/1` plus CCJ-1 `{caller principal, request_id, record id, component, operation, attempt}` (dispatcher §4.5; no newline is added to this formula).
+The dispatcher caller's `request_id` correlates one caller-scoped dispatcher request. It is distinct from each downstream effect's idempotency key. The dispatcher derives a separate effect ID for every create, bind, launch, stop, unbind and retire operation: the first 32 hexadecimal characters of SHA-256 over `swarma-dispatcher effect/1` plus CCJ-1 `{caller principal, request_id, record id, component, operation, attempt}` (dispatcher §4.5; no newline is added to this formula).
 
 | Effect | Receiver | Received `request_id` |
 |---|---|---|
@@ -239,7 +232,9 @@ The root caller's `request_id` correlates one caller-scoped dispatcher request. 
 | `unbind` | Broker | Unbind effect ID |
 | `user.retire` | Helper | Retire effect ID |
 
-Retries of the same effect reuse its ID; different operations MUST NOT reuse one ID. After a failure between components, the dispatcher repeats the relevant effect IDs, each receiver returns its recorded result under its own idempotency contract, and the dispatcher performs the missing effect or retires the generation. The helper also returns the target's current state (§4.6). Root correlation stays in the dispatcher's effect table, not in an invented extra member of the closed helper/launcher schemas.
+Retries of the same effect reuse its ID; different operations MUST NOT reuse one ID. After a failure between components, the dispatcher observes the original effect IDs at their receivers before acting. Completed mutation replay still returns its recorded result under the receiver idempotency contract; authorised same-effect retries preserve the ID and canonical arguments. Observation alone never authorises a new create or replacement execution. The helper also returns the target's current state (§4.6). For R-OBS, the dispatcher maps `recorded` to present or absent according to the current target state; `rolled_back` and `not_recorded` to known absent for that effect only (never permission for an automatic new create); `pending` and `unavailable` to unknown; and `contradictory` to contradictory. Broker bind/unbind observation and removal/tombstone retention belong to the broker's `effect.observe` contract, not the helper ledger.
+
+Root correlation stays in the dispatcher's effect table, not in an invented extra member of the closed helper/launcher schemas.
 
 | Identifier | Meaning |
 |---|---|
@@ -261,7 +256,7 @@ Figure [M-UM4: storage layout and owners](../diagrams/storage-layout.puml) maps 
 - Control paths (configuration, ledger, journal, audit, quarantine, archive, the homes' roots) are root-owned directories that are not writable by others; a control path that is a symbolic link refuses (`path_is_link`).
 - All operations work relative to trusted directory descriptors and never follow links: on Linux through `openat2` with `RESOLVE_BENEATH` and `RESOLVE_NO_SYMLINKS`; on macOS through a per-component `openat` walk with `O_NOFOLLOW` (`O_NOFOLLOW_ANY` where available). Every opened object is checked with `fstat` for type, owner and device where it matters.
 - Homes are created with `mkdirat`, `fchown` and `fchmod` on the descriptor. The helper never runs a recursive `chown` over content an agent controls.
-- Inside a home, symbolic links are ordinary objects: archiving records positively non-secret links as links (§4.4.1) and deletion unlinks them; neither follows them. A home therefore never becomes unremovable because it contains links.
+- Inside a home, symbolic links are ordinary objects: deletion unlinks them without following them (§4.4.1). Metadata export never copies home links. A home therefore never becomes unremovable because it contains links.
 - Destructive walks start only after the account is quiescent (§4.4) and the home has been moved into quarantine, so no process of the account can swap a directory during the walk.
 
 ## 7. The launcher (`swarma-user-launcher`)
@@ -270,7 +265,7 @@ Figure [M-UM2: launch and authorised stop](../diagrams/launch.puml) shows the ro
 
 The launcher is the narrow transition from a dispatcher into an agent account that the platform design calls for: it starts one approved executor, and nothing else, under one active agent generation.
 
-**SH2+ only; disabled until gate I4 is published (R1).** The dispatcher issues a launch ticket; an authenticated session host presents it to this module's launcher binary, `swarma-user-launcher`, which redeems it once under the module's shared lock and journal. Redemption is journaled atomically with the launch intent and receipt; a lost reply is resolved through the same effect ID and receipt, never a second start (session-host §3.3). The ticket signature, schema, canonical bytes, host-role policy and cancel-versus-redemption interlock remain unpublished (§14, question 3). The current v0/v1 request and caller policy do not admit a session host; this paragraph does not extend either closed schema or enable the backend.
+**Only the dispatcher invokes the launcher (F-4, R-START).** A session host asks the dispatcher through `host_start` in `dispatch-op/1`; it never invokes either privileged binary. The dispatcher owns the durable **host admission permit**, bound to `(logical_session_id, execution_id, controller_epoch, op_id)`, and uses its existing claim, effect and root-receipt path for the approved agent-side runner. A fence change withdraws the permit or sends it to reconciliation. Cancellation before the call prevents it; an ambiguous call is resolved through the same effect and receipt, with a stop if required and no second launch. The runner opens a fresh authenticated channel to the host; current-epoch registration and readiness precede delivery. Host failure keeps the claim and delivery fence closed until reconciliation. Controller-only re-adoption preserves the execution ID; actual replacement uses a new one. The joint I4 contract for host authentication, durable permit/fence/crash ordering and readiness would need publication and qualification (§14, question 3); SH2+ activation remains gated. These dispatcher/session-host values add no members to `launch-op/1`. There is no helper host role, host sudo authority, launch ticket or redemption journal.
 
 ```
 swarma-user-manager launch-op/1
@@ -284,14 +279,18 @@ swarma-user-manager launch-op/1
   plan:         base64 (encoded ≤ 64 KiB; decoded ≤ 48 KiB) }  // delivered on descriptor 3; request ≤ 80 KiB
 ```
 
-1. Under the shared lock, read the ledger: the generation is `active`, of kind agent, and created by the calling dispatcher (`generation_not_active`, `target_not_owned`).
-2. Resolve `executor` in the root-owned approved list to an absolute path in a root-owned directory and a SHA-256 digest; open the file without following links and verify the digest (`executor_not_approved`, `executable_digest_mismatch`).
-3. Use the agent's home as the working directory, opened without following links; the executor prepares `work/` and `tmp/` inside it under the agent's own UID.
-4. Close every descriptor above 2, then create a pipe, write `plan` into it and place its read end at descriptor 3. Standard input, output and error are the caller's (its pipes or terminal); no other descriptor crosses the transition.
-5. Build the environment from a fixed set (`HOME`, `USER`, `LOGNAME`, `PATH`, `LANG`, `TMPDIR` inside the home); nothing is inherited.
-6. Refuse if a start receipt for this `execution_id` already exists (`execution_already_started`); otherwise start a new session (`setsid`) so the execution is one process session, then, **while still root and before the privilege drop**, write the atomic, root-owned **start receipt** `lib/user-manager/receipts/<generation>/<execution_id>.json` (`{ execution_id, epoch, pid, start_time, boot_id, session_id }`, mode 0644).
-7. Set the supplementary groups to none, then the GID, then the UID (real, effective and saved), and verify that root cannot be regained (`privilege_drop_failed`).
-8. Exec the verified executable (on Linux by descriptor with `execveat`; on macOS by its path in the root-owned directory).
+This section owns the single launcher descriptor-lifecycle contract (R-FD3); the agent launcher's §10.1 references it. The required order is:
+
+1. Scrub all untrusted inherited descriptors above caller-owned 0–2 **before** creating trusted internal handles. No service or broker connection is inherited. Reserve read-only FD3 for the plan without clobbering any internal lock, executable or directory handle.
+2. Acquire the shared generation lock (§4.6), recover first and read the ledger: the generation is `active`, of kind agent, and created by the calling dispatcher (`generation_not_active`, `target_not_owned`). Keep this lock through the root receipt and the **completed, verified UID/GID transition** in step 7. Retirement and stop cannot interleave while the launcher is still root.
+3. Resolve `executor` in the root-owned approved list to an absolute path in a root-owned directory and a SHA-256 digest; open it without following links and verify the digest (`executor_not_approved`, `executable_digest_mismatch`). Keep the verified executable handle until the kernel exec operation; initial descriptor scrubbing must not close it. Open the agent home without following links and use it as cwd; the executor later prepares `work/` and `tmp/` under the agent UID. Close the directory handle after its last use.
+4. Completely stage the admitted decoded plan as **bounded, immutable bytes on read-only FD3**, preserving the admitted digest and the 48 KiB decoded / 80 KiB request bounds (§2). The plan must be fully readable before the executor starts and immutable to the agent. Staging and the entire pre-exec path MUST be bounded, including interrupted staging and cleanup while the generation lock is held. The per-platform mechanism and bounds would need publication (§14, question 7). A pipe is allowed only with a published and qualified capacity/feeder/deadline/cleanup order that never waits for a reader unable to start; writing the maximum plan into an unqualified pipe before exec is not an admitted mechanism. There is no path/stdin/network fallback or arbitrary caller argv.
+5. Build the environment from a fixed set (`HOME`, `USER`, `LOGNAME`, `PATH`, `LANG`, `TMPDIR` inside the home); nothing is inherited. Standard input, output and error remain the caller's pipes or terminal.
+6. Refuse if a start receipt for this `execution_id` already exists (`execution_already_started`); otherwise start a new session (`setsid`) and, **while still root and holding the generation lock**, write the atomic root-owned **start receipt** `lib/user-manager/receipts/<generation>/<execution_id>.json` (`{ execution_id, epoch, pid, start_time, boot_id, session_id }`, mode 0644). Close receipt/journal handles at their last use without releasing generation exclusion early.
+7. Set supplementary groups to none, then the GID, then the UID (real, effective and saved), and verify that root cannot be regained (`privilege_drop_failed`). Only once the transition has completed and this process is the receipt-matching agent execution may the launcher release and close the generation lock. Failure after receipt persistence retains that evidence for same-effect reconciliation, even if exec never occurs.
+8. Exec the verified executable (Linux by the retained descriptor with `execveat`; macOS by its path in the protected root-owned directory). Retain the verified handle through exec; internal handles close at their last safe use or through platform-qualified close-on-exec. The executor receives **only 0–2 and read-only FD3**, with no lock, verified-executable, directory, receipt, journal, service, broker or root handle. On every failure, including staging, receipt/drop and exec failure, release all internal handles and staging resources while preserving durable effect/receipt evidence; a failed or unknown cleanup/process observation never proves absence or authorises another start. The concrete exec/close-on-exec behavior is part of the platform qualification gate (§§12, 14).
+
+Executor activation requires joint publication and platform qualification of the selected FD3 mechanism and every R-FD3 row in §12.
 
 The execution's lifetime belongs to the dispatcher: it stops an execution only through `exec.stop` (§4.7). sudo may or may not remain a parent, depending on its policy, and is never relied on to relay signals (it cannot forward SIGKILL). The executor is trusted platform code: it reads the plan, resolves the protected credential binding, obtains its lease from the broker on a fresh connection and execs the harness (broker §12.2). Arbitrary `sudo -u` or a general command runner is never a substitute for the launcher.
 
@@ -325,13 +324,13 @@ In the platform design the helper is a handler process that independently limits
 
 | Caller | Operations | Then |
 |---|---|---|
-| swarma-dispatcher (service account `swarma-dispatcher`; Curator's `agent-user` is its client) | `user.create {agent}`, `user.retire`, `exec.stop`, `fw.apply`, `fw.remove`, `launch.start` | binds the generation in the broker before `launch.start`; unbinds before `user.retire` |
+| swarma-dispatcher (service account `swarma-dispatcher`; Curator's `agent-user` is its client) | `user.create {agent}`, `user.retire`, `exec.stop`, `effect.observe`, `fw.apply`, `fw.remove`, `launch.start` | binds the generation in the broker before `launch.start`; unbinds before `user.retire` |
 | platform installer | `user.create {service}`, `user.retire {service}` | installs the broker and other services under those accounts |
 | broker | reads the ledger and the applied state | checks generations and network state before leasing |
 
 ## 11. Installation
 
-The installer places both binaries, the root-owned configuration (callers and roles, quotas, UID and GID ranges, home roots, quarantine and archive directories, the approved executor list with digests, proxy service accounts), the ledger, journal and audit directories, the two sudoers rules and, for v1, the parent firewall anchor. Uninstall refuses while managed accounts exist unless an operator forces it.
+The installer places both binaries, the root-owned configuration (callers and roles, quotas, UID and GID ranges, home roots, quarantine and archive directories, the approved executor list with digests, proxy service accounts), the ledger, journal and audit directories, the two sudoers rules (launcher rule for configured dispatchers only) and, for v1, the parent firewall anchor. Uninstall refuses while managed accounts exist unless an operator forces it.
 
 ## 12. Qualification
 
@@ -342,29 +341,35 @@ Tests that create accounts, start processes under them or change firewall rules 
 - invocation: arguments refused (also through the sudoers rule), non-root and missing or malformed `SUDO_UID` refused, oversized, duplicate-key and trailing-document requests refused, a `grants` member refused;
 - concurrency: two creations racing for the same UID; a creation racing with a retirement;
 - crash recovery after every step: creation rolled back, retirement resumed;
-- files: a rename race during a walk, a control path replaced by a link, a home that contains links is archived and deleted without following them;
-- retirement archives: attempts to override mandatory secret exclusions, declared-key destruction before any walk, interrupted/failed destruction and recovery, credential copies, unknown/unreadable/partial classification deleted rather than archived, deletion failure preventing publication, secret-free audit evidence, archive root 0700 and files 0600;
+- files: a rename race during a walk, a control path replaced by a link, a home that contains links is deleted without following them;
+- retirement: verified quiescence and declared-key destruction before deletion, interrupted/failed/unknown destruction or deletion and forward recovery, credential copies in content/names/links all deleted, no automatic home archive, no archive/delete/keep selector in `user.retire`, and separate operator retention refused until published;
+- metadata export: reject agent-controlled strings/names/links/bodies and unknown provenance, validate the closed service-generated schema, no home reads as an export source, root directory 0700/files 0600, audit without secret contents, retention sweep affects metadata only and preserves live effect/tombstone evidence;
+- launcher authority: only configured dispatchers can invoke it; installer/operator/session-host direct starts refused, including through sudoers; cancelled claim prevents call, ambiguous host start resolves the same effect/receipt with no duplicate start;
 - launcher: unapproved executor, digest mismatch, retiring generation, another dispatcher's generation, `cwd` escaping the home, no descriptor above 3 reaches the executor, supplementary groups cleared, root cannot be regained;
+- R-FD3 qualification on each platform: concurrent launch/stop/retire, generation exclusion through receipt and completed UID/GID drop, verified executable handle retained through exec, maximum admitted plan completely staged and immutable on read-only FD3, interrupted staging and bounded cleanup, abort after receipt/drop, exec failure, and no internal handle in the executor (only 0–2 and FD3); a pipe alternative also requires qualified capacity/feeder/deadline/cleanup ordering;
+- R-OBS qualification: all six observation states, original-principal/operator access and refusal of other principals, digest/operation mismatch, serialization with mutation/recovery, crash before intent/during effects/after result persistence/before acknowledgement, rollback/removal tombstones, current state on old success, reconciliation after caller/grant expiry, expired/missing/unreadable/partial evidence `unavailable` rather than `not_recorded`, contradictory evidence, and no observation-induced create/relaunch;
 - v1: the support matrix for each OS release, including denied and allowed destinations, other accounts unaffected, rules present before the first launch and kept until retirement ends, applied state published and removed.
 
 ## 13. Versions
 
 | Version | Content |
 |---|---|
-| v0 | accounts (create, retire, list), policy, ledger, lock, journal, audit, the launcher; macOS and Linux |
+| v0 | accounts (create, retire, list), `effect.observe`, policy, ledger, lock, journal, audit, the launcher; macOS and Linux |
 | v1 | per-account firewall rules with the support matrix and applied state |
 | v2 | grant verification; parent read access to a child's home (ACL). Donor-side provisioning belongs to the separate component and its own specification (§1.1, D-DONOR-PROVISIONING), outside this module's versions. |
 
 ## 14. Open questions
 
-1. The unified retirement fate set: operator-only `keep`, or archive/delete only (§4.4.1). The archive default is already specified.
+1. The separate explicit operator home-retention operation would need its closed format, authorization, quiescence/key-cleanup and retirement ordering, recovery and disposal policy published. Its confidentiality is not guaranteed. This is publication work, not an unresolved archive/delete owner choice; ordinary retirement deletes (§4.4.1).
 2. The v2 signed-request domain/version and canonical bytes: component-specific format or versioned shared adapter (§9).
-3. SH2+ launch-ticket publication (contract I4): jointly publish the signature domain/version, schema, canonical bytes, host authentication/role policy and cancel-versus-redemption interlock, or leave the backend disabled. The dispatcher issues the ticket; an authenticated session host presents it to `swarma-user-launcher`, which redeems it once under the user manager's shared lock and journal (§7). The existing target payload is `{generation, execution_id, epoch, executor, plan_digest, expires_at}`; it is not a published wire grammar. D-WIRE-NAMES governs its eventual name but does not publish that grammar or grant the host launch authority. The current caller policy has no host role.
+3. SH2+ joint admission publication (I4, R-START) would need authenticated `host_start`, the durable dispatcher-owned host admission permit bound to `(logical_session_id, execution_id, controller_epoch, op_id)`, fence withdrawal/reconciliation, cancellation and same-effect/root-receipt crash ordering, runner channel authentication, current-epoch registration and readiness. The dispatcher alone invokes the launcher; this does not add helper/launcher wire fields or a host role (§7). Leave SH2+ disabled until jointly published and qualified.
 4. The restriction for traffic outside pf's TCP and UDP matching on macOS (§8).
 5. Windows (later).
-6. Publish the trusted home-relative declared-key path list and declaration format, including the orchestrator's dispatcher caller private key (dispatcher §§3.3, 5.2), and the mandatory secret-path catalog for harness credential files, SSH secret material and tokens; define the non-secret classification contract and secret-safe audit encoding (§4.4.1). These paths and formats are unpublished, so this spec assigns no new path, configuration member, wire field or refusal code. Until classification is established, unknown objects are deleted, never archived; mandatory exclusions and pre-walk key destruction already apply.
+6. Retirement publication would need trusted home-relative declared-key paths and their declaration format (including the orchestrator caller private key), the closed service-generated metadata export schema, explicit provenance validation, export naming and bounds, retention configuration encoding and audit encoding (§4.4.1). The arbitrary-home secret classifier/catalog question is removed. Key cleanup and home deletion already apply; export remains disabled until its narrow schema is published and qualified. No new path, configuration member, wire field or refusal code is assigned here.
+7. R-FD3 would need a concrete per-platform read-only descriptor mechanism for completely staged, bounded, immutable plan bytes; staging/pre-exec deadlines, resource cleanup, lock release after verified UID/GID drop and executable-handle/close-on-exec qualification (§7). A pipe would need capacity/feeder/deadline/cleanup ordering. Joint publication with agent launcher §10.1 and qualification of all §12 rows are required before activation.
+8. R-OBS would need exact `effect.observe` argument/result encoding, canonical-argument digest bytes, authenticated original-principal/operator access after mutation-grant expiry, concrete evidence/result/tombstone retention bounds and permanent-inadmissibility/authoritative-coverage rules (§§2, 4.5–4.6). Receipt and process-outcome reconciliation would need qualification without treating expiry as `not_recorded` or permitting a fresh effect. The six observation names and meanings are fixed; no refusal code or freshness field is invented.
 
-Home layout, UID/GID ranges and the archive default are specified in §§4.0–4.4.1. Parent read access to a child's home is absent by default; opt-in ACL delegation belongs to v2 (§13).
+Home layout and UID/GID ranges are specified in §§4.0–4.4.1; ordinary retirement deletes the home. Parent read access to a child's home is absent by default; opt-in ACL delegation belongs to v2 (§13).
 
 ## Appendix A. Error codes
 
@@ -372,7 +377,7 @@ Home layout, UID/GID ranges and the archive default are specified in §§4.0–4
 
 ## Appendix B. Diagrams
 
-These PlantUML sources describe draft v0.5. Current implementation status is **nothing implemented**; v0/v1/v2 annotations name design phases. SH1 details are outside this spec; SH2+ host-role/ticket activation stays open (§14). Each source links its defining section and visibly labels unspecified behavior rather than adding a contract. No rendered copies are maintained here.
+These PlantUML sources describe draft v0.6. Current implementation status is **nothing implemented**; v0/v1/v2 annotations name design phases. SH1 details are outside this spec; SH2+ joint admission remains gated (§14); only the dispatcher invokes the launcher. Each source links its defining section and visibly labels unspecified behavior rather than adding a contract. No rendered copies are maintained here.
 
 | Audit row | Figure | Defining sections |
 |---|---|---|
@@ -380,7 +385,7 @@ These PlantUML sources describe draft v0.5. Current implementation status is **n
 | M-UM2 | [Launch and authorised stop](../diagrams/launch.puml) | §§2–3, 4.6–4.7, 5, 7 |
 | M-UM2 | [Provision, retire and recovery](../diagrams/provision-retire-recovery.puml) | §§4.1–4.6, 5–6, 8 |
 | M-UM3 | [Account lifecycle](../diagrams/account-lifecycle.puml) | §§4.1–4.4, 4.6, 7–8 |
-| M-UM3 | [Receipt evidence and archive fate](../diagrams/receipt-archive-states.puml) | §§4.4–4.4.1, 4.6–4.7, 7 |
+| M-UM3 | [Receipt evidence and retirement fate](../diagrams/receipt-archive-states.puml) | §§4.4–4.4.1, 4.6–4.7, 7 |
 | M-UM4 | [Storage layout and owners](../diagrams/storage-layout.puml) | §§4.0, 4.3–4.6, 6–8, 11 |
 
 The row identifiers come from [the platform documentation audit, B4](https://github.com/relux-works/curator/blob/48789217/.research/261010_platform-docs-audit.md#b4-missing-or-insufficient-module-diagrams--exact-proposed-files). The current spec governs the figures; historical audit gaps do not authorise new behavior.

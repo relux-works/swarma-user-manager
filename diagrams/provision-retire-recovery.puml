@@ -6,15 +6,15 @@ participant "sudo\ntrusted root transition" as S
 participant "swarma-user-manager\nroot; one invocation; no arguments" as M
 database "Root-owned state\npolicy, ledger/cursor, lock, journal, audit\nv1 applied state" as R
 participant "OS account backend / kernel\nmacOS or Linux; root operations" as O
-database "Homes (account-owned)\nquarantine / archive (root-controlled)" as H
+database "Homes (account-owned)\nquarantine / metadata export (root-controlled)" as H
 participant "swarma-credential-broker\nservice UID; owns bindings / leases" as B
 participant "swarma-user-launcher\nroot; separate invocation" as L
 
 note over C,L
   [[../spec/helper.md#43-usercreate Defining spec §4.3 create]], [[../spec/helper.md#44-userretire §4.4 retire]],
-  [[../spec/helper.md#441-archive-policy §4.4.1 archive]], [[../spec/helper.md#46-lock-journal-and-idempotency §4.6 recovery]].
+  [[../spec/helper.md#441-retirement-deletion-and-metadata-export §4.4.1 deletion/export]], [[../spec/helper.md#46-lock-journal-and-idempotency §4.6 recovery]].
   Current: unimplemented; v0 accounts, v1 firewall, v2 grant verification (§13).
-  SH1 internals: unspecified in spec §4.6; SH2+ launcher ticket gate I4 remains closed (§§7, 14).
+  SH2+ joint admission gate I4 remains closed; dispatcher alone invokes the launcher (§§7, 14).
   Each helper request <= 16 KiB, one JSON document in 5 s (§2).
 end note
 
@@ -32,14 +32,36 @@ alt Interrupted creation
 else Interrupted retirement
   M -> M: resume forward from recorded steps (retirement sequence below)
 end
-M -> R: check (caller principal, request_id) and canonical operation/args
-break Same effect and same arguments
+M -> R: for mutations: check (caller principal, request_id) and canonical operation/args
+break Mutation: same effect and same arguments
   M --> C: recorded result + target CURRENT state; do not repeat effect
 end
-break Same ID, different arguments
+break Mutation: same ID, different arguments
   M --> C: request_id_conflict
 end
-note over M,R: Sequences below describe a new effect or pending recovery, not a duplicate replay.
+note over M,R
+  Mutation sequences below describe new effects or pending recovery.
+  effect.observe is a separate read-only invocation, outside the mutation replay/create path.
+end note
+
+== Read-only effect.observe (R-OBS, §§2, 4.5-4.6) ==
+C -> S: effect.observe helper-op/1; original effect request_id,\noperation and canonical-argument digest (exact encoding unpublished)
+S -> M: root; trusted SUDO_UID identifies observing caller
+M -> R: acquire same exclusive lock; recovery first; authenticate original caller or operator;\nserialize observation with receiver journal and recovery
+break Observing principal is neither original caller nor operator
+  M --> C: refuse observation; no private journal exposure
+end
+M -> R: read caller/effect mapping, result, target state and rollback/removal evidence
+M --> C: recorded (result + current state), pending, rolled_back,\nnot_recorded, unavailable or contradictory
+note over C,R
+  not_recorded requires complete authoritative coverage; expired/missing/unreadable evidence = unavailable.
+  Mutation grant expiry does not prevent authenticated original-principal observation.
+  Retain effect/removal evidence until original identities permanently inadmissible;
+  concrete bounds and authoritative-coverage rule unpublished (§14 question 8).
+  Observation never creates/relaunches; rolled_back/not_recorded do not authorise new create.
+  Dispatcher maps recorded by current state; rolled_back/not_recorded -> known absent for effect only;
+  pending/unavailable -> unknown; contradictory -> contradictory (§5).
+end note
 
 == user.create (§§4.1-4.3) ==
 M -> R: choose round-robin UID/GID; new NEVER-REUSED generation
@@ -71,7 +93,8 @@ note over C,M
   Dispatcher normally unbinds before retirement (§10).
   Create/bind/launch/stop/unbind/retire have distinct effect IDs;
   retry each effect with its same ID (§5).
-  home admits archive/delete only; operator keep unresolved (§4.4.1).
+  Retirement deletes the home; no archive/delete/keep selector (§4.4.1).
+  Separate explicit operator home retention: confidentiality not guaranteed; format unpublished.
 end note
 M -> R: journal steps; persist retiring FIRST (commit point)
 note over L,B: Launcher refuses new starts; broker refuses leases for retiring generation.
@@ -88,27 +111,20 @@ M -> R: journal declared-key destruction under shared lock
 M -> H: destroy declared keys through trusted descriptors BEFORE walk
 break Key destruction failed or unknown
   M -> R: audit outcome without secrets; remain retiring
-  M --> C: no archive; retirement pending
+  M --> C: retirement pending; no walk
 end
 note over M,H: Recovery confirms destruction or prior absence before continuing.\nDeclared paths / format unpublished (§14 question 6); never follow links.
-alt home = delete
-  M -> H: descriptor-relative delete; unlink symlinks without following
-else home = archive (configured default)
-  M -> H: enforce mandatory secret exclusion; config may only add exclusions
-  M -> H: classify content, names and link metadata;\ndelete secret and unknown/unreadable/partially classified objects
-  break Required deletion fails
-    M -> R: audit outcome without secrets; remain retiring
-    M --> C: no archive; retirement pending
-  end
-  M -> H: measure positively non-secret remainder only
-  alt Exceeds configured max_per_archive
-    M -> H: delete rather than archive
-    M -> R: audit oversize deletion
-  else Within bound
-    M -> H: secret-filtered tar.zst; root file 0600 in archive root 0700;\npositively non-secret links stored as links
-  end
+M -> H: descriptor-relative delete ALL home content/names/links;\nunlink symlinks without following them
+break Required deletion failed, partial or unknown
+  M -> R: audit outcome without secrets; remain retiring
+  M --> C: retirement pending; unreadability is not absence
 end
-M -> R: audit exclusion decision, key destruction, secret/unknown deletions\nand archive/delete outcome; no secret contents (§4.4.1)
+opt Closed metadata schema and provenance published and qualified (§14 question 6)
+  M -> R: generate metadata only from trusted service records; validate closed schema
+  M -> H: publish root 0600 metadata export in root 0700 archive directory
+  note over M,H: No agent-controlled strings/names/links/bodies; no copying/scanning home.\nUnknown provenance/schema failure prevents export publication (§4.4.1).
+end
+M -> R: audit quiescence, key destruction, deletion and export outcomes; no secrets
 M -> O: remove owned files from system and per-user temporary areas
 M -> O: remove account and group
 opt v1
@@ -116,12 +132,13 @@ opt v1
 end
 M -> R: persist removed (generation retained forever); result + audit
 note over M,H
-  archive.sweep at every retirement and from daily root timer: age, then oldest until total bound.
+  archive.sweep: metadata exports ONLY; age, then oldest until total bound.
+  At every retirement and from a daily root timer; preserve live effect/tombstone evidence.
   Installer/operator authority (§§3, 4.4.1).
-  Exact sweep position in retirement, timer process details and quarantine disposal
-  after successful archive: unspecified in spec §4.4.1.
+  Export schema/naming/bounds and audit encoding unpublished (§14 question 6).
+  Timer process details beyond root / sweep retry unspecified in spec §4.4.1.
 end note
-M --> C: removed; optional archive path
+M --> C: username, generation, state removed
 note over M,R: Crash after retiring commit: next invocation compares OS objects to journal\nand resumes forward; no rollback to active (§§4.2, 4.6).
 note over C,B
   Account retirement is separate from identity revocation (§4.4).
