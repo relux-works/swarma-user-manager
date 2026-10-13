@@ -1,0 +1,42 @@
+name: macOS capability qualification
+on:
+  workflow_dispatch:
+  push:
+    branches: [lab/macos-capability-probe]
+    paths:
+      - qualification/macos/**
+      - .github/workflows/macos-capability-probe.yml
+permissions:
+  contents: read
+jobs:
+  qualify:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-14, macos-15]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Validate harness and refusal tests
+        run: |
+          bash -n qualification/macos/capability-probe.sh
+          python3 -m unittest discover -s qualification/macos -p 'test_*.py' -v
+          clang -Wall -Wextra -Werror -fsyntax-only qualification/macos/native.c
+      - name: Qualify this hosted runner
+        env:
+          PROBE_RUNNER_LABEL: ${{ matrix.os }}
+        run: |
+          sudo env GITHUB_ACTIONS=true RUNNER_ENVIRONMENT="$RUNNER_ENVIRONMENT" RUNNER_OS="$RUNNER_OS" \
+            PROBE_RUNNER_LABEL="$PROBE_RUNNER_LABEL" PROBE_PYTHON="$(command -v python3)" \
+            GITHUB_RUN_ID="$GITHUB_RUN_ID" GITHUB_SHA="$GITHUB_SHA" \
+            bash qualification/macos/capability-probe.sh "$GITHUB_WORKSPACE/probe-output"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: macos-capabilities-${{ matrix.os }}-${{ github.run_id }}
+          path: probe-output/
+          if-no-files-found: error
+          retention-days: 30
