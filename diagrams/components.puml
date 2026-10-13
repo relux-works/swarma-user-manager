@@ -222,10 +222,17 @@ note bottom of Workspace
   import acknowledgement or explicit release, no silent pre-import expiry/stale evidence.
   Board accepts resource only; orchestrator imports signed C, exact-commit independent review,
   rework from C and signed fast-forward through existing board path (§7).
+  First review path: inert exact-C diffs/blobs, read-only by digest outside discovery roots.
+  Tree entry in a discovery-capable harness requires qualified strict-context adapter;
+  no automatic candidate instructions/hooks/MCP/permissions/skills/executable discovery.
+  Flagged-hunk acknowledgement records no prior load; acceptance is not control admission.
   Formats/caps/interlocks unpublished (§14 question 15); no general launcher copy operation.
 end note
 note bottom of Sampler
   CPU, memory, process count, home disk, network and refused connections incl. mail ports.
+  Session host owns service-retained producer-output debt across replacement/retirement,
+  aggregate budgets, bounded buffers/refusal and protected control/evidence reserve (§7).
+  Home telemetry/account ceilings do not satisfy that host storage contract.
   Watcher never kills without journal; node-wide stop manual only (§§8.2-8.3).
   Partial/unknown R-ALLSTOP is incident; all durable service parts required before scoped recovery.
   v0 R-WATCH stop/hold/status only; v1 freeze lifecycle remains open with S2 (§8.2).
@@ -239,6 +246,9 @@ note bottom of Agent
   Workplace loop stays at donor; no subscription binding/lease or web-service socket admission.
   Untrusted by default; operator trusted-circle admission enables donor-side opt-ins only.
   Zero egress, exec profile, transfer and review stay unchanged.
+  Host loop: trusted class AND local placement; remote workers stay workplaces.
+  Review needs explicit role grant + §3 eligibility, never circle/class alone;
+  local-only reviewer/requester-exclusion policies remain off and unchosen.
   R-SHARED: no shared services beside untrusted work; publish host capability matrix.
 end note
 note bottom of Web

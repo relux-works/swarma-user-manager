@@ -130,6 +130,15 @@ else Creation succeeds
   M --> C: username, UID/GID, home, generation, state active
 end
 
+note over C,L
+  OPEN REQUIREMENT (§14 question 23): stage A bridge/helper/dispatcher package must align
+  SSH ingress, relay/auxiliary UID processes, start/quiescence, export/replacement and reconnect
+  with a generation-bound creation fence; no mechanism selected, existing obligations unchanged.
+  Tool-write/egress fences alone cannot prevent SSH relay creation during account-wide absence.
+  Remote workers stay workplace placements after circle admission; host loops need
+  trusted class AND local placement; review-role admission is separate (§3).
+end note
+
 == R-TRANSFER: dispatcher workspace contract (§7) ==
 opt Dispatcher workspace round (separate invocations before ordinary retirement)
 C -> L: dispatcher launches approved swarma-workspace-materialize before work

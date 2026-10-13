@@ -28,6 +28,8 @@ note right of active
   Root launcher starts approved executor under agent or qualified workplace UID (§7).
   Workplace untrusted by default; operator act at admission may admit remote worker to trusted circle.
   That enables donor-side opt-ins only; all host boundaries stay, including transfer/review.
+  Remote workers stay workplace placements; host loop needs trusted class AND local placement.
+  Review-role grant and positive §3 eligibility are separate; circle/class alone is insufficient.
   Helper v1 zero egress, no proxy/loopback or web-service socket; relay/backend publication gate.
   swarma-rb-exec controls run under service principal, never workplace UID.
   Account-wide persistence denial qualifies per OS; idle UID has zero processes.

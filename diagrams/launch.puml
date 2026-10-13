@@ -153,6 +153,9 @@ note over D,E
   Revocation/compromise/ALLSTOP/maintenance/restore holds stay closed;
   invalid cleanup authority needs explicit operator export/recovery or per-act waiver decision.
   Bounded cleanup progress preserves resource/storage accounting and security fences.
+  Session host owns retained producer-output debt across replacement/retirement, aggregate
+  budgets, bounded buffers/refusal and protected control/evidence reserve (§7).
+  Account/home ceilings and watcher telemetry do not discharge that service-owned debt.
   Archive path/kind/mode/content check before work; import recomputes immutable repository B.
   Plan pins exporter digest/caps/repair budget; mode-only/type-only modify and deletion prior mode.
   Workplace tool-write/SSH ingress stays fenced through export; separately admitted repair only.
@@ -172,8 +175,14 @@ note over D,E
   One profile-bound listener per bound account generation; only its own proxy.port admitted.
   N15 account_generation/profile_ref/service_generation/served_policy_digest evidence (§8).
   Operator trusted-circle admission enables donor-side opt-ins only; host boundaries stay.
+  Host loop requires trusted class AND local placement; remote workers stay workplaces.
+  Review-role grant is separate; circle/class alone never grants review (§3).
 end note
 note over D,M
+  OPEN REQUIREMENT (§14 question 23): stage A bridge/helper/dispatcher package owns
+  joint SSH ingress, relay/auxiliary UID processes, start, quiescence, export/replacement
+  and reconnect lifetime with generation-bound creation fence; mechanism not selected.
+  Existing start/stop obligations remain; tool fence/egress deny alone cannot fence SSH creation.
   R-WATCH v0: journaled account stop + published hold + observer status; no phone promise.
   Generation/boot/interval-bound samples; stale/unknown never retargeted.
   Per-account freeze lifecycle remains v1/S2 open (§8.2).

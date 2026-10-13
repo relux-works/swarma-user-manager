@@ -5,7 +5,7 @@ Two minimal privileged components for agent systems. Each runs as root for one o
 - **swarma-user-manager** creates, lists and retires per-agent, per-service and qualified workplace OS accounts, owns the static UID-range default deny from v0, and (v1) narrows trusted agents to their bound model-provider proxy and workplaces to zero egress;
 - **swarma-user-launcher** starts one approved executor under one active agent or qualified workplace account, so that an unprivileged dispatcher can run an agent as that account without general `sudo` rights.
 
-**Status: design in progress.** Accepted architecture-review findings (2026-10-13) are reflected in draft v0.12 and its figures; publication/qualification gates remain open. Nothing is implemented yet. The specification is [`spec/helper.md`](spec/helper.md); diagrams are in [`diagrams/`](diagrams/).
+**Status: design in progress.** Accepted architecture-review findings (2026-10-13) are reflected in draft v0.13 and its figures; publication/qualification gates remain open. Nothing is implemented yet. The specification is [`spec/helper.md`](spec/helper.md); diagrams are in [`diagrams/`](diagrams/).
 
 ## Principles
 

@@ -156,10 +156,15 @@ note bottom of AgentHomes
   R-WATCH least-privilege sampler: CPU/memory/process/home/network/refused counters incl. mail.
   Generation/boot/interval-bound; v0 stop/hold/observer status, no phone/per-account freeze promise.
   v1 freeze lifecycle remains open with S2.
+  Host storage owns retained producer-output debt across replacement/retirement, aggregate
+  budgets, bounded buffers/refusal and protected control/evidence reserve (§7).
+  Account/home quotas and watcher counters do not account for those service-owned bytes.
   R-VERIFY builds/tests/code execution only off-host ephemeral secret-free runners.
   R-STANDING trusted local loops verify plan surfaces at every launch/restart/native resume.
   Workplace untrusted by default; operator trusted-circle admission only enables donor-side opt-ins.
   Host zero egress, exec profile, transfer and review stay; web-service sockets refuse workplaces.
+  Host loop needs trusted class AND local placement; remote workers stay workplaces.
+  Circle/class alone grants no review role; positive reviewer conditions in §3 apply.
   R-UNTRUSTED v0 refusal; v1 ceilings/exec/zero workplace egress/no local loop or subscription lease.
   R-SHARED no shared services beside untrusted work; platform services excluded from shared definition.
 end note
@@ -172,4 +177,5 @@ note bottom of Resources
   Local agents reach it only over Unix socket with peer-UID admission and grant; never TCP/workplace.
   Donor web service separate from harness/bridge; key never reaches project (§8).
 end note
+note "OPEN REQUIREMENT (§14 question 24): stage A helper/owner/docs package publishes readers/phases\nand actual metadata visibility, preserving root pre-drop ledger/receipt work and legitimate scoped consumers.\nWorld-readable layout has no required tenant exclusion; macOS path policy unpublished.\nNetwork binding policy / OS account databases remain visibility routes.\nOptional confidentiality hardening off and unchosen; blocks its own claim, not A automatically." as MetadataOpen
 @enduml
