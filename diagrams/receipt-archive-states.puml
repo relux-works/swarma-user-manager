@@ -48,8 +48,8 @@ end note
 state "Home fate after retiring commit and verified quiescence (§4.4.1)" as Retirement {
   state "Home in quarantine\nsame-filesystem move; root-controlled" as Quarantined
   state "Declared keys destroyed\nbefore deletion walk" as KeysDestroyed
-  state "Home deleted\nno agent content retained" as Deleted
-  [*] --> Quarantined : manager user.retire; account quiescent;\nR-TRANSFER export recorded or explicit operator waiver
+  state "Home deleted\nno home content retained here" as Deleted
+  [*] --> Quarantined : manager user.retire; account quiescent;\nR-TRANSFER complete-content receipt or explicit per-act operator waiver
   Quarantined --> Quarantined : key destruction failed/unknown\nno walk; remain retiring; audit
   Quarantined --> KeysDestroyed : destroy declared keys; journal under shared lock\nrecovery confirms destruction or prior absence
   KeysDestroyed --> KeysDestroyed : bounded batches yield lock; remaining/failed/unknown deletion\nretains retiring, UID/quota and pending effect; unreadable is not absent
@@ -62,8 +62,15 @@ note right of Quarantined
   Dependency recovery resumes same retirement effect in bounded batches (§4.6).
   Labels illustrate sequence, not new persisted ledger states.
   R-TRANSFER workspace export precedes retirement; dispatcher owns obligation.
-  Only confirmed UID absence + workplace write fence permits approved child-UID export.
-  Home deletion waits for recorded export or explicit direct-operator retirement waiver.
+  Each physical materialize/work/export has distinct claim/launch/stop/root receipt/absence.
+  Confirmed UID absence + workplace tool-write/SSH-ingress fences precede approved export.
+  Bounded original-admission expiry consent collects only; active generation, no hold bypass.
+  Immutable refusal retains obligation; new linked bounded repair needs current work authority.
+  Pending/unknown never discharges; standing discard off.
+  Home deletion waits for result + every blob digest/size-verified durable outside deletion
+  with journaled complete-content receipt or explicit per-act direct-operator retirement waiver.
+  Retained content: current-authenticated requester release, then authenticated import
+  acknowledgement/explicit release; retirement need not await import (§7).
   Workspace result is separate from retirement metadata; formats/interlocks unpublished (§14 question 15).
   Declared paths and audit encoding unpublished (§14 question 6).
   No arbitrary-home secret classifier; no archive/delete/keep selector.

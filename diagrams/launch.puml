@@ -145,8 +145,26 @@ note over D,E
   R-TRANSFER: approved swarma-workspace-materialize before work;
   swarma-workspace-export after confirmed UID absence and workplace write fence.
   Child UID / fixed environment; no general launcher copy operation.
+  Each materialize/work/export start has distinct execution claim, launch/stop effects,
+  root receipt and confirmed UID absence; round/obligation linkage durable (§§5, 7).
+  Cleanup after ordinary caller/allocation expiry requires bounded original-admission consent,
+  exact active generation/round/exporter/base/manifest/scope; no harness/lease/network/new work.
+  No retiring bypass, R-SESSION reuse or duplicate start after lost reply.
+  Revocation/compromise/ALLSTOP/maintenance/restore holds stay closed;
+  invalid cleanup authority needs explicit operator export/recovery or per-act waiver decision.
+  Bounded cleanup progress preserves resource/storage accounting and security fences.
+  Archive path/kind/mode/content check before work; import recomputes immutable repository B.
+  Plan pins exporter digest/caps/repair budget; mode-only/type-only modify and deletion prior mode.
+  Workplace tool-write/SSH ingress stays fenced through export; separately admitted repair only.
+  Immutable refusal retained; new linked repair turn/export needs current work authority and budget.
+  Interrupted/unknown stays unresolved; terminal replay never reruns, no partial success.
   Fresh standalone repository: no hooks/remotes/credential helpers; no linked cross-account worktree.
-  Export recorded BEFORE retirement or explicit operator waiver; dispatcher owns obligation.
+  Complete result + all blobs digest/size-verified and durable outside deletion;
+  journal complete-content receipt BEFORE retirement or explicit per-act operator waiver.
+  Missing/corrupt blobs/storage failure retain obligation; no digest-only discharge.
+  Retrieval requires current authenticated requester; retain content until authenticated
+  import acknowledgement or explicit release; retirement may precede import (§7).
+  Standing discard off; dispatcher owns obligation. Encoding/qualification gated (§14 question 15).
   OS profile blocks harness/agent binaries except admitted plan executor path.
   R-STANDING: trusted harness surfaces checked before launch/restart/native resume; drift refuses.
   R-VERIFY: builds/tests/worker-produced code only in secret-free off-host ephemeral runners.

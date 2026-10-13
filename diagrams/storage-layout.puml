@@ -28,6 +28,7 @@ component "swarma-user-launcher\nroot until groups/GID/UID drop" as L
 component "swarma-dispatcher\nservice account swarma-dispatcher" as D
 component "swarma-credential-broker\nits service UID; credential state owned by broker" as Broker
 component "curator-run -> harness\nagent UID; account-owned content" as Agent
+database "Admitted workspace-result + all-blob custody\noutside child home and retirement deletion path\nlocation/transport unpublished (§7)" as Content
 component "Kernel firewall\nv0 static UID-range rule; v1 per-account narrowing\nhelper-owned pf parent/account anchors or nftables table" as Firewall
 
 Installer --> Binaries : install protected binaries
@@ -44,7 +45,8 @@ M --> Applied : publish after successful v1 apply
 M --> OS : create / remove account and group
 M --> ServiceHomes : descriptor-relative create; fchown / fchmod
 M --> AgentHomes : descriptor-relative create; no recursive chown
-M --> Quarantine : only after verified quiescence and recorded workspace export\nor explicit operator waiver; dispatcher owns export obligation
+D --> Content : digest/size verify result + EVERY blob, durable complete-content receipt;\ncurrent-authenticated requester retrieval, bounded retention until authenticated import ack/authorized release
+M --> Quarantine : only after verified quiescence and complete-content discharge\nor explicit per-act operator waiver; dispatcher owns export obligation
 M --> Quarantine : declared keys destroyed BEFORE deletion; bounded batches delete ALL home objects; yield lock;\nfailed/unknown/incomplete keeps retiring and reservations
 M --> Archives : export from trusted service records ONLY (schema/provenance gate);\nsweep metadata age then total; preserve live effect/tombstone evidence
 M --> Firewall : v1 narrowing before launch; workplace ZERO egress;\naccount-rule cleanup after account/group; static range rule remains
@@ -110,7 +112,16 @@ note bottom of Ledger
   R-TRANSFER: cross-account repository private/standalone; no hooks/remotes/helpers.
   Approved workspace materialize before work / export after confirmed UID absence, child UID.
   Dispatcher relays/journals base archive, holds no repository; result only original requester.
-  Export obligation discharged by recorded export or explicit operator waiver before deletion.
+  Immutable B manifest: path/Git kind/mode/content; archive verified before work;
+  import independently recomputes repository B; mode/type-only modify, deletion prior mode.
+  Each physical start has distinct claim/launch/stop/receipt/absence and durable round linkage.
+  Bounded original-admission expiry consent collects only while active; no security-hold bypass.
+  Refusal immutable; same-workspace repair separately admitted with current authority/budget;
+  new linked effects, then tool-write/SSH fences and account-wide absence before re-export.
+  Complete result/all-blob custody outside deletion discharges, or explicit per-act waiver.
+  Digest-only/incomplete evidence retains obligation; standing discard off.
+  Home deletion need not await import; independently retained content requires authenticated
+  import acknowledgement or explicit release, never silent expiry/stale-signature retrieval.
   Formats/caps/retention/interlocks unpublished (§14 question 15).
 end note
 note bottom of Operator

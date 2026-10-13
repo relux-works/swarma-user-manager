@@ -58,8 +58,13 @@ note right of retiring
   Bounded cleanup batches yield shared lock; keep UID/quota reservation and pending evidence.
   Recovery validates shared accounting then requested dependencies, not full unrelated cleanup.
   Root controls quarantine and owns metadata exports; no-follow walks (§6).
-  R-TRANSFER: recorded workspace export before retirement or explicit operator waiver.
-  Missing/unknown export keeps deletion closed; dispatcher owns obligation.
+  R-TRANSFER: complete result + every blob digest/size-verified and durable outside deletion,
+  journaled complete-content receipt before retirement or explicit per-act operator waiver.
+  Digest-only/missing/corrupt/unknown evidence keeps deletion closed; dispatcher owns obligation.
+  Refusal immutable; bounded new linked repair needs current authority + separate admission.
+  Expiry cleanup needs bounded original-admission consent while active; no retiring bypass.
+  Security holds remain; standing discard off. Retained content awaits authenticated import
+  acknowledgement/authorized release; home retirement need not await import (§7).
   Declared keys destroyed before home deletion.
   Failed/unknown destruction or deletion keeps retiring; unreadable is not absent.
   Retirement metadata export never copies agent-controlled strings/names/links/bodies (§4.4.1).

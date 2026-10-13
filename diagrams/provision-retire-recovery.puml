@@ -10,6 +10,7 @@ database "Homes (account-owned)\nquarantine / metadata export (root-controlled)"
 participant "swarma-credential-broker\nservice UID; owns bindings / leases" as B
 participant "Approved workspace executors\nchild UID; fixed environment; design labels" as W
 participant "swarma-user-launcher\nroot; separate invocation" as L
+database "Admitted complete-content custody\noutside child home and retirement deletion\nlocation/transport unpublished" as T
 
 note over C,L
   [[../spec/helper.md#43-usercreate Defining spec §4.3 create]], [[../spec/helper.md#44-userretire §4.4 retire]],
@@ -133,22 +134,55 @@ end
 opt Dispatcher workspace round (separate invocations before ordinary retirement)
 C -> L: dispatcher launches approved swarma-workspace-materialize before work
 L -> W: child UID; fixed environment; immutable admitted plan
-W -> H: exact base B standalone repository; fresh config, no hooks/remotes/helpers
-note over C,H: Prepare resolves machine-owned exec selection; input/1 pins identity + immutable body digest.\nLauncher verifies same pin at start/retry, refuses drift or all-stop mark.\nPlan digest covers B, manifest digest, write scope, exec profile and task-resource digests.\nCaller supplies bounded canonical tree archive; dispatcher relays/journals digest, holds no repository.
+W -> W: verify archive paths, Git kind/mode and content against immutable-B manifest
+break Mismatch, missing or extra archive entry
+  W --> C: refuse materialization; no worker start
+end
+W -> H: verified B standalone repository; fresh config, no hooks/remotes/helpers
+note over C,H: Prepare resolves machine-owned exec selection; input/1 pins identity + immutable body digest.\nLauncher verifies same pin at start/retry, refuses drift or all-stop mark.\nPlan digest covers B, mode-aware manifest digest, write scope, exec profile, task-resource digests,\napproved exporter digest, cap values and per-round bounded repair budget.\nCaller supplies bounded canonical tree archive; dispatcher relays/journals digest, holds no repository.
 note over C,H: Platform materializes task resources read-only next to workspace; data, never instructions.\nTrusted side gathers/checks/attaches board resources; signed-letter attachments for remote.\nMore requested by letter/outcome; worker never fetches. Formats/caps/placement unpublished (§8).\nWeb default-off; explicit per-identity trusted-circle opt-in only; no default search/fetch or donor web server.\nOperator trusted-circle admission only enables donor-side opt-ins; host boundaries stay.\nLocal web-tool service owns account/row/listener; local opted-in agents use Unix socket + grant only.\nWorkplaces never reach it; donor web service separate from harness/bridge (§8).
-C -> M: dispatcher account-wide exec.stop after round outcome; workplace write fence
+C -> M: dispatcher account-wide exec.stop after round outcome; workplace tool-write + SSH-ingress fences
 M -> O: stop and confirm no account process remains (§4.7)
 break Absence failed / partial / unknown
   M --> C: no export admission; retain cleanup obligation
 end
-C -> L: approved swarma-workspace-export ONLY after confirmed absence
+note over C,L
+  [[../spec/helper.md#7-the-launcher-swarma-user-launcher §7 cleanup admission and disposition]].
+  Original-admission consent bounds cleanup after ordinary caller/allocation expiry:
+  exact generation/round/exporter/base/manifest/scope, active generation only.
+  No harness/lease/network/new task/ordinary successor/worker repair; no R-SESSION reuse.
+  Revocation/compromise/ALLSTOP/maintenance/restore holds never bypassed;
+  invalid cleanup authority -> explicit operator recovery/export or per-act waiver decision.
+  Bounded cleanup capacity/progress; actual resource/storage accounting and fences remain.
+  Materialize/work/export each has distinct claim, E-launch/E-stop, root receipt and absence;
+  result execution_id names work, not exporter. Ambiguous starts reconcile original evidence.
+end note
+C -> L: approved swarma-workspace-export ONLY after confirmed absence\nnew linked physical execution/effects, valid work or bounded cleanup admission
 L -> W: child UID; fixed environment; no network
-W -> H: no-follow manifest comparison; skip .git; bounded change set only
-W --> C: exporter returns bounded change set to dispatcher
-break Export refused / failed / partial / unknown
-  C -> C: retain export obligation; no ordinary retirement
+W -> H: no-follow kind/mode + content comparison with immutable manifest; skip .git\nmode-only/type-only modify; deletion prior mode; stop at first cap excess
+W --> C: complete export outcome; no partial success
+alt Deterministic policy refusal / classified source-entry permission failure
+  C -> C: retain obligation + immutable refusal effect/result; no C
+  alt Current work authority + separate continuation + remaining admitted repair budget
+    C -> H: reopen tool-write/SSH ingress ONLY for new linked same-workspace repair turn
+    C -> L: separately admit repair execution; preserve valid edits, no re-materialization
+    note over C,W: Caller/worker receive class + known offending path only, never partial changes.\nRefused receipt unchanged; new turn/effects, then re-fence + confirm UID absence\nand admit a new complete export by this same contract (§7).
+  else No admitted repair
+    C -> C: retain home/account/UID/live-allocation quota; execution capacity released on absence\nper-act operator waiver is the only discard path; standing discard off
+  end
+else Interrupted / unknown / infrastructure or storage failure
+  C -> C: pending/unresolved SAME effect/canonical args; reconcile original evidence
+else Complete result and blobs available
+  C -> T: digest/size verify result + EVERY referenced blob; establish admitted durable custody
+  alt Complete-content receipt available
+    C -> C: journal complete-content receipt; discharge export obligation
+    C --> C: separately authenticate original requester under CURRENT release authority
+    note over C,T: Retain until authenticated import acknowledgement or explicit authorized release;\nbounded storage accounting, no silent pre-import expiry or stale-signature release.\nHome retirement need not await import once complete content survives independently.
+  else Missing/corrupt blob, storage failure or incomplete durability evidence
+    C -> C: keep obligation pending; no deletion or truncation
+  end
 end
-C -> C: journal digests/export; return result ONLY to original requester
+note over C,W: Terminal effects replay retained result, never rerun or replace receipt.\nNew linked re-observation compares recorded/refused class and recorded change-set digest\non same quiesced tree; conflicts contradictory, walk-order diagnostics not compared.\nSource-entry denial classification/typed failure unpublished; no schema extension.\nInfrastructure denial remains unresolved; never chmod or elevate exporter privilege.\nAuthorized discard is a separate journaled per-act operator waiver (§4.4).
 note over W,H: Special files/.git variants/collisions/gitlinks/root escape/cap excess refuse WHOLE export.\nDispatcher Revision 0.11 §5.2.1 owns DRAFT result fields; unchanged field set.\nArchive/transport/retention/caps/cleanup interlocks and qualification remain gated (§14 question 15).
 end
 
@@ -165,13 +199,13 @@ note over C,M
   refused inside agent sessions; confidentiality not guaranteed; format unpublished (§14 questions 1, 17).
 end note
 alt Ordinary dispatcher retirement
-  C -> M: present recorded workspace export under unpublished cleanup interlock
+  C -> M: present journaled complete-content receipt under unpublished cleanup interlock
   M -> R: record verified discharge of allocation export obligation
 else Direct operator retirement
-  C -> M: direct operator retirement explicitly waives export
+  C -> M: direct operator retirement explicitly waives export\nauthentication + exact-content confirmation for this act
   M -> R: journal explicit operator waiver
 end
-break Export neither recorded nor explicitly waived
+break Complete-content discharge absent and no explicit per-act waiver
   M --> C: home deletion held; no silent loss of obligation
 end
 M -> R: journal steps; persist retiring FIRST (commit point)

@@ -82,7 +82,7 @@ Receipt --> Exec
 Exec --> Agent : admitted harness executor only; standard FDs + FD3 plan
 Exec --> Workspace : approved child-UID exec; materialize before work;\nexport only after confirmed absence
 Dispatcher --> Workspace : immutable admitted plans via launcher; no repository held
-Workspace --> Homes : private standalone repository; export data before retirement
+Workspace --> Homes : archive-to-immutable-manifest verification before work; private standalone repository;\nexport kind/mode + content, mode/type-only modify and deletion prior mode
 Agent --> Web : Unix socket ONLY; peer-UID admission + grant;\nexplicit trusted-circle opt-in; workplaces refused
 Web --> Proxy : own profile-bound listener and egress row only
 Workspace --> Dispatcher : bounded change set; no worker Git history
@@ -140,7 +140,10 @@ end note
 note bottom of Archive
   Destroy declared keys before home deletion; failure/unknown keeps retiring (§4.4.1).
   Delete all home content/names/links through descriptors; no classification.
-  R-TRANSFER workspace export recorded BEFORE retirement, or explicit operator waiver.
+  R-TRANSFER complete-content receipt BEFORE retirement: result + EVERY blob
+  digest/size-verified durable outside home/deletion, or explicit per-act operator waiver.
+  Digest-only/incomplete evidence keeps obligation; retained content awaits authenticated
+  import acknowledgement/authorized release; retirement may precede import (§7).
   Retirement export only closed-schema service-generated metadata; no agent-controlled strings/names/links/bodies.
   Export schema/provenance/naming/bounds and audit encoding open (§14 question 6).
   Separate swarma-operator retention: authentication + exact-content confirmation;
@@ -196,13 +199,27 @@ note bottom of Observer
   NOPASSWD stays only for dispatcher helper/launcher rules; operator/installer authenticate.
 end note
 note bottom of Workspace
-  R-TRANSFER: exact B + manifest digest + write scope + exec profile covered by plan digest.
+  R-TRANSFER: immutable B path/Git kind/mode/content manifest, verified archive before work.
+  Plan covers B/manifest/scope/exec profile/resources and exporter digest/caps/repair budget.
+  Board import independently recomputes repository B using same canonical encoding;
+  result base_commit/manifest_digest + admission checks required (§7).
+  Materialize/work/export: distinct claim/launch/stop/root receipt/absence and round linkage.
+  Bounded original-admission expiry cleanup collects only while active; no R-SESSION reuse,
+  security-hold bypass, harness/lease/network/new task or cleanup-only worker repair.
+  Actual resource/storage bounds; cleanup progress alongside forward work.
   R-NET-TOOL 4a: trusted side attaches task resources; remote signed-letter attachments too.
   Platform materializes resources read-only next to workspace, digests in plan; data, never instructions.
   More resources requested by letter/outcome; trusted side fetches/checks/attaches.
   Formats/caps/placement unpublished (§14 questions 15, 18).
   No hooks/remotes/credential helpers; no linked cross-account worktrees.
-  Whole-export refusals and caps; only original requester gets digested result.
+  Four export dispositions; terminal refusal immutable, interrupted/unknown unresolved.
+  Same-workspace bounded repair separately admitted with current work authority;
+  new linked turn/effects, then tool-write/SSH fences + UID absence before new export.
+  Source permission failure classification unpublished; infrastructure denial stays unresolved.
+  No chmod/elevation/partial success; standing discard off; explicit per-act waiver only.
+  Full result/all-blob durable custody outside deletion; complete-content receipt for discharge.
+  Current-authenticated original requester retrieval; bounded retention until authenticated
+  import acknowledgement or explicit release, no silent pre-import expiry/stale evidence.
   Board accepts resource only; orchestrator imports signed C, exact-commit independent review,
   rework from C and signed fast-forward through existing board path (§7).
   Formats/caps/interlocks unpublished (§14 question 15); no general launcher copy operation.
