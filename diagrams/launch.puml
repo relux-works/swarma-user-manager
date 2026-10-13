@@ -90,6 +90,7 @@ L -> L: after verified receipt-matching UID/GID transition: release and close ge
 L -> E: exec verified executor as uid 30412; retain executable handle through kernel exec\ninternal handles close at last use or qualified close-on-exec\nexecutor receives only 0-2 and read-only FD3
 note over L,E: Exec failure: release handles/staging resources; preserve receipt/effect evidence.\nUnknown outcome reconciles SAME effect; never launches twice (§§4.6, 7).
 E -> E: verify immutable caller-composed plan and digested PATH;\nresolve protected credential binding (no profile composition)
+note over D,E: Task resources read-only next to workspace, digests in plan; data, never instructions.\nTrusted side gathers/checks/attaches, including remote signed-letter attachments.\nMore requested by letter/outcome; worker never fetches; formats/caps unpublished (§8).\nWeb default-off; explicit per-identity trusted-circle opt-in only; no default search/fetch/donor web server.\nDefault donor loop reaches provider endpoints and our host; our side has no internet.\nLocal web-tool service owns account/row/listener; Unix socket + peer UID + grant only; workplaces refused.\nDonor web service separate from harness/bridge; key never reaches project (§8).
 E -> B: trusted harness executor only; fresh connection; lease.request (broker lease-at-launch)
 note over E,B: Lease refusal/recovery details unspecified in this spec §7; broker contract owns them.\nExecutor prepares work/ and tmp/ as agent UID, then execs harness; no profile composition.
 note over S, E: Dispatcher owns the execution lifetime; sudo is never a signal relay
@@ -147,6 +148,10 @@ note over D,E
   OS profile blocks harness/agent binaries except admitted plan executor path.
   R-STANDING: trusted harness surfaces checked before launch/restart/native resume; drift refuses.
   R-VERIFY: builds/tests/worker-produced code only in secret-free off-host ephemeral runners.
+  R-NETBIND: no direct/external-http-proxy binding for ANY platform account class.
+  One profile-bound listener per bound account generation; only its own proxy.port admitted.
+  N15 account_generation/profile_ref/service_generation/served_policy_digest evidence (§8).
+  Operator trusted-circle admission enables donor-side opt-ins only; host boundaries stay.
 end note
 note over D,M
   R-WATCH hard threshold requests freeze + journaled exec.stop for that one account only;

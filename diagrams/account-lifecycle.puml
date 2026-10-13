@@ -25,7 +25,9 @@ note left of creating
 end note
 note right of active
   Root launcher starts approved executor under agent or qualified workplace UID (§7).
-  Workplace always untrusted-class: helper v1 zero egress, no proxy/loopback; relay/backend publication gate.
+  Workplace untrusted by default; operator act at admission may admit remote worker to trusted circle.
+  That enables donor-side opt-ins only; all host boundaries stay, including transfer/review.
+  Helper v1 zero egress, no proxy/loopback or web-service socket; relay/backend publication gate.
   swarma-rb-exec controls run under service principal, never workplace UID.
   F-13 persistence denial qualifies per OS; idle UID has zero processes.
   swarma-dispatcher service UID owns execution lifetime.
@@ -37,6 +39,10 @@ note right of active
   Only configured installer or operator creates them; dispatcher cannot (§4.3).
   Operator SSH: operator device key only; forced operator command; no interactive shell.
   Narrow OS entry/sshd settings remain publication gates (§14 question 17).
+  R-NETBIND: no direct/external-http-proxy binding for ANY platform account class.
+  One profile-bound listener per bound account generation; only its own proxy.port admitted.
+  N15 account_generation/profile_ref/service_generation/served_policy_digest evidence (§8).
+  Web default-off; explicit trusted-circle opt-in only (§8).
   Refused launch/stop/fw.apply does not change account state.
 end note
 note right of retiring

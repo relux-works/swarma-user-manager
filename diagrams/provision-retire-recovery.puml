@@ -114,7 +114,7 @@ note over M,O: Agent/ordinary-service no-login shell; operator/observer qualifie
 M -> H: descriptor-relative empty home; account owner; mode 0700
 opt v1 enforced profile (MANDATORY for workplace)
   M -> O: denial + verified fw.apply applied state before activation / first launch
-  note over M,O: Workplace zero egress: no loopback/proxy exception.\nLinux namespace + Unix-only families; macOS deny-network sandbox + per-UID deny.\nTrusted agent R-NETBIND served policy digest, not owner alone.\nService rows use installer/operator; R-SVC-EGRESS schedule/DNS qualification (§8).
+  note over M,O: Workplace zero egress: no loopback/proxy exception.\nLinux namespace + Unix-only families; macOS deny-network sandbox + per-UID deny.\nR-NETBIND: account_generation / profile_ref / service_generation / served_policy_digest, not owner alone.\nOne profile-bound listener per bound account generation; row admits only its own proxy.port.\nNo direct/external-http-proxy for any platform account class; N15 revision 2026-10-13 (§8).\nService rows use installer/operator; R-SVC-EGRESS schedule/DNS qualification (§8).
   note over M,O: Whole matrix without evidence refuses fw_unsupported (§8); creation failure rolls back.
 end
 alt Creation fails or crashes at a step boundary
@@ -133,7 +133,8 @@ opt Dispatcher workspace round (separate invocations before ordinary retirement)
 C -> L: dispatcher launches approved swarma-workspace-materialize before work
 L -> W: child UID; fixed environment; immutable admitted plan
 W -> H: exact base B standalone repository; fresh config, no hooks/remotes/helpers
-note over C,H: Plan digest covers B, manifest digest, write scope, exec profile.\nCaller supplies bounded canonical tree archive; dispatcher relays/journals digest, holds no repository.
+note over C,H: Plan digest covers B, manifest digest, write scope, exec profile and task-resource digests.\nCaller supplies bounded canonical tree archive; dispatcher relays/journals digest, holds no repository.
+note over C,H: Platform materializes task resources read-only next to workspace; data, never instructions.\nTrusted side gathers/checks/attaches board resources; signed-letter attachments for remote.\nMore requested by letter/outcome; worker never fetches. Formats/caps/placement unpublished (§8).\nWeb default-off; explicit per-identity trusted-circle opt-in only; no default search/fetch or donor web server.\nOperator trusted-circle admission only enables donor-side opt-ins; host boundaries stay.\nLocal web-tool service owns account/row/listener; local opted-in agents use Unix socket + grant only.\nWorkplaces never reach it; donor web service separate from harness/bridge (§8).
 C -> M: dispatcher account-wide exec.stop after round outcome; workplace write fence
 M -> O: stop and confirm no account process remains (§4.7)
 break Absence failed / partial / unknown

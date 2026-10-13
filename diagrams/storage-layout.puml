@@ -13,6 +13,7 @@ package "Platform root chosen at installation (§4.0)\nexample /opt/swarma; root
   }
   folder "run/ - 0755\ncredential-broker/ (v0), dispatcher/ (first slice)\nsession-host/ (SH2+ activation gated)\nservice socket directories" as Runtime
   folder "services/<account>/ - account owner 0700\nservice home" as ServiceHomes
+  folder "Task resources next to workspace\nplatform-materialized read-only; digests in plan\ndata, never instructions; placement unpublished" as Resources
   folder "workers/<account>/ - account owner 0700\nagent/workplace home: work/, tmp/, harness state" as AgentHomes
   folder "quarantine/ - root 0700\nretiring homes moved on same filesystem" as Quarantine
   folder "archive/ - root 0700\nclosed-schema service-generated metadata\nexport files root 0600; naming unpublished" as Archives
@@ -91,7 +92,11 @@ note "Defining spec: [[../spec/helper.md#40-layout §4.0 layout]], [[../spec/hel
 Scope .. Ledger
 note bottom of Config
   R-NETBIND: name + Curator lock digest -> exactly one pinned network ref/digest.
-  fw.apply checks actual served digest; existing allocation re-apply reconciles proxy sessions.
+  No direct/external-http-proxy binding for any platform account class.
+  One profile-bound listener per bound account generation; row admits only its own proxy.port.
+  fw.apply checks account_generation/profile_ref/service_generation/served_policy_digest.
+  Digest covers allow entries/caps/guard version; re-apply reconciles proxy sessions.
+  N15 revision 2026-10-13 owns proposed platform-proxy kind/fixed refused-port set (§8).
   R-SVC-EGRESS: installer service rows and separate verification schedule, DNS sandbox gate.
   R-WORKPLACE: fixed root relay shell; rb-exec service controls outside worker home/UID.
 end note
@@ -134,7 +139,18 @@ note bottom of AgentHomes
   R-WATCH read-only least-privilege sampler: CPU/memory/process/home/network/refused counters incl. mail.
   R-VERIFY builds/tests/code execution only off-host ephemeral secret-free runners.
   R-STANDING trusted local loops verify plan surfaces at every launch/restart/native resume.
+  Workplace untrusted by default; operator trusted-circle admission only enables donor-side opt-ins.
+  Host zero egress, exec profile, transfer and review stay; web-service sockets refuse workplaces.
   R-UNTRUSTED v0 refusal; v1 ceilings/exec/zero workplace egress/no local loop or subscription lease.
   R-SHARED no shared services beside untrusted work; platform services excluded from shared definition.
+end note
+note bottom of Resources
+  Trusted side gathers/checks task resources and attaches to board; signed-letter attachments for remote.
+  More requested by letter/outcome; worker never fetches; formats/caps/plan encoding unpublished (§8).
+  Default: no web; donor loop reaches only provider endpoints and our host, our side has no internet.
+  Web options default-off; explicit per-identity trusted-circle opt-in only.
+  Local web-tool service: own account, row and listener; key outside agent accounts.
+  Local agents reach it only over Unix socket with peer-UID admission and grant; never TCP/workplace.
+  Donor web service separate from harness/bridge; key never reaches project (§8).
 end note
 @enduml

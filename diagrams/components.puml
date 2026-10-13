@@ -34,9 +34,11 @@ component "Read-only usage sampler (R-WATCH)\nleast OS-required privilege; root 
 component "Usage watcher\nper-class thresholds; interface unpublished" as Watcher
 component "swarma-dispatcher\nworkspace contract / journaled stop owner" as Dispatcher
 component "Approved workspace executors\nswarma-workspace-materialize / swarma-workspace-export\nchild UID; fixed environment; design labels" as Workspace
-component "R-VERIFY runners\nisolated ephemeral; another machine; no secrets" as Verify
+component "R-VERIFY runners\nboard / infrastructure lanes\nisolated ephemeral; another machine; no secrets\nsudo-capable qualification runner kind" as Verify
 component "Session host\nservice UID; delivery / bound-board snapshots" as Host
-component "Profile proxy (v1)\ntrusted service account; verified listener" as Proxy
+component "Profile proxy (v1)\ntrusted service account\none profile-bound listener per account generation" as Proxy
+component "Local web-tool service (design option)\ndefault-off; trusted-circle opt-in only\nown service account, row and listener; key custody" as Web
+folder "Task resources\nread-only next to workspace; digests in plan\ndata, never instructions" as Resources
 
 actor "Operator phone\nsecure element; biometric gate" as Phone
 actor "Operator terminal\npassword fallback; no cached ticket" as Terminal
@@ -65,7 +67,7 @@ Accounts --> Files
 Archive --> Files
 Files --> Homes
 Firewall --> Kernel
-Firewall --> Proxy : verify owner/generation AND served digest; no shared lock across query
+Firewall --> Proxy : verify account_generation / profile_ref / service_generation / served_policy_digest;\naccount row admits only its own proxy.port; no lock across query
 Firewall --> State : publish applied state after successful apply
 Stop --> State : matching root start receipt
 Stop --> Agent : latest receipt/current generation; TERM/KILL same UID set; quiet absence
@@ -81,6 +83,8 @@ Exec --> Agent : admitted harness executor only; standard FDs + FD3 plan
 Exec --> Workspace : approved child-UID exec; materialize before work;\nexport only after confirmed absence
 Dispatcher --> Workspace : immutable admitted plans via launcher; no repository held
 Workspace --> Homes : private standalone repository; export data before retirement
+Agent --> Web : Unix socket ONLY; peer-UID admission + grant;\nexplicit trusted-circle opt-in; workplaces refused
+Web --> Proxy : own profile-bound listener and egress row only
 Workspace --> Dispatcher : bounded change set; no worker Git history
 Sampler --> State : read-only generation attribution
 Sampler --> Homes : read-only home usage
@@ -94,7 +98,6 @@ Operator --> Firewall : authorized range flip to deny-all; journaled
 Dispatcher --> Stop : every agent / workplace generation; confirmed absence
 Operator --> Broker : freeze leases / renewals; delivered tokens keep vendor lifetime
 Operator --> Host : close delivery; snapshot bound boards
-Dispatcher --> Verify : board-owned controlled verification; results as data
 Agent --> Broker : trusted agent only; fresh connection / lease
 Broker --> State : reads ledger / v1 applied state; readability is not authority
 
@@ -140,7 +143,11 @@ note bottom of Observe
 end note
 note bottom of Firewall
   R-NETBIND: root-owned binding beside user-manager.json; dispatcher pins at prepare.
-  Verify served digest; re-apply existing allocations flushes kernel/old proxy sessions.
+  No direct/external-http-proxy binding on a platform host, for any account class.
+  One profile-bound listener per account generation; row admits only its own port.
+  served_policy_digest covers allow entries, caps and guard version.
+  N15 revision 2026-10-13 owns proposed platform-proxy kind and fixed refused-port set (§8).
+  Re-apply existing allocations flushes kernel/old proxy sessions.
   R-SVC-EGRESS: dispatcher/host deny-all, broker via own proxy; resolver sandbox qualified.
   Installer owns start-time and periodic service-policy checks; lapse drops readiness.
   R-RANGE-DENY: range 30000-59999 before accounts; v0 proxy listeners only.
@@ -179,6 +186,10 @@ note bottom of Observer
 end note
 note bottom of Workspace
   R-TRANSFER: exact B + manifest digest + write scope + exec profile covered by plan digest.
+  R-NET-TOOL 4a: trusted side attaches task resources; remote signed-letter attachments too.
+  Platform materializes resources read-only next to workspace, digests in plan; data, never instructions.
+  More resources requested by letter/outcome; trusted side fetches/checks/attaches.
+  Formats/caps/placement unpublished (§14 questions 15, 18).
   No hooks/remotes/credential helpers; no linked cross-account worktrees.
   Whole-export refusals and caps; only original requester gets digested result.
   Board accepts resource only; orchestrator imports signed C, exact-commit independent review,
@@ -195,7 +206,24 @@ note bottom of Agent
   No account-started harness/agent environment, builds/tests/downloads or heavy tools.
   R-CEILINGS: selected root-created non-delegated Linux unit; qualified macOS mechanisms.
   R-STANDING: trusted local loop only; plan surfaces verified before launch/restart/native resume.
-  Untrusted standing workplace loop stays at donor; no subscription binding/lease.
+  Workplace loop stays at donor; no subscription binding/lease or web-service socket admission.
+  Untrusted by default; operator trusted-circle admission enables donor-side opt-ins only.
+  Zero egress, exec profile, transfer and review stay unchanged.
   R-SHARED: no shared services beside untrusted work; publish host capability matrix.
+end note
+note bottom of Web
+  R-NET-TOOL 4/4b: all web options default-off; explicit per-identity trusted-circle opt-in only.
+  Default donor loop reaches model-provider endpoints and our host; our side has no internet.
+  CIP-0008 provider search off; no default search/fetch or donor web server.
+  Provider search needs qualified no-local-fetch tuple; remote CIP-0008 tuple change.
+  Donor swarma-web: own identity B / sandbox C; never harness or bridge identity.
+  Donor key stays there (Keychain/0600 file in A), never in channel/frame/package/project API.
+  Search-provider API only; donor consent at init; results only to donor model.
+  Local service key stays in own account; allowlist/rate limits/logs; no TCP agent ingress.
+  Formats/principal/grant/socket interface unpublished (§14 question 18).
+end note
+note bottom of Verify
+  R-VERIFY pool, job contract and result format belong to board / infrastructure lanes.
+  Results return to board as data in testing; tester orchestrates/reads, never executes code.
 end note
 @enduml
