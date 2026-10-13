@@ -18,6 +18,7 @@ import time
 ROOT = Path('/private/tmp/swarma-capability')
 USER = '_swarma_cap_probe'
 OBSERVER = '_swarma_cap_observer'
+DENY_ROOT = Path('/usr/lib/cron')
 ROWS = ('ACCT', 'EXEC', 'NET', 'DNS', 'PF', 'NPROC', 'MEM-RLIMIT',
         'MEM-WATCH', 'CPU-QOS', 'DISK', 'VIS', 'CRON', 'LAUNCHD', 'KILL', 'SOCK')
 BOUNDS = {row: 120 for row in ROWS}
@@ -42,7 +43,7 @@ def guard(env=None, major=None, euid=None):
 def redact(text):
     # Capture only test-owned process arguments. Sanitize diagnostics from OS tools.
     text = re.sub(r'/Users/[^/\s]+', '<runner-home>', str(text))
-    text = re.sub(r'/home/[^/\s]+', '<runner-home>', text)
+    text = re.sub(r'(?<![\w/-])/home/[^/\s]+', '<runner-home>', text)
     text = re.sub(r'(?i)(host(?:name)?\s*[=:]\s*)\S+', r'\1<redacted>', text)
     return text[:12000]
 
@@ -59,6 +60,7 @@ def spawn(argv, uid=None, stdin=None, stdout=subprocess.PIPE):
             demote(uid)
     return subprocess.Popen([str(x) for x in argv], stdin=stdin, stdout=stdout,
                             stderr=subprocess.PIPE, text=True, start_new_session=True,
+                            cwd=ROOT / 'tmp' if (ROOT / 'tmp').exists() else '/private/tmp',
                             preexec_fn=child if uid is not None else None,
                             env={'PATH': '/usr/bin:/bin:/usr/sbin:/sbin', 'HOME': str(ROOT / 'home'),
                                  'LANG': 'C', 'TMPDIR': str(ROOT / 'tmp')})
@@ -106,6 +108,14 @@ def denied(result):
         return False
     return bool(re.search(r'(?i)not permitted|permission denied|operation denied|not allowed|denied access',
                           result.get('stderr', '') + result.get('stdout', '')))
+
+
+def ordered_pf_rules(nat, filtering):
+    # pfctl -sr includes scrub rules. Normalization must precede translation.
+    lines = filtering.splitlines(keepends=True)
+    scrub = [line for line in lines if line.lstrip().startswith(('scrub ', 'scrub-anchor '))]
+    filters = [line for line in lines if line not in scrub]
+    return ''.join(scrub) + nat + ''.join(filters)
 
 
 def deny_verdict(controls, attempts):
@@ -255,6 +265,11 @@ def row_acct(cfg):
     uid = cfg['uid']
     identity = run(['/usr/bin/id', USER])
     launched = run(['/usr/bin/id'], uid)
+    shell_control_setup = run(['/usr/bin/dscl', '.', '-create', '/Users/' + USER, 'UserShell', '/bin/sh'])
+    try:
+        su_control = run(['/usr/bin/su', '-l', USER, '-c', '/usr/bin/id'])
+    finally:
+        shell_restore = run(['/usr/bin/dscl', '.', '-create', '/Users/' + USER, 'UserShell', '/usr/bin/false'])
     su = run(['/usr/bin/su', '-l', USER, '-c', '/usr/bin/id'])
     # Direct invocation of the configured shell; no pseudo-terminal/password guessing.
     shell = run(['/usr/bin/false'], uid)
@@ -265,14 +280,20 @@ def row_acct(cfg):
     observed = {'su_login': su, 'shell': shell, 'password_auth': auth, 'attributes': attrs,
                 'home_mode': oct(stat.st_mode & 0o777), 'home_entries': len(list((ROOT / 'home').iterdir())),
                 'supplementary_groups': run(['/usr/bin/id', '-G'], uid)}
+    observed['kernel_groups'] = run(binary('groups'), uid)
     groups = observed['supplementary_groups']
     hard = (success(identity) and success(launched) and success(attrs) and
+            success(shell_control_setup) and success(su_control) and success(shell_restore) and
             su['rc'] == 1 and shell['rc'] == 1 and auth['rc'] != 0 and
             success(groups) and groups['stdout'].strip() == str(uid) and
+            observed['kernel_groups'].get('value', {}).get('effective_groups') == [] and
             observed['home_mode'] == '0o700' and observed['home_entries'] == 0)
-    return emit('ACCT', {'id_record': identity, 'root_launcher_id': launched}, observed,
+    return emit('ACCT', {'id_record': identity, 'root_launcher_id': launched,
+                         'su_with_sh_shell': su_control, 'shell_control_setup': shell_control_setup,
+                         'restore_false_shell': shell_restore}, observed,
                 'hard' if hard else 'unknown',
-                'No graphical/SSH interactive login attempted; false shell, su -l and disabled password tested.',
+                'No graphical/SSH interactive login attempted; false shell, su -l and disabled password tested. '
+                'Directory-service groups and kernel getgroups reported separately; implicit memberships are not ignored.',
                 'Hidden UID >=30000, private empty home, own group, no supplementary groups, login refused')
 
 
@@ -354,7 +375,11 @@ def row_pf(cfg):
         return emit('PF', control, original, 'unknown', 'PF rules could not be read.', 'UID TCP/UDP deny and precedence detection')
     (ROOT / 'pf-original-filter').write_text(original['stdout'])
     (ROOT / 'pf-original-nat').write_text(nat['stdout'])
-    (ROOT / 'pf-original.conf').write_text(nat['stdout'] + original['stdout'])
+    (ROOT / 'pf-original.conf').write_text(ordered_pf_rules(nat['stdout'], original['stdout']))
+    syntax = run(['/sbin/pfctl', '-n', '-f', ROOT / 'pf-original.conf'])
+    if not success(syntax):
+        return emit('PF', control, {'restore_syntax': syntax}, 'unknown',
+                    'Original rules cannot be restored; no firewall mutation attempted.', 'UID TCP/UDP deny and precedence')
     # Hosted ephemeral runner only: temporary root filter contains two named anchors.
     (ROOT / 'pf-active').touch()
     root_rules = ROOT / 'pf-test.conf'
@@ -370,7 +395,7 @@ def row_pf(cfg):
     match = re.search(r'Token\s*:\s*(\d+)', enabled.get('stderr', '') + enabled.get('stdout', ''))
     if match:
         (ROOT / 'pf-token').write_text(match[1])
-    observed = {'setup': setup}
+    observed = {'setup': setup, 'restore_syntax': syntax}
     verdict = 'unknown'
     try:
         if all(success(x) for x in setup):
@@ -416,7 +441,7 @@ def row_nproc(cfg):
 
 def row_mem_rlimit(cfg):
     control = run(binary('memory', 'control'), cfg['uid'], timeout=30)
-    observed = {kind: run(binary('memory', kind), cfg['uid'], timeout=30) for kind in ('as', 'data')}
+    observed = {kind: run(binary('memory', kind), cfg['uid'], timeout=30) for kind in ('as', 'data', 'as-headroom')}
     statuses = {}
     for kind, result in observed.items():
         value = result.get('value', {})
@@ -432,7 +457,8 @@ def row_mem_rlimit(cfg):
     verdict = 'hard' if all(x == 'hard' for x in statuses.values()) else (
         'absent' if all(x == 'absent' for x in statuses.values()) else 'unknown')
     return emit('MEM-RLIMIT', control, observed, verdict,
-                'Native malloc+memset, 16 MiB chunks, 128 MiB limit, 1 GiB allocation bound; per process only.',
+                'Native malloc+volatile page touch, 16 MiB chunks, 128 MiB absolute limits, 1 GiB allocation bound. '
+                'Extra AS trial uses current Mach virtual size +128 MiB because shared mappings can invalidate low absolute limits; per process only.',
                 'RLIMIT_AS and RLIMIT_DATA prevent touched allocations beyond their limits')
 
 
@@ -501,7 +527,7 @@ def row_cpu(cfg):
         burners = []
         try:
             for _ in range(cores):
-                prefix = ['/usr/bin/taskpolicy', '-b'] if mode == 'background' else []
+                prefix = ['/usr/sbin/taskpolicy', '-b'] if mode == 'background' else []
                 burners.append(spawn(prefix + binary('burn'), cfg['uid']))
             time.sleep(.4)
             measurements[mode] = run(binary('bench'), cfg['runner_uid'], timeout=20)
@@ -632,7 +658,7 @@ def row_vis(cfg):
 
 
 def save_deny(name):
-    path = Path('/etc/' + name)
+    path = DENY_ROOT / name
     backup = ROOT / (name + '.backup')
     if path.exists():
         shutil.copy2(path, backup)
@@ -640,7 +666,7 @@ def save_deny(name):
 
 
 def restore_deny(name):
-    path = Path('/etc/' + name)
+    path = DENY_ROOT / name
     marker = ROOT / (name + '.saved')
     if marker.exists():
         if marker.read_text() == 'existing':
@@ -653,11 +679,11 @@ def restore_deny(name):
 def row_cron(cfg):
     for name in ('cron.deny', 'at.deny'):
         save_deny(name)
-        Path('/etc/' + name).write_text('')
+        (DENY_ROOT / name).write_text('')
     controls = {'crontab': run(['/usr/bin/crontab', '-'], cfg['uid'], input='# qualification: no jobs\n'),
                 'at': run(['/usr/bin/at', 'now', '+', '1', 'hour'], cfg['uid'], input='/usr/bin/true\n')}
     for name in ('cron.deny', 'at.deny'):
-        Path('/etc/' + name).write_text(USER + '\n')
+        (DENY_ROOT / name).write_text(USER + '\n')
     observed = {'crontab': run(['/usr/bin/crontab', '-'], cfg['uid'], input='# qualification: no jobs\n'),
                 'at': run(['/usr/bin/at', 'now', '+', '1', 'hour'], cfg['uid'], input='/usr/bin/true\n')}
     # Root removal works even while deny files are present.
@@ -716,6 +742,9 @@ def row_kill(cfg):
     procs = []
     try:
         for name, command in commands.items():
+            # nohup redirects to a file; provide a private writable cwd/output explicitly.
+            if name == 'nohup':
+                command = ['/bin/sh', '-c', 'cd ' + str(ROOT / 'home') + '; exec /usr/bin/nohup /bin/sleep 30 >nohup.out 2>&1']
             p = spawn(command, cfg['uid'])
             procs.append(p)
             time.sleep(.2)
@@ -800,7 +829,9 @@ FUNCTIONS = dict(zip(ROWS, (row_acct, row_exec, row_net, row_dns, row_pf, row_np
 
 def cleanup(cfg):
     results = []
-    for uid in (cfg['uid'], cfg['observer_uid']):
+    owned = [(name, uid) for name, uid in ((USER, cfg['uid']), (OBSERVER, cfg['observer_uid']))
+             if (ROOT / ('created-' + name)).exists()]
+    for name, uid in owned:
         try:
             kill_uid(uid)
         except Exception as e:
@@ -808,25 +839,29 @@ def cleanup(cfg):
     results.extend(pf_restore())
     for name in ('cron.deny', 'at.deny'):
         restore_deny(name)
-    results.append(run(['/bin/launchctl', 'bootout', 'user/' + str(cfg['uid']) + '/works.swarma.qualification']))
-    results.append(run(['/bin/launchctl', 'bootout', 'user/' + str(cfg['runner_uid']) + '/works.swarma.qualification']))
-    results.append(run(['/usr/bin/crontab', '-u', USER, '-r']))
-    jobs = run(['/usr/bin/atq'], cfg['uid'])
-    for line in jobs.get('stdout', '').splitlines():
-        fields = line.split()
-        if fields and fields[0].isdigit():
-            results.append(run(['/usr/bin/atrm', fields[0]]))
+    if any(name == USER for name, uid in owned):
+        results.append(run(['/bin/launchctl', 'bootout', 'user/' + str(cfg['uid']) + '/works.swarma.qualification']))
+        results.append(run(['/usr/bin/crontab', '-u', USER, '-r']))
+        jobs = run(['/usr/bin/atq'], cfg['uid'])
+        for line in jobs.get('stdout', '').splitlines():
+            fields = line.split()
+            if fields and fields[0].isdigit():
+                results.append(run(['/usr/bin/atrm', fields[0]]))
+    if (ROOT / 'job.plist').exists():
+        results.append(run(['/bin/launchctl', 'bootout', 'user/' + str(cfg['runner_uid']) + '/works.swarma.qualification']))
     disk = ROOT / 'disk-device'
     if disk.exists():
         results.append(run(['/usr/bin/hdiutil', 'detach', '-force', disk.read_text()], timeout=30))
-    for name in (USER, OBSERVER):
-        if (ROOT / ('created-' + name)).exists():
-            results.append(run(['/usr/bin/dscl', '.', '-delete', '/Users/' + name]))
-            results.append(run(['/usr/bin/dscl', '.', '-delete', '/Groups/' + name]))
+    for name, uid in owned:
+        kill_uid(uid)
+        results.append(run(['/usr/bin/dscl', '.', '-delete', '/Users/' + name]))
+        results.append(run(['/usr/bin/dscl', '.', '-delete', '/Groups/' + name]))
     # Keep no test accounts, jobs, mounts or fixture files after the evidence is copied.
-    checks = {'remaining_uid_processes': {str(uid): pid_inventory(uid) for uid in (cfg['uid'], cfg['observer_uid'])},
-              'accounts_removed': {name: run(['/usr/bin/id', name]) for name in (USER, OBSERVER)},
-              'pf_restore_pending': (ROOT / 'pf-active').exists()}
+    checks = {'remaining_uid_processes': {str(uid): pid_inventory(uid) for name, uid in owned},
+              'accounts_removed': {name: run(['/usr/bin/id', name]) for name, uid in owned},
+              'pf_restore_pending': (ROOT / 'pf-active').exists(),
+              'disk_detach_pending': (ROOT / 'disk-device').exists(),
+              'deny_restore_pending': any((ROOT / (name + '.saved')).exists() for name in ('cron.deny', 'at.deny'))}
     return {'actions': results, 'checks': checks}
 
 
@@ -897,6 +932,12 @@ def main():
                 with (out / 'results.jsonl').open('a') as results:
                     results.write(json.dumps(record) + '\n')
         cleaned = cleanup(cfg)
+        checks = cleaned['checks']
+        if (any(checks['remaining_uid_processes'].values()) or checks['pf_restore_pending'] or
+                checks['disk_detach_pending'] or checks['deny_restore_pending'] or
+                any(r.get('rc') != 1 or 'no such user' not in r.get('stderr', '')
+                    for r in checks['accounts_removed'].values())):
+            interrupted = True
         (out / 'cleanup.json').write_text(json.dumps(cleaned, indent=2) + '\n')
         metadata = {'os': os.environ['PROBE_RUNNER_LABEL'],
                     'version': subprocess.check_output(['/usr/bin/sw_vers', '-productVersion'], text=True).strip(),

@@ -11,6 +11,14 @@
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
+#include <mach/mach.h>
+
+// Volatile writes make page touching observable even under -O2.
+static void touch(void *p, size_t bytes) {
+    volatile unsigned char *v = p;
+    for (size_t i = 0; i < bytes; i += 4096) v[i] = (unsigned char)(i / 4096 + 1);
+    v[bytes - 1] = 0xa5;
+}
 
 static double now(void) {
     struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t);
@@ -24,6 +32,14 @@ static int limit(int resource, rlim_t n) {
     return 0;
 }
 static int memory(const char *kind) {
+    if (!strcmp(kind, "as-headroom")) {
+        struct mach_task_basic_info info;
+        mach_msg_type_number_t count = MACH_TASK_BASIC_INFO_COUNT;
+        if (task_info(mach_task_self(), MACH_TASK_BASIC_INFO, (task_info_t)&info, &count) != KERN_SUCCESS) return 2;
+        if (limit(RLIMIT_AS, info.virtual_size + (128ULL << 20))) return 2;
+        printf("{\"baseline_virtual_bytes\":%llu,\"limit_bytes\":%llu,", (unsigned long long)info.virtual_size,
+               (unsigned long long)info.virtual_size + (128ULL << 20));
+    }
     if (!strcmp(kind, "as") && limit(RLIMIT_AS, 128ULL << 20)) return 2;
     if (!strcmp(kind, "data") && limit(RLIMIT_DATA, 128ULL << 20)) return 2;
     const size_t step = 16ULL << 20;
@@ -32,9 +48,10 @@ static int memory(const char *kind) {
     for (int i = 0; i < 64; ++i) {
         chunks[i] = malloc(step);
         if (!chunks[i]) { error = errno; break; }
-        memset(chunks[i], 0xa5, step); total += step;
+        touch(chunks[i], step); total += step;
     }
-    printf("{\"bytes\":%zu,\"errno\":%d,\"bound_bytes\":1073741824}\n", total, error);
+    printf("%s\"bytes\":%zu,\"errno\":%d,\"bound_bytes\":1073741824}\n",
+           !strcmp(kind, "as-headroom") ? "" : "{", total, error);
     return 0;
 }
 static int nproc(int n) {
@@ -65,7 +82,7 @@ int main(int argc, char **argv) {
         void *chunks[60];
         for (int i = 0; i < 60; ++i) {
             chunks[i] = malloc(50ULL << 20); if (!chunks[i]) return 2;
-            memset(chunks[i], 0xa5, 50ULL << 20);
+            touch(chunks[i], 50ULL << 20);
             printf("{\"bytes\":%llu,\"time\":%.6f}\n", (unsigned long long)(i + 1) * (50ULL << 20), now());
             fflush(stdout); usleep(250000);
         }
@@ -96,6 +113,13 @@ int main(int argc, char **argv) {
             sleep(30); _exit(0);
         }
         waitpid(p, NULL, 0); return 0;
+    }
+    if (!strcmp(argv[1], "groups")) {
+        gid_t groups[256]; int n = getgroups(256, groups);
+        if (n < 0) return 2;
+        printf("{\"effective_groups\":[");
+        for (int i = 0; i < n; ++i) printf("%s%u", i ? "," : "", groups[i]);
+        printf("]}\n"); return 0;
     }
     return 64;
 }

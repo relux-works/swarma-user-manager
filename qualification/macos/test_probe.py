@@ -1,5 +1,9 @@
 """Run these tests on the hosted runners. Importing probe never runs a workload."""
 import unittest
+import os
+from pathlib import Path
+import subprocess
+import tempfile
 from unittest.mock import patch
 import probe
 
@@ -31,6 +35,15 @@ class RefusalTests(unittest.TestCase):
         for label, major, euid in (('macos-13', '13', 0), ('macos-14', '15', 0), ('macos-14', '14', 501)):
             with self.assertRaises(RuntimeError):
                 probe.guard(dict(self.env, PROBE_RUNNER_LABEL=label), major=major, euid=euid)
+
+    def test_shell_entrypoint_refuses_without_creating_output(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / 'must-not-exist'
+            env = dict(os.environ, GITHUB_ACTIONS='false')
+            result = subprocess.run(['bash', str(Path(__file__).with_name('capability-probe.sh')), str(output)],
+                                    env=env, capture_output=True, text=True, timeout=5)
+            self.assertEqual(64, result.returncode)
+            self.assertFalse(output.exists())
 
     def test_valid_control_and_permission_denial(self):
         self.assertEqual('hard', probe.deny_verdict([{'rc': 0}], [{'rc': 1, 'stderr': 'Operation not permitted'}]))
@@ -68,6 +81,22 @@ class RefusalTests(unittest.TestCase):
 
     def test_redact_personal_paths(self):
         self.assertNotIn('/Users/example', probe.redact('/Users/example/work/file'))
+        self.assertEqual('/private/tmp/swarma-capability/home/echo-copy',
+                         probe.redact('/private/tmp/swarma-capability/home/echo-copy'))
+
+    def test_pf_restoration_orders_scrub_before_nat_and_filter(self):
+        nat = 'nat-anchor "existing/*" all\n'
+        filtering = 'scrub-anchor "existing/*" all\nanchor "existing/*" all\n'
+        self.assertEqual('scrub-anchor "existing/*" all\n' + nat + 'anchor "existing/*" all\n',
+                         probe.ordered_pf_rules(nat, filtering))
+
+    def test_cleanup_does_not_signal_or_delete_unowned_identities(self):
+        with tempfile.TemporaryDirectory() as directory, patch('probe.ROOT', Path(directory)), \
+                patch('probe.kill_uid') as kill, patch('probe.run') as command:
+            result = probe.cleanup({'uid': 39001, 'observer_uid': 39002, 'runner_uid': 501})
+            kill.assert_not_called()
+            command.assert_not_called()
+            self.assertEqual({}, result['checks']['accounts_removed'])
 
 
 if __name__ == '__main__':
