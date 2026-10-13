@@ -8,12 +8,13 @@ database "Root-owned state\npolicy, ledger/cursor, lock, journal, audit\nv1 appl
 participant "OS account backend / kernel\nmacOS or Linux; root operations" as O
 database "Homes (account-owned)\nquarantine / metadata export (root-controlled)" as H
 participant "swarma-credential-broker\nservice UID; owns bindings / leases" as B
+participant "Approved workspace executors\nchild UID; fixed environment; design labels" as W
 participant "swarma-user-launcher\nroot; separate invocation" as L
 
 note over C,L
   [[../spec/helper.md#43-usercreate Defining spec §4.3 create]], [[../spec/helper.md#44-userretire §4.4 retire]],
   [[../spec/helper.md#441-retirement-deletion-and-metadata-export §4.4.1 deletion/export]], [[../spec/helper.md#46-lock-journal-and-idempotency §4.6 recovery]].
-  Current: unimplemented; v0 accounts, v1 firewall, v2 grant verification (§13).
+  Current: unimplemented; v0 accounts/static range deny, v1 account narrowing, v2 grant verification (§13).
   SH2+ joint admission gate I4 remains closed; dispatcher alone invokes the launcher (§§7, 14).
   Each helper request <= 16 KiB, one JSON document in 5 s (§2).
 end note
@@ -25,7 +26,7 @@ note over C,S
   Terminal: password sudo into operator, no NOPASSWD, timestamp_timeout=0.
   Operator helper sudo authenticated and non-cached; NOPASSWD only dispatcher helper/launcher.
   Widening: authentication + exact-content confirmation; refused inside agent sessions.
-  Narrowing: authentication only; revocation: one biometric confirmation.
+  Narrowing: authentication only except R-ALLSTOP needs one confirmation; revocation: one biometric confirmation.
   Human status/grants/accounts/bindings reads via swarma-observer without confirmation.
   Observer has no mutation/launcher or other principal's private effect.observe access.
   Entry/signature/read interfaces and phone-to-helper transition unpublished (§14 question 17).
@@ -91,6 +92,14 @@ note over C,R
   pending/unavailable -> unknown liveness; contradictory -> contradictory (§5).
 end note
 
+== Installation before any agent account (§§8, 11) ==
+C -> O: installer: helper-owned parent anchor/table + static range deny
+note over C,O: R-RANGE-DENY: UIDs 30000-59999; v0 admits platform proxy listeners only.\nLinux skuid range every protocol + counters/logs; macOS pf user range + sandbox beyond TCP/UDP.
+C -> O: dedicated test-UID active precedence probe at install / service start / schedule
+break Failed or unknown range precedence proof
+  C -> R: incident; drop enforced readiness; no activation
+end
+
 == user.create (§§4.1-4.3) ==
 M -> R: choose round-robin UID/GID; fresh random 128-bit generation (R-GEN), never counter/reused
 M -> O: check directory service and ledger availability;
@@ -101,11 +110,11 @@ end
 M -> R: journal planned/completed steps before acting; state creating
 M -> O: create account + same-name primary group; no supplementary groups;
 M -> O: locked password, hidden; exact UID/GID/home; no supplementary groups
-note over M,O: Agent/service no-login shell; deny cron/at and qualify per-OS persistence denial.\nWorkplace fixed root relay shell requires joint backend and helper v1; service executor outside UID.
+note over M,O: Agent/ordinary-service no-login shell; operator/observer qualified narrow-entry exception (§4.3).\nDeny cron/at and qualify per-OS persistence denial.\nWorkplace fixed root relay shell requires joint backend and helper v1; service executor outside UID.
 M -> H: descriptor-relative empty home; account owner; mode 0700
 opt v1 enforced profile (MANDATORY for workplace)
   M -> O: denial + verified fw.apply applied state before activation / first launch
-  note over M,O: Workplace loopback hard row; R-NETBIND served policy digest, not owner alone.\nService rows use installer/operator; R-SVC-EGRESS schedule/DNS qualification (§8).
+  note over M,O: Workplace zero egress: no loopback/proxy exception.\nLinux namespace + Unix-only families; macOS deny-network sandbox + per-UID deny.\nTrusted agent R-NETBIND served policy digest, not owner alone.\nService rows use installer/operator; R-SVC-EGRESS schedule/DNS qualification (§8).
   note over M,O: Whole matrix without evidence refuses fw_unsupported (§8); creation failure rolls back.
 end
 alt Creation fails or crashes at a step boundary
@@ -114,13 +123,36 @@ alt Creation fails or crashes at a step boundary
   M -> H: roll back creation
   note over M,H: Exact per-step rollback order / firewall rollback details: unspecified in spec §§4.3, 4.6, 8.
 else Creation succeeds
+  M -> R: verify recorded admission class, host matrix, exec profile and socket set;\nuntrusted needs v1/ceilings/no shared services/no local loop/no binding or lease
   M -> R: persist active; record result and audit line
   M --> C: username, UID/GID, home, generation, state active
 end
 
+== R-TRANSFER: dispatcher workspace contract (§7) ==
+opt Dispatcher workspace round (separate invocations before ordinary retirement)
+C -> L: dispatcher launches approved swarma-workspace-materialize before work
+L -> W: child UID; fixed environment; immutable admitted plan
+W -> H: exact base B standalone repository; fresh config, no hooks/remotes/helpers
+note over C,H: Plan digest covers B, manifest digest, write scope, exec profile.\nCaller supplies bounded canonical tree archive; dispatcher relays/journals digest, holds no repository.
+C -> M: dispatcher account-wide exec.stop after round outcome; workplace write fence
+M -> O: stop and confirm no account process remains (§4.7)
+break Absence failed / partial / unknown
+  M --> C: no export admission; retain cleanup obligation
+end
+C -> L: approved swarma-workspace-export ONLY after confirmed absence
+L -> W: child UID; fixed environment; no network
+W -> H: no-follow manifest comparison; skip .git; bounded change set only
+W --> C: exporter returns bounded change set to dispatcher
+break Export refused / failed / partial / unknown
+  C -> C: retain export obligation; no ordinary retirement
+end
+C -> C: journal digests/export; return result ONLY to original requester
+note over W,H: Special files/.git variants/collisions/gitlinks/root escape/cap excess refuse WHOLE export.\nFormat, caps, result schema/retention and cleanup interlocks unpublished (§14 question 15).
+end
+
 == user.retire (§4.4): forward recovery only ==
 note over C,M
-  Dispatcher confirms broker unbind before retirement (§10).
+  Dispatcher confirms any broker unbind before retirement (§10); untrusted class never binds/leases.
   Direct operator retirement needs no broker; unconfirmed binding cleanup stays durable
   at dispatcher/operator boundary, never a helper unbind receipt (F-12).
   R-TIME: expiry destruction also needs boot-inclusive monotonic lifetime; explicit retirement works.
@@ -130,6 +162,16 @@ note over C,M
   Separate explicit swarma-operator home retention: authentication + exact-content confirmation;
   refused inside agent sessions; confidentiality not guaranteed; format unpublished (§14 questions 1, 17).
 end note
+alt Ordinary dispatcher retirement
+  C -> M: present recorded workspace export under unpublished cleanup interlock
+  M -> R: record verified discharge of allocation export obligation
+else Direct operator retirement
+  C -> M: direct operator retirement explicitly waives export
+  M -> R: journal explicit operator waiver
+end
+break Export neither recorded nor explicitly waived
+  M --> C: home deletion held; no silent loss of obligation
+end
 M -> R: journal steps; persist retiring FIRST (commit point)
 note over L,B: Launcher refuses new starts; broker refuses leases for retiring generation.
 M -> O: stop per-user service domain where available;
@@ -172,7 +214,7 @@ break Temporary cleanup incomplete / failed / unknown
 end
 M -> O: remove account and group
 opt v1
-  M -> O: remove firewall rules LAST
+  M -> O: remove per-account firewall rules LAST; static range deny remains
 end
 M -> R: persist removed (generation retained forever); result + audit
 note over M,H

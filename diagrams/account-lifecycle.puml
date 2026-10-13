@@ -1,16 +1,16 @@
 @startuml account-lifecycle
-title M-UM3: account generation lifecycle (v0 design; v1 egress annotations)
+title M-UM3: account generation lifecycle (v0 design; v0 range deny; v1 class/enforcement annotations)
 hide empty description
 
 [*] --> creating : user.create\n(under the helper lock: allocate UID/GID,\nledger entry, journal)
-creating --> active : account, group and home created\n(v1 enforcement required: denial before activation / first launch)
+creating --> active : account, group and home created\n(static range rule already installed; v1 class gates before activation / launch)
 state "creation rolled back\n(fresh random 128-bit generation never reused)" as rolled_back
 creating --> rolled_back : failure or crash →\nmanager compares OS objects with journal, rolls back
 rolled_back --> [*]
 active --> active : launch.start (launcher)\nfw.apply (v1)
-active --> retiring : user.retire\n(commit point: persisted first)
+active --> retiring : user.retire\n(workspace export already recorded or direct operator waiver;\ncommit point: persist retiring)
 retiring --> retiring : processes_remain → later retry\ncrash → dependency recovery continues same effect; bounded batches yield lock
-retiring --> removed : processes stopped and verified; home quarantined;\ndeclared keys destroyed before walk; home deleted;\nonly closed-schema service-generated metadata export; temporary files removed;\naccount and group removed; v1 rules removed last; persist removed
+retiring --> removed : processes stopped and verified; export obligation discharged;\nhome quarantined;\ndeclared keys destroyed before walk; home deleted;\nonly closed-schema service-generated metadata export; temporary files removed;\naccount and group removed; v1 rules removed last; persist removed
 note right of removed: Generation stays in root ledger forever (§4.2).
 note left of creating
   [[../spec/helper.md#42-lifecycle Defining spec §4.2]],
@@ -25,11 +25,14 @@ note left of creating
 end note
 note right of active
   Root launcher starts approved executor under agent or qualified workplace UID (§7).
-  Workplace always needs helper v1 applied state incl. loopback; relay/backend publication gate.
+  Workplace always untrusted-class: helper v1 zero egress, no proxy/loopback; relay/backend publication gate.
   swarma-rb-exec controls run under service principal, never workplace UID.
   F-13 persistence denial qualifies per OS; idle UID has zero processes.
   swarma-dispatcher service UID owns execution lifetime.
-  Broker service UID owns bindings/leases; admitted active agent may be bound.
+  Broker service UID owns bindings/leases; trusted active agent may be bound.
+  Untrusted class never has subscription binding/lease or local agent loop.
+  Recorded class + qualified host matrix/ceilings/exec profile/socket set required.
+  No shared services on hosts admitting untrusted class; v0/Slice 0 refuses it.
   Protected service-class swarma-operator and swarma-observer never host a harness or launch.
   Only configured installer or operator creates them; dispatcher cannot (§4.3).
   Operator SSH: operator device key only; forced operator command; no interactive shell.
@@ -46,19 +49,35 @@ note right of retiring
   Bounded cleanup batches yield shared lock; keep UID/quota reservation and pending evidence.
   Recovery validates shared accounting then requested dependencies, not full unrelated cleanup.
   Root controls quarantine and owns metadata exports; no-follow walks (§6).
+  R-TRANSFER: recorded workspace export before retirement or explicit operator waiver.
+  Missing/unknown export keeps deletion closed; dispatcher owns obligation.
   Declared keys destroyed before home deletion.
   Failed/unknown destruction or deletion keeps retiring; unreadable is not absent.
-  Export never copies agent-controlled strings/names/links/bodies (§4.4.1).
+  Retirement metadata export never copies agent-controlled strings/names/links/bodies (§4.4.1).
   Export schema/provenance and audit encoding unpublished (§14 question 6).
-  v1 rules removed AFTER account/group; no rollback to active.
+  v1 account rules removed AFTER account/group; static range deny remains; no rollback to active.
   Retirement is separate from identity revocation (§4.4).
 end note
-note "Current: nothing implemented; v0 accounts/launcher; v1 egress; v2 grants (§13).\nSH2+ joint admission gate I4 remains closed; dispatcher alone invokes the launcher (§§7, 14).\nSeparate explicit swarma-operator home retention: authentication + exact-content confirmation; refused inside agent sessions; confidentiality not guaranteed; format unpublished (§4.4.1)." as Phase
+note "Current: nothing implemented; v0 accounts/launcher/static range deny; v1 narrowing; v2 grants (§13).\nSH2+ joint admission gate I4 remains closed; dispatcher alone invokes the launcher (§§7, 14).\nSeparate explicit swarma-operator home retention: authentication + exact-content confirmation; refused inside agent sessions; confidentiality not guaranteed; format unpublished (§4.4.1)." as Phase
 Phase .. retiring
 note bottom of removed
   R-OUTCOME: pending stop/retire continues same effect/arguments; terminal result replays.
   R-GEN restore: fence all readers externally; reconcile surviving evidence and epoch floors.
   Never restore retiring/removed to active; lost coverage unavailable, never not_recorded.
   R-TIME: expiry deletion needs boot-inclusive monotonic lifetime, not wall clock alone.
+end note
+note bottom of creating
+  R-RANGE-DENY active test-UID precedence proof at install/start/schedule;
+  failure -> incident/readiness drop. Linux every-protocol skuid range; macOS pf + sandbox.
+  R-NET-TOOL Linux workplace namespace + Unix-only families; macOS deny-network sandbox + UID deny.
+  R-CEILINGS selected Linux non-delegated unit, macOS qualified mechanisms; matrix per OS release.
+  Kernel baseline and exact declared socket reachability/deployment inventory qualify (§12).
+  R-EXEC OS allowlist; writable areas non-executable; light checks only, R-VERIFY off-host.
+end note
+note bottom of retiring
+  R-ALLSTOP: manual operator act with authentication + one confirmation; refused in agent sessions.
+  Hold admission + range deny-all + every generation account-wide stop, journaled;
+  lease/renewal freeze, delivered tokens retain vendor lifetime, close delivery/snapshot boards.
+  Partial/unknown -> incident and closed admission; recovery explicit, never automatic restart.
 end note
 @enduml

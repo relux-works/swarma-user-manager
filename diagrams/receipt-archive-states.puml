@@ -19,7 +19,7 @@ note right of Recorded
   execution_id, epoch, pid, start_time, boot_id, session_id.
   Location binds generation and execution_id (§7).
   Process: swarma-user-manager, root, owns exec.stop.
-  Execution: curator-run -> harness under agent UID;
+  Execution: admitted curator-run -> harness under trusted agent UID;
   dispatcher service UID owns execution lifetime.
   Unknown/failed observation is not known absence (§4.7).
   Post-receipt/pre-exec failure resolves same effect/receipt; never launch twice.
@@ -41,7 +41,7 @@ state "Home fate after retiring commit and verified quiescence (§4.4.1)" as Ret
   state "Home in quarantine\nsame-filesystem move; root-controlled" as Quarantined
   state "Declared keys destroyed\nbefore deletion walk" as KeysDestroyed
   state "Home deleted\nno agent content retained" as Deleted
-  [*] --> Quarantined : manager user.retire; account quiescent
+  [*] --> Quarantined : manager user.retire; account quiescent;\nR-TRANSFER export recorded or explicit operator waiver
   Quarantined --> Quarantined : key destruction failed/unknown\nno walk; remain retiring; audit
   Quarantined --> KeysDestroyed : destroy declared keys; journal under shared lock\nrecovery confirms destruction or prior absence
   KeysDestroyed --> KeysDestroyed : bounded batches yield lock; remaining/failed/unknown deletion\nretains retiring, UID/quota and pending effect; unreadable is not absent
@@ -53,6 +53,10 @@ note right of Quarantined
   Dispatcher only own agents/qualified workplaces; quarantine root 0700 (§4.0).
   Dependency recovery resumes same retirement effect in bounded batches (§4.6).
   Labels illustrate sequence, not new persisted ledger states.
+  R-TRANSFER workspace export precedes retirement; dispatcher owns obligation.
+  Only confirmed UID absence + workplace write fence permits approved child-UID export.
+  Home deletion waits for recorded export or explicit direct-operator retirement waiver.
+  Workspace result is separate from retirement metadata; formats/interlocks unpublished (§14 question 15).
   Declared paths and audit encoding unpublished (§14 question 6).
   No arbitrary-home secret classifier; no archive/delete/keep selector.
   Separate explicit swarma-operator home retention: authentication + exact-content confirmation;
@@ -78,11 +82,14 @@ end note
 note "R-OBS (§§2, 4.5-4.6): original principal/operator observes under journal lock.\nExactly recorded (result + current state), pending, rolled_back, not_recorded, unavailable, contradictory.\nComplete authoritative evidence required for not_recorded; expired/missing/unreadable evidence = unavailable.\nObservation never authorises a new effect; concrete retention/coverage publication remains open (§14 question 8)." as Observation
 Observation .. Receipt
 
-note "Defining spec: [[../spec/helper.md#7-the-launcher-swarma-user-launcher §7 start receipt]],\n[[../spec/helper.md#47-execstop §4.7 stop evidence]], [[../spec/helper.md#441-retirement-deletion-and-metadata-export §4.4.1 deletion/export]].\nThese are independent evidence, deletion and export views, not a receipt-to-export transition.\nCurrent repository: nothing implemented. v1 retains egress until account/group removal (§8).\nv2 grant grammar open (§9); SH2+ joint admission remains I4-gated (§§7, 14).\nOnly the dispatcher invokes the launcher; FD3 platform mechanism open (§14 question 7)." as Scope
+note "Defining spec: [[../spec/helper.md#7-the-launcher-swarma-user-launcher §7 start receipt]],\n[[../spec/helper.md#47-execstop §4.7 stop evidence]], [[../spec/helper.md#441-retirement-deletion-and-metadata-export §4.4.1 deletion/export]].\nThese are independent evidence, deletion and export views, not a receipt-to-export transition.\nCurrent repository: nothing implemented. v0 static range deny remains; v1 per-account denial until account/group removal (§8).\nv2 grant grammar open (§9); SH2+ joint admission remains I4-gated (§§7, 14).\nOnly the dispatcher invokes the launcher; FD3 platform mechanism open (§14 question 7)." as Scope
 Scope .. Receipt
 Scope .. Retirement
 Scope .. Metadata
 note "R-FATE (§7) owns process-class fate beside R-FD3; service swaps verify affected-set absence.\nOld-daemon supervisor writes fenced by durable instance epoch; no live adoption.\nR-GEN fenced restore cannot resurrect retiring/removed; lost coverage unavailable.\nR-TIME expiry deletion requires boot-inclusive monotonic lifetime (§4.4.1).\nR-OUTCOME (§4.6.2) maps four operation tables onto these same six R-OBS states." as Wave4
 Wave4 .. Receipt
 Wave4 .. Retirement
+note "R-CEILINGS: Linux root-created non-delegated execution unit selected; account-wide absence decisive.\nmacOS qualified sandbox/limits/scheduling/quota/watcher; host matrix per OS release.\nR-EXEC writable areas non-executable; admitted executor alone starts harness; no account builds/tests.\nR-ALLSTOP journals every generation stop; partial/unknown is incident, explicit recovery only.\nR-WATCH requests one-account freeze + dispatcher stop, never unjournaled killing." as Wave5
+Wave5 .. Receipt
+Wave5 .. Retirement
 @enduml

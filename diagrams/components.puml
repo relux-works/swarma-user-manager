@@ -12,7 +12,7 @@ package "swarma-user-manager process\nroot; one helper-op/1 invocation (v0)" {
   component "OS account backend\nmacOS dscl / Linux groupadd, useradd" as Accounts
   component "Descriptor-safe file operations\ntrusted directory descriptors; no-follow" as Files
   component "Retirement / metadata sweep\nquiescence; keys destroyed before deletion\nclosed-schema service-generated export only" as Archive
-  component "Egress adapter (v1)\npf / nftables; evidence matrix" as Firewall
+  component "Egress adapter\nv0 static range deny; v1 account narrowing\npf / nftables; evidence matrix" as Firewall
   component "Read-only effect.observe\noriginal caller / operator; six evidence states" as Observe
   component "Authorised exec.stop\nreceipt + live identity; TERM / KILL\naccount-wide absence ONLY; latest-receipt fence" as Stop
 }
@@ -27,9 +27,15 @@ database "Root-owned configuration\nroles, ranges, metadata retention, approved 
 database "Root-owned manager control state\nledger + allocation cursor; lock; journal; audit\nlauncher-written start receipts; v1 applied state" as State
 database "OS directory service\naccount / primary-group records\nmanager-created; backend storage" as OS
 folder "Account-owned homes\nroot-controlled home roots\nRoot quarantine + metadata exports" as Homes
-component "Kernel egress rules (v1)\nhelper-owned pf anchor / nftables table" as Kernel
-component "curator-run -> harness\nagent account UID; immutable plan only" as Agent
+component "Kernel egress rules\nv0 range rule BEFORE accounts; v1 narrowing\nhelper-owned pf anchor / nftables table" as Kernel
+component "curator-run -> harness\ntrusted agent UID; admitted executor path only" as Agent
 component "swarma-credential-broker\nservice account; owns credentials / bindings / leases" as Broker
+component "Read-only usage sampler (R-WATCH)\nleast OS-required privilege; root only if required\nno other authority; interface unpublished" as Sampler
+component "Usage watcher\nper-class thresholds; interface unpublished" as Watcher
+component "swarma-dispatcher\nworkspace contract / journaled stop owner" as Dispatcher
+component "Approved workspace executors\nswarma-workspace-materialize / swarma-workspace-export\nchild UID; fixed environment; design labels" as Workspace
+component "R-VERIFY runners\nisolated ephemeral; another machine; no secrets" as Verify
+component "Session host\nservice UID; delivery / bound-board snapshots" as Host
 component "Profile proxy (v1)\ntrusted service account; verified listener" as Proxy
 
 actor "Operator phone\nsecure element; biometric gate" as Phone
@@ -71,8 +77,25 @@ LFiles --> Homes : opened home as cwd
 Launch --> Receipt
 Receipt --> State
 Receipt --> Exec
-Exec --> Agent : verified exec; only standard FDs + FD3 plan
-Agent --> Broker : fresh connection; lease
+Exec --> Agent : admitted harness executor only; standard FDs + FD3 plan
+Exec --> Workspace : approved child-UID exec; materialize before work;\nexport only after confirmed absence
+Dispatcher --> Workspace : immutable admitted plans via launcher; no repository held
+Workspace --> Homes : private standalone repository; export data before retirement
+Workspace --> Dispatcher : bounded change set; no worker Git history
+Sampler --> State : read-only generation attribution
+Sampler --> Homes : read-only home usage
+Sampler --> Kernel : read-only network / refused counters
+Sampler --> Agent : read-only CPU / memory / process count
+Sampler --> Watcher : per-UID telemetry
+Watcher --> Dispatcher : hard threshold: one-account freeze + journaled exec.stop
+Watcher --> Phone : operator alerts; unpublished format
+Operator --> Dispatcher : R-ALLSTOP: authentication + one confirmation; hold admission
+Operator --> Firewall : authorized range flip to deny-all; journaled
+Dispatcher --> Stop : every agent / workplace generation; confirmed absence
+Operator --> Broker : freeze leases / renewals; delivered tokens keep vendor lifetime
+Operator --> Host : close delivery; snapshot bound boards
+Dispatcher --> Verify : board-owned controlled verification; results as data
+Agent --> Broker : trusted agent only; fresh connection / lease
 Broker --> State : reads ledger / v1 applied state; readability is not authority
 
 note bottom of Recovery
@@ -103,7 +126,8 @@ end note
 note bottom of Archive
   Destroy declared keys before home deletion; failure/unknown keeps retiring (§4.4.1).
   Delete all home content/names/links through descriptors; no classification.
-  Export only closed-schema service-generated metadata; no agent-controlled strings/names/links/bodies.
+  R-TRANSFER workspace export recorded BEFORE retirement, or explicit operator waiver.
+  Retirement export only closed-schema service-generated metadata; no agent-controlled strings/names/links/bodies.
   Export schema/provenance/naming/bounds and audit encoding open (§14 question 6).
   Separate swarma-operator retention: authentication + exact-content confirmation;
   refused inside agent sessions; confidentiality not guaranteed; format unpublished (§14 questions 1, 17).
@@ -119,11 +143,16 @@ note bottom of Firewall
   Verify served digest; re-apply existing allocations flushes kernel/old proxy sessions.
   R-SVC-EGRESS: dispatcher/host deny-all, broker via own proxy; resolver sandbox qualified.
   Installer owns start-time and periodic service-policy checks; lapse drops readiness.
-  R-WORKPLACE: helper v1 enforced activation incl. loopback; rb-exec under service UID.
+  R-RANGE-DENY: range 30000-59999 before accounts; v0 proxy listeners only.
+  Install/start/scheduled test-UID precedence probe: any earlier quick match -> incident/readiness drop.
+  R-NET-TOOL: workplaces ZERO egress, no loopback/proxy exception.
+  Linux network namespace + Unix-only families; macOS deny-network sandbox + per-UID deny.
+  R-SOCKETS: test UID reaches exactly declared platform sockets, no other sockets.
+  R-WORKPLACE: helper v1 enforced activation; rb-exec under service UID.
   v1: refuse unsupported tuple; never report enforcement without whole-matrix evidence.
   Denial before first launch; retain until account/group removal (§8).
 end note
-note "Defining spec: [[../spec/helper.md#1-purpose §1 process split]], [[../spec/helper.md#2-invocation §§2-3 invocation/policy]],\n[[../spec/helper.md#46-lock-journal-and-idempotency §4.6 recovery]], [[../spec/helper.md#6-file-operations §6 paths]],\n[[../spec/helper.md#7-the-launcher-swarma-user-launcher §7 launcher]], [[../spec/helper.md#8-firewall-per-account-v1 §8 egress]].\nBoxes are conceptual responsibilities within binaries, not implemented classes or extra processes.\nCurrent: nothing implemented; v0 accounts/launcher, v1 egress, v2 grants (§13).\nv0/v1 refuse grants; v2 subject-bound chain checks target/time/revocation (§9); signature grammar open.\nSH2+ joint admission remains gated by I4 publication (§§7, 14); dispatcher alone invokes the launcher.\nDonor provisioning is a separate component; variant B disabled pending its spec (§1.1)." as Scope
+note "Defining spec: [[../spec/helper.md#1-purpose §1 process split]], [[../spec/helper.md#2-invocation §§2-3 invocation/policy]],\n[[../spec/helper.md#46-lock-journal-and-idempotency §4.6 recovery]], [[../spec/helper.md#6-file-operations §6 paths]],\n[[../spec/helper.md#7-the-launcher-swarma-user-launcher §7 launcher]], [[../spec/helper.md#8-firewall-per-account-v1 §8 egress]].\nBoxes are conceptual responsibilities within binaries, not implemented classes or extra processes.\nCurrent: nothing implemented; v0 accounts/launcher/static range rule, v1 narrowing, v2 grants (§13).\nv0/v1 refuse grants; v2 subject-bound chain checks target/time/revocation (§9); signature grammar open.\nSH2+ joint admission remains gated by I4 publication (§§7, 14); dispatcher alone invokes the launcher.\nDonor provisioning is a separate component; variant B disabled pending its spec (§1.1)." as Scope
 Scope .. MEntry
 note bottom of State
   R-GEN: fresh random 128-bit generations, ledger store epoch and reader floors.
@@ -137,7 +166,7 @@ note bottom of Operator
   holder of broker v0 root and operator signing authority; never a harness account.
   Machine verifies act-bound signature against pinned phone key; no reuse for another act.
   App shows who/actions/until; widening requires authentication + exact-content confirmation;
-  CLI refuses widening inside agent sessions. Revocation: one biometric confirmation.
+  CLI refuses all operator acts inside agent sessions. Revocation: one biometric confirmation.
   Command binary/wire, signature domain/canonical bytes, exact sshd config,
   OS entry and phone-to-helper authenticated transition unpublished (§14 question 17).
   No signature-algorithm change mandated; root/device compatibility remains publication work.
@@ -147,5 +176,26 @@ note bottom of Observer
   No other principal's private effect.observe journal access (§§2-3, 14 question 17).
   Installer or operator creates both protected service-class accounts; dispatcher cannot (§4.3).
   NOPASSWD stays only for dispatcher helper/launcher rules; operator/installer authenticate.
+end note
+note bottom of Workspace
+  R-TRANSFER: exact B + manifest digest + write scope + exec profile covered by plan digest.
+  No hooks/remotes/credential helpers; no linked cross-account worktrees.
+  Whole-export refusals and caps; only original requester gets digested result.
+  Board accepts resource only; orchestrator imports signed C, exact-commit independent review,
+  rework from C and signed fast-forward through existing board path (§7).
+  Formats/caps/interlocks unpublished (§14 question 15); no general launcher copy operation.
+end note
+note bottom of Sampler
+  CPU, memory, process count, home disk, network and refused connections incl. mail ports.
+  Watcher never kills without journal; node-wide stop manual only (§§8.2-8.3).
+  Partial/unknown R-ALLSTOP is incident; admission closed; explicit recovery, no restart.
+end note
+note bottom of Agent
+  R-EXEC: OS exec allowlist; writable areas non-executable; protected shared-tool wrapper only.
+  No account-started harness/agent environment, builds/tests/downloads or heavy tools.
+  R-CEILINGS: selected root-created non-delegated Linux unit; qualified macOS mechanisms.
+  R-STANDING: trusted local loop only; plan surfaces verified before launch/restart/native resume.
+  Untrusted standing workplace loop stays at donor; no subscription binding/lease.
+  R-SHARED: no shared services beside untrusted work; publish host capability matrix.
 end note
 @enduml

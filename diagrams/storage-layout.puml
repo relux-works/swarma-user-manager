@@ -4,7 +4,7 @@ left to right direction
 
 package "Platform root chosen at installation (§4.0)\nexample /opt/swarma; root 0755" {
   folder "libexec/ - root 0755\nswarma-user-manager: v0 accounts, v1 egress\nswarma-user-launcher: dispatcher caller only\nswarma-dispatcher: Unix-socket service from first slice\nswarma-credential-broker: v0 daemon / CLI\nswarma-session-host: SH2+ service-account host\nswarma-session-runner: SH2+ agent-account runner\nfixed protected release paths" as Binaries
-  folder "etc/ - root 0755\nuser-manager.json: roles/ranges/metadata retention\napproved-executors.json: paths/digests\nmachine-owned network binding beside config (filename/encoding unpublished)" as Config
+  folder "etc/ - root 0755\nuser-manager.json: roles/ranges/metadata retention\napproved-executors.json: paths/digests\nworkspace materialize/export design labels; task exec profiles unpublished\nmachine-owned network binding beside config (filename/encoding unpublished)" as Config
   package "lib/user-manager/ - root control state" {
     file "ledger.json - root 0644\nfresh random 128-bit generations forever; UID cursor\nmonotonic store epoch (encoding unpublished)" as Ledger
     folder "receipts/ - root\nstart files 0644\n<generation>/<execution_id>.json" as Receipts
@@ -27,11 +27,12 @@ component "swarma-user-launcher\nroot until groups/GID/UID drop" as L
 component "swarma-dispatcher\nservice account swarma-dispatcher" as D
 component "swarma-credential-broker\nits service UID; credential state owned by broker" as Broker
 component "curator-run -> harness\nagent UID; account-owned content" as Agent
-component "Kernel firewall (v1)\nhelper-owned pf parent/account anchors\nor nftables table" as Firewall
+component "Kernel firewall\nv0 static UID-range rule; v1 per-account narrowing\nhelper-owned pf parent/account anchors or nftables table" as Firewall
 
 Installer --> Binaries : install protected binaries
 Installer --> Config : install policy and approved list
 Installer --> Journal : install state directories / sudoers (§11)
+Installer --> Firewall : static range deny BEFORE agent accounts; active test-UID precedence probe
 Installer --> M : configured service creation for operator/observer (§4.3)
 Operator --> M : helper only; authenticated sudo; timestamp_timeout=0
 Observer --> Ledger : accounts read without confirmation
@@ -42,10 +43,10 @@ M --> Applied : publish after successful v1 apply
 M --> OS : create / remove account and group
 M --> ServiceHomes : descriptor-relative create; fchown / fchmod
 M --> AgentHomes : descriptor-relative create; no recursive chown
-M --> Quarantine : only after verified quiescence
+M --> Quarantine : only after verified quiescence and recorded workspace export\nor explicit operator waiver; dispatcher owns export obligation
 M --> Quarantine : declared keys destroyed BEFORE deletion; bounded batches delete ALL home objects; yield lock;\nfailed/unknown/incomplete keeps retiring and reservations
 M --> Archives : export from trusted service records ONLY (schema/provenance gate);\nsweep metadata age then total; preserve live effect/tombstone evidence
-M --> Firewall : denial before first launch; cleanup after account/group
+M --> Firewall : v1 narrowing before launch; workplace ZERO egress;\naccount-rule cleanup after account/group; static range rule remains
 L --> Config : approved path + digest; caller policy
 L --> Ledger : active agent / qualified workplace generation; caller owner
 L --> Journal : transition lock; bounded dependency recovery; reservations/accounting first
@@ -67,7 +68,7 @@ end note
 note bottom of Archives
   Ordinary retirement deletes the home; no archive/delete/keep selector (§4.4.1).
   Destroy declared keys before walk; failed/unknown destruction/deletion keeps retiring.
-  Export never copies agent-controlled strings/names/links/bodies; service provenance required.
+  Retirement metadata export never copies agent-controlled strings/names/links/bodies; service provenance required.
   Export schema/naming/bounds, declared paths and audit encoding open (§14 question 6).
   Separate explicit swarma-operator home retention: authentication + exact-content confirmation;
   refused inside agent sessions; confidentiality not guaranteed; format unpublished (§14 questions 1, 17).
@@ -99,7 +100,11 @@ note bottom of Ledger
   Each reader keeps highest store epoch outside rollback domain; reconcile surviving inventory.
   Retiring/removed never becomes active; pre-restore coverage unavailable until proved.
   Restore mark/floor encoding unpublished; whole-machine rollback not locally detectable.
-  F-16: cross-account repository has private standalone Git administration; no linked worktree.
+  R-TRANSFER / F-16: cross-account repository private/standalone; no hooks/remotes/helpers.
+  Approved workspace materialize before work / export after confirmed UID absence, child UID.
+  Dispatcher relays/journals base archive, holds no repository; result only original requester.
+  Export obligation discharged by recorded export or explicit operator waiver before deletion.
+  Formats/caps/retention/interlocks unpublished (§14 question 15).
 end note
 note bottom of Operator
   Neither operator nor observer hosts a harness session; homes under services/, not workers/.
@@ -112,5 +117,24 @@ note bottom of Operator
   Read-only observer status/grants/accounts/bindings require no confirmation.
   Other read interfaces, command binary/wire, canonical bytes/domain, exact sshd/OS entry,
   phone-to-helper authenticated transition, key lifecycle and service egress rows unpublished (§14 question 17).
+end note
+note bottom of Firewall
+  R-RANGE-DENY: range 30000-59999; v0 proxy listeners only, v1 account narrowing/zero egress.
+  Linux every-protocol skuid counters/logs; macOS pf user range + sandbox beyond TCP/UDP.
+  Active precedence probe install/start/schedule; earlier quick on any interface -> incident/readiness drop.
+  R-NET-TOOL workplace Linux namespace + Unix-only families; macOS deny-network sandbox + UID deny.
+  R-SOCKETS probe proves reachable set equals declared platform sockets; all others unreachable.
+  R-ALLSTOP operator-authorized range deny-all + all-generation journaled confirmed absence;
+  partial/unknown incident keeps admission closed; explicit recovery only (§8.3).
+end note
+note bottom of AgentHomes
+  R-EXEC writable areas non-executable; OS task allowlist, protected shared-tool wrapper only.
+  R-CEILINGS selected Linux non-delegated unit + per-UID agents-filesystem disk quota.
+  macOS aggregate APFS quota, per-account disk/memory watcher soft; qualified host matrix.
+  R-WATCH read-only least-privilege sampler: CPU/memory/process/home/network/refused counters incl. mail.
+  R-VERIFY builds/tests/code execution only off-host ephemeral secret-free runners.
+  R-STANDING trusted local loops verify plan surfaces at every launch/restart/native resume.
+  R-UNTRUSTED v0 refusal; v1 ceilings/exec/zero workplace egress/no local loop or subscription lease.
+  R-SHARED no shared services beside untrusted work; platform services excluded from shared definition.
 end note
 @enduml

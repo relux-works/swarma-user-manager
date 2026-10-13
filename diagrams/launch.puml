@@ -12,7 +12,7 @@ participant "swarma-user-manager\n(root, no arguments)" as M
 note over D,M
   [[../spec/helper.md#7-the-launcher-swarma-user-launcher Defining spec §7 launcher]],
   [[../spec/helper.md#47-execstop §4.7 stop]], [[../spec/helper.md#5-cross-component-reconciliation §5 effect IDs]].
-  Current repository: unimplemented design; v1 adds egress, v2 grants (§13).
+  Current repository: unimplemented design; v0 installs static range deny; v1 narrows egress/admission, v2 grants (§13).
   SH2+ joint admission remains gated by I4 publication (§14); dispatcher is the only launcher caller.
   Executor intake / Decision 0021 amendment is publication work (§7), not implemented here.
   Manager owns ledger/journal/audit; launcher writes root-owned start receipts.
@@ -47,6 +47,9 @@ break Inactive / retiring generation or wrong owner
   L --> D: generation_not_active / target_not_owned
 end
 note over L,R: Before new physical start: zero UID processes; no unresolved prior execution/stop.
+L -> R: recorded admission class and qualified host capability matrix;\nexec profile + ceiling/network/socket/deployment gates before start
+L -> L: Linux root-created non-delegated per-execution unit;\nmacOS qualified sandbox / process-CPU limits / scheduling / quota / watcher
+note over L,E: R-EXEC: OS allowlist; writable areas non-executable; no heavy/network tools.\nShared executables only through protected fixed-subcommand wrapper; no account-started loop.\nWorkplace ZERO egress: Linux no-external-interface namespace + Unix-only families;\nmacOS deny-network sandbox + per-UID deny; no subscription binding/lease or local harness.
 L -> R: executor id → approved path + SHA-256
 L -> L: open executable no-follow; verify digest; retain verified handle THROUGH exec
 break Unapproved executor or digest mismatch
@@ -87,7 +90,7 @@ L -> L: after verified receipt-matching UID/GID transition: release and close ge
 L -> E: exec verified executor as uid 30412; retain executable handle through kernel exec\ninternal handles close at last use or qualified close-on-exec\nexecutor receives only 0-2 and read-only FD3
 note over L,E: Exec failure: release handles/staging resources; preserve receipt/effect evidence.\nUnknown outcome reconciles SAME effect; never launches twice (§§4.6, 7).
 E -> E: verify immutable caller-composed plan and digested PATH;\nresolve protected credential binding (no profile composition)
-E -> B: fresh connection; lease.request (broker lease-at-launch)
+E -> B: trusted harness executor only; fresh connection; lease.request (broker lease-at-launch)
 note over E,B: Lease refusal/recovery details unspecified in this spec §7; broker contract owns them.\nExecutor prepares work/ and tmp/ as agent UID, then execs harness; no profile composition.
 note over S, E: Dispatcher owns the execution lifetime; sudo is never a signal relay
 note over D,S
@@ -136,6 +139,22 @@ note over D,E
   SH2+ survival across controller-only restart requires qualified separate containment.
   Every old-daemon supervisor write is fenced by durable daemon-instance epoch.
   A service swap confirms absence for every affected execution; unit configs unpublished.
-  F-16: cross-account workspace has standalone private Git administration, no linked worktree.
+  R-TRANSFER / F-16: approved swarma-workspace-materialize before work;
+  swarma-workspace-export after confirmed UID absence and workplace write fence.
+  Child UID / fixed environment; no general launcher copy operation.
+  Fresh standalone repository: no hooks/remotes/credential helpers; no linked cross-account worktree.
+  Export recorded BEFORE retirement or explicit operator waiver; dispatcher owns obligation.
+  OS profile blocks harness/agent binaries except admitted plan executor path.
+  R-STANDING: trusted harness surfaces checked before launch/restart/native resume; drift refuses.
+  R-VERIFY: builds/tests/worker-produced code only in secret-free off-host ephemeral runners.
+end note
+note over D,M
+  R-WATCH hard threshold requests freeze + journaled exec.stop for that one account only;
+  least-privilege read-only sampler has no stop authority; phone alerts (§8.2).
+  R-ALLSTOP: manual operator authentication + one confirmation; refused inside agent sessions.
+  Dispatcher hold; range deny-all; ALL agent/workplace generation stops with confirmed absence;
+  broker freezes leases/renewals (delivered tokens keep vendor lifetime);
+  host closes delivery/snapshots boards; every part journaled.
+  Partial/unknown -> incident and closed admission; explicit recovery only (§8.3).
 end note
 @enduml
