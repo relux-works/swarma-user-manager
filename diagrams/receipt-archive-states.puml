@@ -6,13 +6,21 @@ state "Start receipt / execution evidence (§§4.7, 7)" as Receipt {
   state "No start receipt yet" as NoReceipt
   state "Root start receipt exists\nwritten before privilege drop / exec" as Recorded
   state "Process absence confirmed ONLY\nresult receipt: remaining = 0" as Absent
+  state "ALLSTOP never-launched absence\nfresh generation-bound evidence; no start receipt" as EmptyAbsent
   [*] --> NoReceipt
+  NoReceipt --> EmptyAbsent : root all-stop mark + closed create/launch/ingress frontier;\ncomplete no-launch coverage, no pending launch; fresh qualified zero-UID-process observation
+  NoReceipt --> NoReceipt : missing/ambiguous history or unexpected processes stays unresolved;\nno dummy start, old receipt, generic kill or automatic retirement
   NoReceipt --> Recorded : launcher: setsid, atomic root write\nthen clear groups / GID / UID / exec
   Recorded --> Recorded : launch with existing execution_id refuses\nexecution_already_started
   Recorded --> Recorded : stop identity/latest-receipt mismatch refuses signalling;\nprocesses_remain / unknown -> pending same effect
   Recorded --> Absent : helper exec.stop verifies active owned generation,\nlatest receipt + live identity; TERM / grace / KILL ALL UID processes;\nverify same set incl. escaped/OS/pre-receipt processes over quiet period
   Absent --> Absent : effect/receipt evidence retained for reconciliation\nterminal stop replays WITHOUT signalling; no second-launch permission
 }
+note right of EmptyAbsent
+  Distinct evidence from a receipt-backed stop; no lifecycle state added.
+  Act/inventory/fence evidence encoding and qualification remain open (§14 question 22).
+  All durable service parts must reconcile before scoped explicit recovery (§8.3).
+end note
 note right of Recorded
   Process: swarma-user-launcher, root until UID drop.
   Root-owned mode 0644 start receipt:
@@ -89,7 +97,7 @@ Scope .. Metadata
 note "R-FATE (§7) owns process-class fate beside R-FD3; service swaps verify affected-set absence.\nOld-daemon supervisor writes fenced by durable instance epoch; no live adoption.\nR-GEN fenced restore cannot resurrect retiring/removed; lost coverage unavailable.\nR-TIME expiry deletion requires boot-inclusive monotonic lifetime (§4.4.1).\nR-OUTCOME (§4.6.2) maps four operation tables onto these same six R-OBS states." as Wave4
 Wave4 .. Receipt
 Wave4 .. Retirement
-note "R-CEILINGS: Linux root-created non-delegated execution unit selected; account-wide absence decisive.\nmacOS qualified sandbox/limits/scheduling/quota/watcher; host matrix per OS release.\nR-EXEC writable areas non-executable; admitted executor alone starts harness; no account builds/tests.\nR-ALLSTOP journals every generation stop; partial/unknown is incident, explicit recovery only.\nR-WATCH requests one-account freeze + dispatcher stop, never unjournaled killing." as Wave5
+note "R-CEILINGS: Linux root-created non-delegated execution unit selected; account-wide absence decisive.\nmacOS qualified sandbox/limits/scheduling/quota/watcher; host matrix per OS release.\nR-EXEC writable areas non-executable; admitted executor alone starts harness; no account builds/tests.\nR-ALLSTOP root fence before inventory; receipt-backed stops or fresh never-launched absence\nwith complete launch coverage; unknown history stays unresolved, no dummy launch/retirement.\nDirect operator helper stops progress without dispatcher; ALL service parts before scoped recovery.\nR-WATCH v0 generation-bound stop/hold/status; never unjournaled killing or phone promise.\nPer-account freeze lifecycle remains v1/S2 publication work." as Wave5
 Wave5 .. Receipt
 Wave5 .. Retirement
 @enduml

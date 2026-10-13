@@ -73,7 +73,7 @@ Stop --> State : matching root start receipt
 Stop --> Agent : latest receipt/current generation; TERM/KILL same UID set; quiet absence
 LEntry --> Launch
 Launch --> Config
-Launch --> State : same transition lock + bounded dependency recovery; active owned generation
+Launch --> State : same transition lock; all-stop mark refuses ALL physical starts;\nactive owned generation + pinned exec policy identity/body digest
 Launch --> LFiles : no-follow executable / home
 LFiles --> Homes : opened home as cwd
 Launch --> Receipt
@@ -90,14 +90,25 @@ Sampler --> State : read-only generation attribution
 Sampler --> Homes : read-only home usage
 Sampler --> Kernel : read-only network / refused counters
 Sampler --> Agent : read-only CPU / memory / process count
-Sampler --> Watcher : per-UID telemetry
-Watcher --> Dispatcher : hard threshold: one-account freeze + journaled exec.stop
-Watcher --> Phone : operator alerts; unpublished format
-Operator --> Dispatcher : R-ALLSTOP: authentication + one confirmation; hold admission
-Operator --> Firewall : authorized range flip to deny-all; journaled
-Dispatcher --> Stop : every agent / workplace generation; confirmed absence
-Operator --> Broker : freeze leases / renewals; delivered tokens keep vendor lifetime
-Operator --> Host : close delivery; snapshot bound boards
+Sampler --> Watcher : generation / boot / interval-bound telemetry;\nstale or unverifiable sample discarded, never retargeted
+Watcher --> Dispatcher : v0 hard threshold: affected-account journaled exec.stop + published hold
+Watcher --> State : journal threshold / hold / stop / confirmed or unknown result; v0 status-only
+Observer --> State : authorised watcher status read; no phone notification guarantee
+Operator --> Dispatcher : direct SAME R-ALLSTOP act; authentication + one confirmation; hold at admission
+Operator --> Recovery : direct SAME R-ALLSTOP act; persist receiver mark before inventory;\nclose create/activation/launch/ingress, including already-issued calls
+Operator --> Firewall : promptly issue range deny-all; journal independently
+Dispatcher --> Stop : receipt-backed E-stops when available; reconcile operator stops, no relaunch
+Operator --> Stop : authenticated helper path under SAME act; no dispatcher dependency
+Stop --> State : fenced inventory: fresh never-launched absence with full no-launch coverage;\nmissing/ambiguous history stays unresolved, never dummy start/retirement
+Operator --> Broker : promptly issue SAME act directly; freeze leases / renewals; delivered tokens keep vendor lifetime
+Operator --> Host : promptly issue SAME act directly; close delivery/snapshot boards
+note bottom of Stop
+  Stops begin after independent cuts are issued, without waiting for acknowledgements.
+  Broker unavailable + valid helper absence: broker part unknown, admission closed.
+  Dispatcher absent: direct cuts/stops progress, dispatcher hold/journal remains unknown.
+  All durable parts must reconcile before scoped explicit recovery; hold last, no restart.
+  Inventory/act/phone-to-helper encodings remain gated (§14 questions 17, 22).
+end note
 Agent --> Broker : trusted agent only; fresh connection / lease
 Broker --> State : reads ledger / v1 applied state; readability is not authority
 
@@ -199,10 +210,12 @@ end note
 note bottom of Sampler
   CPU, memory, process count, home disk, network and refused connections incl. mail ports.
   Watcher never kills without journal; node-wide stop manual only (§§8.2-8.3).
-  Partial/unknown R-ALLSTOP is incident; admission closed; explicit recovery, no restart.
+  Partial/unknown R-ALLSTOP is incident; all durable service parts required before scoped recovery.
+  v0 R-WATCH stop/hold/status only; v1 freeze lifecycle remains open with S2 (§8.2).
 end note
 note bottom of Agent
-  R-EXEC: OS exec allowlist; writable areas non-executable; protected shared-tool wrapper only.
+  R-EXEC: machine-selected identity/body pin; launcher verifies before child code.
+  Full invocation/transitive interpreted inputs qualify; no direct/indirect heavy bypass.
   No account-started harness/agent environment, builds/tests/downloads or heavy tools.
   R-CEILINGS: selected root-created non-delegated Linux unit; qualified macOS mechanisms.
   R-STANDING: trusted local loop only; plan surfaces verified before launch/restart/native resume.

@@ -20,6 +20,7 @@ note left of creating
   OS backend stores account/group records; account owns home content.
   One durable lock protects both binaries; bounded retirement batches yield it.
   Invalid role/ownership/quota refuses before creation (§3).
+  All-stop root mark closes create/activation and already-issued create frontier (§8.3).
   Unmanaged name/home and dirty reused UID refuse (§§4.1, 4.3).
   Fresh random 128-bit generation (R-GEN); never reused with UID or label.
 end note
@@ -29,11 +30,13 @@ note right of active
   That enables donor-side opt-ins only; all host boundaries stay, including transfer/review.
   Helper v1 zero egress, no proxy/loopback or web-service socket; relay/backend publication gate.
   swarma-rb-exec controls run under service principal, never workplace UID.
-  F-13 persistence denial qualifies per OS; idle UID has zero processes.
+  Account-wide persistence denial qualifies per OS; idle UID has zero processes.
   swarma-dispatcher service UID owns execution lifetime.
   Broker service UID owns bindings/leases; trusted active agent may be bound.
   Untrusted class never has subscription binding/lease or local agent loop.
-  Recorded class + qualified host matrix/ceilings/exec profile/socket set required.
+  Recorded class + qualified host matrix/ceilings/socket set required.
+  Machine-owned exec identity/body pin; drift refuses at launch/retry (§§7-8).
+  All-stop mark refuses every physical start, including workspace executors.
   No shared services on hosts admitting untrusted class; v0/Slice 0 refuses it.
   Protected service-class swarma-operator and swarma-observer never host a harness or launch.
   Only configured installer or operator creates them; dispatcher cannot (§4.3).
@@ -48,7 +51,7 @@ end note
 note right of retiring
   [[../spec/helper.md#44-userretire Defining spec §4.4]].
   Launcher refuses new starts; broker refuses leases.
-  No manager-to-broker call; dispatcher/operator owns unbind obligation (F-12).
+  No manager-to-broker call; dispatcher/operator owns unbind obligation.
   Unknown/failed observation does not prove quiescence (§4.7);
   exact retirement observation error: unspecified in spec §4.4.
   TERM/KILL and verification cover the same generation UID set as exec.stop (§4.7).
@@ -78,12 +81,18 @@ note bottom of creating
   R-NET-TOOL Linux workplace namespace + Unix-only families; macOS deny-network sandbox + UID deny.
   R-CEILINGS selected Linux non-delegated unit, macOS qualified mechanisms; matrix per OS release.
   Kernel baseline and exact declared socket reachability/deployment inventory qualify (§12).
-  R-EXEC OS allowlist; writable areas non-executable; light checks only, R-VERIFY off-host.
+  R-EXEC full invocation/transitive interpreted inputs qualify; unsupported tools R-VERIFY off-host.
+  v0 R-WATCH generation-bound stop/hold/status; no phone/per-account freeze promise.
+  v1/S2 freeze lifecycle remains open.
 end note
 note bottom of retiring
   R-ALLSTOP: manual operator act with authentication + one confirmation; refused in agent sessions.
-  Hold admission + range deny-all + every generation account-wide stop, journaled;
+  Direct same-act service parts; root receiver fence before inventory.
+  Receipt-backed account-wide stop; never-launched fresh absence requires full no-launch coverage.
+  Unknown/lost history unresolved; no dummy launch or automatic retirement.
+  Direct containment/stops progress without dispatcher or other-part acknowledgements;
   lease/renewal freeze, delivered tokens retain vendor lifetime, close delivery/snapshot boards.
-  Partial/unknown -> incident and closed admission; recovery explicit, never automatic restart.
+  All durable parts, dispatcher included, required before scoped explicit recovery/hold-last.
+  Partial/unknown -> incident and closed admission; never automatic restart.
 end note
 @enduml

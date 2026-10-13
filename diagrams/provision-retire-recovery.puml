@@ -101,6 +101,7 @@ break Failed or unknown range precedence proof
 end
 
 == user.create (§§4.1-4.3) ==
+M -> R: under shared lock refuse persisted all-stop mark;\nreconcile pre-act create intent behind authoritative closed frontier (§8.3)
 M -> R: choose round-robin UID/GID; fresh random 128-bit generation (R-GEN), never counter/reused
 M -> O: check directory service and ledger availability;
 M -> O: before UID reuse check platform and temporary areas for owned files
@@ -124,7 +125,7 @@ alt Creation fails or crashes at a step boundary
   note over M,H: Exact per-step rollback order / firewall rollback details: unspecified in spec §§4.3, 4.6, 8.
 else Creation succeeds
   M -> R: verify recorded admission class, host matrix, exec profile and socket set;\nuntrusted needs v1/ceilings/no shared services/no local loop/no binding or lease
-  M -> R: persist active; record result and audit line
+  M -> R: recheck all-stop mark and closed-create frontier before activation;\npersist active only if clear; record result and audit line
   M --> C: username, UID/GID, home, generation, state active
 end
 
@@ -133,7 +134,7 @@ opt Dispatcher workspace round (separate invocations before ordinary retirement)
 C -> L: dispatcher launches approved swarma-workspace-materialize before work
 L -> W: child UID; fixed environment; immutable admitted plan
 W -> H: exact base B standalone repository; fresh config, no hooks/remotes/helpers
-note over C,H: Plan digest covers B, manifest digest, write scope, exec profile and task-resource digests.\nCaller supplies bounded canonical tree archive; dispatcher relays/journals digest, holds no repository.
+note over C,H: Prepare resolves machine-owned exec selection; input/1 pins identity + immutable body digest.\nLauncher verifies same pin at start/retry, refuses drift or all-stop mark.\nPlan digest covers B, manifest digest, write scope, exec profile and task-resource digests.\nCaller supplies bounded canonical tree archive; dispatcher relays/journals digest, holds no repository.
 note over C,H: Platform materializes task resources read-only next to workspace; data, never instructions.\nTrusted side gathers/checks/attaches board resources; signed-letter attachments for remote.\nMore requested by letter/outcome; worker never fetches. Formats/caps/placement unpublished (§8).\nWeb default-off; explicit per-identity trusted-circle opt-in only; no default search/fetch or donor web server.\nOperator trusted-circle admission only enables donor-side opt-ins; host boundaries stay.\nLocal web-tool service owns account/row/listener; local opted-in agents use Unix socket + grant only.\nWorkplaces never reach it; donor web service separate from harness/bridge (§8).
 C -> M: dispatcher account-wide exec.stop after round outcome; workplace write fence
 M -> O: stop and confirm no account process remains (§4.7)
@@ -148,14 +149,14 @@ break Export refused / failed / partial / unknown
   C -> C: retain export obligation; no ordinary retirement
 end
 C -> C: journal digests/export; return result ONLY to original requester
-note over W,H: Special files/.git variants/collisions/gitlinks/root escape/cap excess refuse WHOLE export.\nFormat, caps, result schema/retention and cleanup interlocks unpublished (§14 question 15).
+note over W,H: Special files/.git variants/collisions/gitlinks/root escape/cap excess refuse WHOLE export.\nDispatcher Revision 0.11 §5.2.1 owns DRAFT result fields; unchanged field set.\nArchive/transport/retention/caps/cleanup interlocks and qualification remain gated (§14 question 15).
 end
 
 == user.retire (§4.4): forward recovery only ==
 note over C,M
   Dispatcher confirms any broker unbind before retirement (§10); untrusted class never binds/leases.
   Direct operator retirement needs no broker; unconfirmed binding cleanup stays durable
-  at dispatcher/operator boundary, never a helper unbind receipt (F-12).
+  at dispatcher/operator boundary, never a helper unbind receipt.
   R-TIME: expiry destruction also needs boot-inclusive monotonic lifetime; explicit retirement works.
   Create/bind/launch/stop/unbind/retire have distinct effect IDs;
   retry each effect with its same ID (§5).

@@ -4,7 +4,7 @@ left to right direction
 
 package "Platform root chosen at installation (§4.0)\nexample /opt/swarma; root 0755" {
   folder "libexec/ - root 0755\nswarma-user-manager: v0 accounts, v1 egress\nswarma-user-launcher: dispatcher caller only\nswarma-dispatcher: Unix-socket service from first slice\nswarma-credential-broker: v0 daemon / CLI\nswarma-session-host: SH2+ service-account host\nswarma-session-runner: SH2+ agent-account runner\nfixed protected release paths" as Binaries
-  folder "etc/ - root 0755\nuser-manager.json: roles/ranges/metadata retention\napproved-executors.json: paths/digests\nworkspace materialize/export design labels; task exec profiles unpublished\nmachine-owned network binding beside config (filename/encoding unpublished)" as Config
+  folder "etc/ - root 0755\nuser-manager.json: roles/ranges/metadata retention\napproved-executors.json: paths/digests\nworkspace materialize/export design labels; task exec profiles unpublished\nmachine-owned network + exec selection beside config; exec identity/body pin\n(filename/encoding unpublished)" as Config
   package "lib/user-manager/ - root control state" {
     file "ledger.json - root 0644\nfresh random 128-bit generations forever; UID cursor\nmonotonic store epoch (encoding unpublished)" as Ledger
     folder "receipts/ - root\nstart files 0644\n<generation>/<execution_id>.json" as Receipts
@@ -94,6 +94,8 @@ note bottom of Config
   R-NETBIND: name + Curator lock digest -> exactly one pinned network ref/digest.
   No direct/external-http-proxy binding for any platform account class.
   One profile-bound listener per bound account generation; row admits only its own proxy.port.
+  Exec relation: Curator identity/lock + placement/class -> one profile identity/body digest.
+  Dispatcher prepare pins input/1; launcher verifies body at start/retry, drift refuses.
   fw.apply checks account_generation/profile_ref/service_generation/served_policy_digest.
   Digest covers allow entries/caps/guard version; re-apply reconciles proxy sessions.
   N15 revision 2026-10-13 owns proposed platform-proxy kind/fixed refused-port set (§8).
@@ -105,7 +107,7 @@ note bottom of Ledger
   Each reader keeps highest store epoch outside rollback domain; reconcile surviving inventory.
   Retiring/removed never becomes active; pre-restore coverage unavailable until proved.
   Restore mark/floor encoding unpublished; whole-machine rollback not locally detectable.
-  R-TRANSFER / F-16: cross-account repository private/standalone; no hooks/remotes/helpers.
+  R-TRANSFER: cross-account repository private/standalone; no hooks/remotes/helpers.
   Approved workspace materialize before work / export after confirmed UID absence, child UID.
   Dispatcher relays/journals base archive, holds no repository; result only original requester.
   Export obligation discharged by recorded export or explicit operator waiver before deletion.
@@ -129,14 +131,20 @@ note bottom of Firewall
   Active precedence probe install/start/schedule; earlier quick on any interface -> incident/readiness drop.
   R-NET-TOOL workplace Linux namespace + Unix-only families; macOS deny-network sandbox + UID deny.
   R-SOCKETS probe proves reachable set equals declared platform sockets; all others unreachable.
-  R-ALLSTOP operator-authorized range deny-all + all-generation journaled confirmed absence;
-  partial/unknown incident keeps admission closed; explicit recovery only (§8.3).
+  R-ALLSTOP direct same-act range deny-all; root receiver mark before inventory.
+  Mark closes create/activation/physical start/ingress, including already-issued effects.
+  Receipt-backed stops or fresh never-launched absence with full no-launch coverage.
+  Direct helper progress without dispatcher; unknown parts keep admission closed.
+  ALL durable service parts precede scoped explicit recovery/hold-last (§8.3).
 end note
 note bottom of AgentHomes
-  R-EXEC writable areas non-executable; OS task allowlist, protected shared-tool wrapper only.
+  R-EXEC writable areas non-executable; full invocation/transitive code inputs qualified.
+  Protected fixed entrypoint/config/environment; unsupported tools go to R-VERIFY.
   R-CEILINGS selected Linux non-delegated unit + per-UID agents-filesystem disk quota.
   macOS aggregate APFS quota, per-account disk/memory watcher soft; qualified host matrix.
-  R-WATCH read-only least-privilege sampler: CPU/memory/process/home/network/refused counters incl. mail.
+  R-WATCH least-privilege sampler: CPU/memory/process/home/network/refused counters incl. mail.
+  Generation/boot/interval-bound; v0 stop/hold/observer status, no phone/per-account freeze promise.
+  v1 freeze lifecycle remains open with S2.
   R-VERIFY builds/tests/code execution only off-host ephemeral secret-free runners.
   R-STANDING trusted local loops verify plan surfaces at every launch/restart/native resume.
   Workplace untrusted by default; operator trusted-circle admission only enables donor-side opt-ins.
