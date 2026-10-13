@@ -106,7 +106,7 @@ def denied(result):
     # A timeout, missing executable, syntax error or crash is not a denial.
     if result.get('rc') in (None, 0, 124, 127) or result.get('rc', 0) < 0:
         return False
-    return bool(re.search(r'(?i)not permitted|permission denied|operation denied|not allowed|denied access',
+    return bool(re.search(r'(?i)not permitted|permission denied|do not have permission|operation denied|not allowed|denied access',
                           result.get('stderr', '') + result.get('stdout', '')))
 
 
@@ -286,7 +286,7 @@ def row_acct(cfg):
             success(shell_control_setup) and success(su_control) and success(shell_restore) and
             su['rc'] == 1 and shell['rc'] == 1 and auth['rc'] != 0 and
             success(groups) and groups['stdout'].strip() == str(uid) and
-            observed['kernel_groups'].get('value', {}).get('effective_groups') == [] and
+            observed['kernel_groups'].get('value', {}).get('effective_groups') in ([], [uid]) and
             observed['home_mode'] == '0o700' and observed['home_entries'] == 0)
     return emit('ACCT', {'id_record': identity, 'root_launcher_id': launched,
                          'su_with_sh_shell': su_control, 'shell_control_setup': shell_control_setup,
@@ -480,6 +480,7 @@ def watch_trial(uid, interval, enabled):
     with logfile.open('w') as log:
         p = spawn(binary('grow'), uid, stdout=log)
         start = time.monotonic()
+        next_sample = start
         try:
             while p.poll() is None and time.monotonic() - start < 25:
                 value = rss(p.pid)
@@ -493,7 +494,8 @@ def watch_trial(uid, interval, enabled):
                         p.wait(timeout=3)
                         killed = time.monotonic()
                         break
-                time.sleep(interval)
+                next_sample += interval
+                time.sleep(max(0, next_sample - time.monotonic()))
             if p.poll() is None:
                 stop(p)
             rc = p.wait(timeout=3)
@@ -503,7 +505,9 @@ def watch_trial(uid, interval, enabled):
     return {'rc': rc, 'sample_interval_seconds': interval, 'samples': samples,
             'peak_sampled_rss_bytes': peak, 'last_allocation_bytes': allocations[-1]['bytes'] if allocations else 0,
             'kill_after_detection_seconds': None if killed is None else round(killed - crossed, 4),
-            'threshold_crossing_to_detection_bound_seconds': interval,
+            'max_observed_sample_gap_seconds': round(max(
+                (b['seconds'] - a['seconds'] for a, b in zip(samples, samples[1:])), default=0), 4),
+            'threshold_crossing_latency': 'not directly measured; scheduling delays can exceed the requested interval',
             'elapsed_seconds': round(time.monotonic() - start, 4)}
 
 
@@ -515,6 +519,7 @@ def row_mem_watch(cfg):
     return emit('MEM-WATCH', control, observed, 'soft' if soft else 'unknown',
                 '50 MiB touched every 250 ms (200 MiB/s nominal), 3000 MiB bound; threshold 1 GiB. '
                 'Peak is sampled, not continuous; kill latency starts at detection, true crossing lies between samples. '
+                'Absolute sample schedule, actual maximum gap recorded; no promised crossing-to-detection bound. '
                 'Single allocator demonstration, not a deployed aggregate-UID watcher.',
                 'Root RSS watcher kills above 1 GiB at 250 ms and 1 s sampling')
 
@@ -687,13 +692,13 @@ def row_cron(cfg):
     observed = {'crontab': run(['/usr/bin/crontab', '-'], cfg['uid'], input='# qualification: no jobs\n'),
                 'at': run(['/usr/bin/at', 'now', '+', '1', 'hour'], cfg['uid'], input='/usr/bin/true\n')}
     # Root removal works even while deny files are present.
+    for name in ('cron.deny', 'at.deny'):
+        restore_deny(name)
     observed['remove_crontab'] = run(['/usr/bin/crontab', '-u', USER, '-r'])
     jobs = []
     for result in (controls['at'], observed['at']):
         jobs.extend(re.findall(r'\bjob\s+(\d+)', result.get('stderr', '') + result.get('stdout', '')))
     observed['remove_at_jobs'] = [run(['/usr/bin/atrm', job]) for job in jobs]
-    for name in ('cron.deny', 'at.deny'):
-        restore_deny(name)
     verdict = deny_verdict(list(controls.values()), [observed['crontab'], observed['at']])
     return emit('CRON', controls, observed, verdict,
                 'Empty crontab and at true job one hour away; removed immediately. Existing deny files restored. '
@@ -709,12 +714,14 @@ def row_launchd(cfg):
                      'umask 000; echo started >> ' + str(marker) + '; exec /bin/sleep 30'],
                      'KeepAlive': True, 'RunAtLoad': True}))
     domains = {d: run(['/bin/launchctl', 'print', d + '/' + str(cfg['uid'])]) for d in ('user', 'gui')}
+    os.chown(plist, cfg['runner_uid'], -1)
     control = run(['/bin/launchctl', 'bootstrap', 'user/' + str(cfg['runner_uid']), plist], cfg['runner_uid'])
     time.sleep(.5)
     control['job_lookup'] = run(['/bin/launchctl', 'print', 'user/' + str(cfg['runner_uid']) + '/' + label], cfg['runner_uid'])
     control['job_lookup']['stdout'] = ''  # launchd environment is not public evidence
     control['bootout'] = run(['/bin/launchctl', 'bootout', 'user/' + str(cfg['runner_uid']) + '/' + label])
     marker.unlink(missing_ok=True)
+    os.chown(plist, cfg['uid'], cfg['uid'])
     observed = {'domains_before': {k: {'rc': v['rc'], 'stderr': v.get('stderr', '')} for k, v in domains.items()},
                 'bootstrap_user': run(['/bin/launchctl', 'bootstrap', 'user/' + str(cfg['uid']), plist], cfg['uid'])}
     time.sleep(.5)
@@ -744,11 +751,17 @@ def row_kill(cfg):
         for name, command in commands.items():
             # nohup redirects to a file; provide a private writable cwd/output explicitly.
             if name == 'nohup':
-                command = ['/bin/sh', '-c', 'cd ' + str(ROOT / 'home') + '; exec /usr/bin/nohup /bin/sleep 30 >nohup.out 2>&1']
+                nohup = shutil.which('nohup', path='/usr/bin:/bin:/usr/sbin:/sbin')
+                command = ['/bin/sh', '-c', 'cd ' + str(ROOT / 'home') + '; exec ' +
+                           (nohup or '/usr/bin/nohup') + ' /bin/sleep 30 >nohup.out 2>&1']
             p = spawn(command, cfg['uid'])
             procs.append(p)
             time.sleep(.2)
             controls[name] = {'alive': p.poll() is None, 'rc': p.poll()}
+            if name == 'nohup':
+                controls[name]['resolved_tool'] = nohup
+                logfile = ROOT / 'home' / 'nohup.out'
+                controls[name]['diagnostic'] = redact(logfile.read_text()) if logfile.exists() else 'no output file'
         before = pid_inventory(cfg['uid'])
         kill_uid(cfg['uid'])
         for p in procs:

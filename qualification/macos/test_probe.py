@@ -47,6 +47,7 @@ class RefusalTests(unittest.TestCase):
 
     def test_valid_control_and_permission_denial(self):
         self.assertEqual('hard', probe.deny_verdict([{'rc': 0}], [{'rc': 1, 'stderr': 'Operation not permitted'}]))
+        self.assertEqual('hard', probe.deny_verdict([{'rc': 0}], [{'rc': 1, 'stderr': 'at: you do not have permission to use this program'}]))
 
     def test_absent_or_failing_control_is_unknown(self):
         refused = [{'rc': 1, 'stderr': 'Permission denied'}]

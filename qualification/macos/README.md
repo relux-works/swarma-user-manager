@@ -9,7 +9,7 @@ who forges the runner environment.
 
 The workflow has read-only repository permission, does not retain checkout
 credentials, uses no secrets, and uploads evidence even after failures. The probe
-does not read the runner environment, Keychain, credentials or foreign process
+does not dump the runner environment or read Keychain, credentials or foreign process
 arguments. Process visibility tests target only processes created for the test.
 Every command records its exit code. Unknown means unmeasured, invalid control,
 timeout, malformed evidence, or a scoped observation insufficient for the claim.
@@ -23,7 +23,7 @@ timeout, malformed evidence, or a scoped observation insufficient for the claim.
 | PF | dedicated UID deny anchor, runner-user controls, earlier quick-pass anchor and active test-UID probe | 120 s; temporary root rules on disposable runner, original root NAT/filter rules restored and compared; no state-table snapshot |
 | NPROC | native fork with RLIMIT_NPROC 16 and narrowed limit 8; unlimited control | 120 s; at most 100 children, killed/reaped; inherited limit counts UID, every launch must inherit it |
 | MEM-RLIMIT | native malloc and volatile page touching beyond 128 MiB RLIMIT_AS/DATA; unrestricted allocation; extra AS trial at initial Mach virtual size +128 MiB | 120 s; 16 MiB chunks, 1 GiB maximum, per process; rejected settings are unknown, not absence |
-| MEM-WATCH | native allocator 50 MiB/250 ms, root RSS sampler kills above 1 GiB, at 250 ms and 1 s; no-watcher control | 120 s; 3000 MiB maximum and 25 s trial; sampled peak, detection-to-death latency, one process |
+| MEM-WATCH | native allocator 50 MiB/250 ms, root RSS sampler kills above 1 GiB, at 250 ms and 1 s; no-watcher control | 120 s; 3000 MiB maximum and 25 s trial; sampled peak, detection-to-death latency, actual sample gaps, one process |
 | CPU-QOS | fixed foreground benchmark with one 8 s burner/core at default and taskpolicy background; no-burner baseline; RLIMIT_CPU 1 s/unrestricted control | 180 s; scheduling comparison is not an aggregate CPU-share ceiling; IO unmeasured |
 | DISK | diskutil adds 256 MiB quota volume to disposable APFS image; unrestricted identical random-data write; quotaon support query | 180 s; 1 GiB image, 384 MiB write bound; aggregate volume quota, no hard per-account quota claim |
 | VIS | probe reads controlled runner process ps/top arguments, CPU, RSS; observer UID reads controlled probe; root controls | 120 s; confidentiality and sampler privilege reported separately |
