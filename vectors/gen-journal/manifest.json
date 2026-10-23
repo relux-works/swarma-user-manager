@@ -367,6 +367,93 @@
         "target": "journal",
         "violation": "file-size"
       }
+    },
+    {
+      "name": "late-broken-chain",
+      "file": "late-broken-chain.jsonl",
+      "expect": "journal_chain",
+      "control": "retiring"
+    },
+    {
+      "name": "writer.pending-empty",
+      "expect": "journal_pending_malformed",
+      "control": "active",
+      "fixture": {
+        "target": "writer.pending",
+        "violation": "empty"
+      }
+    },
+    {
+      "name": "writer.pending-malformed",
+      "expect": "journal_pending_malformed",
+      "control": "active",
+      "fixture": {
+        "target": "writer.pending",
+        "violation": "malformed"
+      }
+    },
+    {
+      "name": "writer.pending-noncanonical",
+      "expect": "journal_pending_malformed",
+      "control": "active",
+      "fixture": {
+        "target": "writer.pending",
+        "violation": "noncanonical"
+      }
+    },
+    {
+      "name": "writer.pending-bad-budget",
+      "expect": "journal_pending_malformed",
+      "control": "active",
+      "fixture": {
+        "target": "writer.pending",
+        "violation": "bad-budget"
+      }
+    },
+    {
+      "name": "writer.pending-duplicate-field",
+      "expect": "journal_pending_malformed",
+      "control": "active",
+      "fixture": {
+        "target": "writer.pending",
+        "violation": "duplicate-field"
+      }
+    },
+    {
+      "name": "writer.pending-oversized",
+      "expect": "journal_pending_malformed",
+      "control": "active",
+      "fixture": {
+        "target": "writer.pending",
+        "violation": "oversized"
+      }
+    },
+    {
+      "name": "writer.pending-stale",
+      "expect": "journal_writer_stale",
+      "control": "active",
+      "fixture": {
+        "target": "writer.pending",
+        "violation": "stale"
+      }
+    },
+    {
+      "name": "writer.pending-other-boot",
+      "expect": "journal_writer_stale",
+      "control": "active",
+      "fixture": {
+        "target": "writer.pending",
+        "violation": "other-boot"
+      }
+    },
+    {
+      "name": "writer.pending-future-start",
+      "expect": "journal_writer_stale",
+      "control": "active",
+      "fixture": {
+        "target": "writer.pending",
+        "violation": "future-start"
+      }
     }
   ]
 }

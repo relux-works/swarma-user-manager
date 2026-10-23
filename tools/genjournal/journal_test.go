@@ -102,6 +102,53 @@ func checkCase(t *testing.T, c vectorCase) error {
 	wantCode(t, positiveErr, "ok")
 	f := c.Fixture
 	path := filepath.Join(dir, f.Target)
+
+	if f.Target == "writer.pending" && f.Violation != "present" {
+		if e := makeIntent(dir, p); e != nil {
+			t.Fatal(e)
+		}
+		b, e := os.ReadFile(path)
+		if e != nil {
+			t.Fatal(e)
+		}
+		m, e := decodePending(b)
+		if e != nil {
+			t.Fatal(e)
+		}
+		switch f.Violation {
+		case "empty":
+			b = nil
+		case "malformed":
+			b = []byte("unexpected state")
+		case "noncanonical":
+			b = append([]byte(" "), b...)
+		case "bad-budget":
+			b = bytes.Replace(b, []byte(`"budget_ms":1000`), []byte(`"budget_ms":999`), 1)
+		case "duplicate-field":
+			b = append(append([]byte{}, b[:len(b)-2]...), []byte(`,"budget_ms":1000}`+"\n")...)
+		case "oversized":
+			b = bytes.Repeat([]byte{'x'}, MaxPending+1)
+		case "stale":
+			m.StartedMS -= 2000
+			b, e = encodePending(m)
+		case "other-boot":
+			m.BootID = "00000000-0000-0000-0000-000000000000"
+			b, e = encodePending(m)
+		case "future-start":
+			m.StartedMS += 10000
+			b, e = encodePending(m)
+		default:
+			t.Fatal("unknown pending fixture")
+		}
+		if e != nil {
+			t.Fatal(e)
+		}
+		if e = os.WriteFile(path, b, 0644); e != nil {
+			t.Fatal(e)
+		}
+		_, e = inspect(context.Background(), dir, floor, p)
+		return e
+	}
 	switch f.Violation {
 	case "owner":
 		// Non-root fixtures test expected-owner mismatch directly; no chown or root is needed.
@@ -365,7 +412,7 @@ func TestManualRunbook(t *testing.T) {
 
 // TestManualGuards proves set -e stops after an injected checker failure and never clears its fence.
 func TestManualGuards(t *testing.T) {
-	for _, phase := range []string{"intent", "append-locked", "verify-locked", "clear-intent"} {
+	for _, phase := range []string{"intent", "lock-writer", "append-locked", "finish-intent"} {
 		t.Run(phase, func(t *testing.T) {
 			dir, p := fixture(t, vector(t, "active"))
 			real := testTool(t, p)
@@ -544,15 +591,17 @@ func TestWriterTimeout(t *testing.T) {
 	before, _ := os.ReadFile(filepath.Join(dir, "journal"))
 	out, e := manualAppend(t, tool, dir, p, "retiring", token)
 	var exit *exec.ExitError
-	if !errors.As(e, &exit) || exit.ExitCode() != 75 {
-		t.Fatalf("writer did not hit flock timeout: %v %s", e, out)
+	if !errors.As(e, &exit) || exit.ExitCode() != 1 || !strings.Contains(out, "journal_writer_deadline") {
+		t.Fatalf("writer did not hit the whole-operation deadline: %v %s", e, out)
 	}
 	after, _ := os.ReadFile(filepath.Join(dir, "journal"))
 	if !bytes.Equal(before, after) {
 		t.Fatal("timeout appended")
 	}
 	_, e = inspect(context.Background(), dir, genesis, p)
-	wantCode(t, e, "journal_writer_pending")
+	if got := code(e); got != "journal_writer_pending" && got != "journal_writer_stale" {
+		t.Fatalf("timeout did not keep admission closed: %v", e)
+	}
 }
 
 // TestReaderCancellation proves a cancelled caller cannot enter its release callback.

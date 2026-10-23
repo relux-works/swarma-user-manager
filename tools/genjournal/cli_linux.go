@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"strconv"
+	"syscall"
 	"time"
 )
 
@@ -49,6 +50,12 @@ func command(args []string, out io.Writer, p policy) error {
 			return usage()
 		}
 		return initialize(path, p)
+	}
+	if action == "lock-writer" {
+		if len(args) != 2 {
+			return usage()
+		}
+		return waitWriterLocks(path, p)
 	}
 	if action == "intent" {
 		if len(args) != 2 {
@@ -94,6 +101,19 @@ func command(args []string, out io.Writer, p policy) error {
 		v, e := inspect(context.Background(), path, floor, p)
 		if e != nil {
 			return e
+		}
+		return json.NewEncoder(out).Encode(v)
+	case "finish-intent":
+		if len(args) != 4 {
+			return usage()
+		}
+		v, e := finishIntent(path, floor, p)
+		if e != nil {
+			return e
+		}
+		// The parent's inherited open-file descriptions are unlocked before diagnostic stdout can block.
+		if syscall.Flock(9, syscall.LOCK_UN) != nil || syscall.Flock(8, syscall.LOCK_UN) != nil {
+			return refuse("journal_lock")
 		}
 		return json.NewEncoder(out).Encode(v)
 	case "clear-intent":

@@ -17,7 +17,7 @@ import (
 const (
 	Format   = "gen-journal/1"
 	MaxLine  = 4096 // Includes LF.
-	MaxFile  = 64 * 1024 * 1024
+	MaxFile  = 1024 * 1024
 	MaxSeq   = int64(9007199254740991)
 	ZeroHash = "0000000000000000000000000000000000000000000000000000000000000000"
 )

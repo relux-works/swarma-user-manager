@@ -11,7 +11,6 @@ import (
 )
 
 const ReaderHold = 250 * time.Millisecond
-const WriterWait = 5 * time.Second
 
 // policy is private: a fixture can change its owner/anchor only from package tests.
 // No CLI flag, environment variable or production API can relax root ownership.
@@ -118,15 +117,15 @@ func (d *directory) open(name string, flags int) (*os.File, error) {
 	return f, nil
 }
 func (d *directory) pending() error {
-	f, e := d.open("writer.pending", syscall.O_RDONLY)
+	m, e := d.marker()
 	if r, ok := e.(*Refusal); ok && r.Code == "journal_missing" {
 		return nil
 	}
 	if e != nil {
 		return e
 	}
-	f.Close()
-	return refuse("journal_writer_pending")
+	boot, now, e := bootEvidence()
+	return classifyPending(m, boot, now, e)
 }
 func (d *directory) files() (gate, data, journal *os.File, err error) {
 	gate, err = d.open("gate.lock", syscall.O_RDONLY)
@@ -157,6 +156,11 @@ func unlock(f *os.File) { _ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN) }
 
 // readWindow takes no lock while waiting on an external service. Callbacks must obey deadline.
 func readWindow(ctx context.Context, path string, p policy, fn func(*directory, *os.File, time.Time) error) error {
+	return readWindowAtBoundary(ctx, path, p, nil, fn)
+}
+
+// The private boundary callback is used only by deterministic package tests; all production entry points pass nil.
+func readWindowAtBoundary(ctx context.Context, path string, p policy, afterFirstCheck func(), fn func(*directory, *os.File, time.Time) error) error {
 	d, e := openDirectory(path, p, true)
 	if e != nil {
 		return e
@@ -164,6 +168,9 @@ func readWindow(ctx context.Context, path string, p policy, fn func(*directory, 
 	defer d.file.Close()
 	if e = d.pending(); e != nil {
 		return e
+	}
+	if afterFirstCheck != nil {
+		afterFirstCheck()
 	}
 	gate, data, journal, e := d.files()
 	if e != nil {

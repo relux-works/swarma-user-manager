@@ -10,13 +10,13 @@ Go tests, so no root access or large committed file is required.
 Run the content and path vectors plus the mandatory corrupt-link control:
 
 ```sh
-go test ./tools/genjournal -run '^(TestVectors|TestBrokenChainPlant)$' -count=1
+go test ./tools/genjournal -run '^(TestVectors|TestBrokenChainPlant|TestReviewLateBrokenChain)$' -count=1
 ```
 
 Run the release/retirement ordering harness and new-reader drain check:
 
 ```sh
-go test ./tools/genjournal -run '^(TestReleaseWins|TestRetirementWins|TestWriterProgress)$' -count=1
+go test ./tools/genjournal -run '^(TestReleaseWins|TestRetirementWins|TestWriterProgress|TestPendingGateWindow)$' -count=1
 ```
 
 `TestReleaseWins` holds the data lock while a writer publishes intent, proves no
@@ -25,3 +25,30 @@ retirement append occurs during that release, then lets the writer commit.
 active check prevents its later release. These are executable Linux lock tests,
 not claims that a static file can prove ordering or that a production transport
 has been qualified.
+
+
+Marker fixtures follow `gen-journal-pending/1`: fresh valid evidence is retryable
+but refuses admission; malformed bytes are preserved with
+`journal_pending_malformed`; cross-boot, expired (1500 ms including margin) or
+future-start evidence returns `journal_writer_stale`. Fixture timestamps are
+materialized relative to the test boot clock, never committed as host metadata.
+The journal byte ceiling is 1 MiB; marker size is at most 512 bytes. The normal
+writer has one 1000 ms budget across all stages, distinct from retry advice.
+
+`late-broken-chain.jsonl` corrupts only the third record's predecessor; the
+nearest valid control is `retiring`. `TestPendingGateWindow` publishes intent
+in the exact gap after the first check and before shared gate acquisition;
+the unfenced neighbor releases. Private scheduling injection is unavailable
+through the production CLI or exported reader entry points. Narrowing the
+second check to cancelled contexts must fail this regression.
+
+Run the maximum-size qualification once on the installation's local storage:
+
+```sh
+GEN_JOURNAL_MEASURE=1 go test ./tools/genjournal -run '^TestMaximumFenceDuration$' -count=1 -v
+```
+
+The fixture's final journal fills exactly 1048576 bytes. This diagnostic test is
+opt-in and is not rerun by the ordinary vector/order checks. It measures the
+real runbook and checks the complete final history and removed marker; no
+single timing observation proves performance on all storage or under faults.

@@ -41,17 +41,21 @@ case "$operation" in
         else
             if [ "$#" -ne 2 ]; then exit 2; fi
         fi
-        # Lock files must already exist; '<' never creates them. All guards are standalone.
+        # '<' never creates a missing lock. Normal writes share one marker deadline, not per-lock waits.
         exec 8<"$dir/gate.lock"
-        flock -x -w 5 -E 75 8
         exec 9<"$dir/data.lock"
-        flock -x -w 5 -E 75 9
         if [ "$operation" = append ]; then
+            "$tool" lock-writer "$dir"
             "$tool" append-locked "$dir" "$@"
+            "$tool" finish-intent "$dir" "$1" "$2"
+        else
+            # Reviewed incident reconciliation is outside the normal append budget.
+            flock -x -w 5 -E 75 8
+            flock -x -w 5 -E 75 9
+            "$tool" verify-locked "$dir" "$1" "$2"
+            "$tool" clear-intent "$dir" "$1" "$2"
         fi
-        "$tool" verify-locked "$dir" "$1" "$2"
-        "$tool" clear-intent "$dir" "$1" "$2"
-        # Exit closes both descriptors; a reader arriving after clear still finds the gate busy.
+        # Exit closes both descriptors; finish-intent already unlocks before diagnostic output.
         ;;
     *) echo 'journal_usage' >&2; exit 2 ;;
 esac

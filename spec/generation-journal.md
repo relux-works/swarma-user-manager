@@ -44,7 +44,7 @@ The installer chooses an absolute platform root. The generation directory is
 | `journal` | root | 0644 | Zero or more complete records |
 | `gate.lock` | root | 0644 | Empty, persistent lock inode |
 | `data.lock` | root | 0644 | Empty, persistent lock inode |
-| `writer.pending` | root | 0644 | Empty admission fence; exists only during a write or incident |
+| `writer.pending` | root | 0644 | Canonical `gen-journal-pending/1` record (§6.3); write or incident fence |
 
 The Keymaker service UID is unprivileged. It opens lock files **read-only** and
 uses Linux `flock(LOCK_SH)` on those descriptors. It MUST NOT create any missing
@@ -96,7 +96,7 @@ All eight members below are REQUIRED. Canonical key order is
 | `writer` | string | `user-manager` or `operator-manual` |
 
 Maximum line size is 4096 bytes **including LF**. Maximum journal size is
-67108864 bytes. The checker MUST bound bytes read to
+1048576 bytes (1 MiB). The checker MUST bound bytes read to
 that limit plus one byte. Limits are hard refusals, not truncation rules.
 An empty journal is valid initial history, but admits no UID.
 
@@ -131,6 +131,9 @@ All other edges, including self edges, `active→removed`, `retiring→active`,
 `removed→active` and `removed→creating` with the same token MUST refuse. A
 retry observes the existing outcome; it MUST NOT append a duplicate transition.
 `removed` is the wire representation of a rolled-back creation, not a fifth state.
+An incomplete creation that never became active MUST use `creating→removed`
+after verified rollback, with no intermediate `retiring`. `retiring` belongs
+only to retirement of an incarnation that previously became active.
 
 At most one non-removed incarnation may exist for a UID. A generation bump on
 the same UID is the old `active→retiring→removed`, then a **fresh token** with
@@ -211,7 +214,11 @@ ignored even if it contains a verified prefix.
 | `journal_path`, `journal_path_io` | Non-normalized path, unsafe traversal, symlink or failed path open/stat |
 | `journal_missing` | Required protected leaf absent |
 | `journal_owner`, `journal_mode`, `journal_path_type` | Wrong owner, mode, type or link count |
-| `journal_writer_pending`, `journal_busy` | Writer intent exists or lock cannot be acquired immediately |
+| `journal_writer_pending` | Valid same-boot marker younger than 1500 ms; bounded retry advice only |
+| `journal_writer_stale` | Valid marker on another boot, in the future, at least 1500 ms old, or with unavailable clock evidence; operator needed |
+| `journal_pending_malformed` | Marker fails exact closed schema, canonical bytes, fixed budget or size; preserve it |
+| `journal_writer_deadline`, `journal_clock` | Normal writer's 1000 ms whole-operation deadline expired or boot clock cannot be read |
+| `journal_busy` | Lock cannot be acquired immediately |
 | `journal_lock`, `journal_lock_timeout`, `journal_reader_deadline` | Invalid/nonempty lock, expired acquisition or local read budget |
 | `generation_missing`, `generation_mismatch`, `generation_inactive` | No UID, wrong incarnation, or state other than active |
 | `journal_create`, `journal_append`, `journal_sync` | Exclusive create, one-write append, or durability failed |
@@ -263,46 +270,141 @@ check the deadline before handoff and implement its own bounded commit. Go
 cannot preempt a callback, undo its writes or recall released bytes; simply
 wrapping an unbounded callback in `WithActive` does not qualify a consumer.
 
-### 6.2 Writer
+### 6.2 Writer and one normal-path fence budget
 
-1. Verify protected files. Exclusively create empty `writer.pending` with
-   `O_CREAT|O_EXCL|O_NOFOLLOW`, mode 0644, then fsync it and the directory.
-   An existing marker refuses; a second writer MUST NOT join or clear it.
-2. Acquire exclusive gate, then exclusive data, with a **5-second timeout per
-   acquisition**. Root can open both read-only on Linux. Keep the marker present.
-3. Verify all bytes, the writer's independently preserved checkpoint, and the
-   proposed transition. Build the fixed-schema CCJ-1 line. Append it with exactly
-   one `write` on an `O_APPEND` descriptor. Short write is failure, not a retry.
-4. Fsync journal and directory, then re-read and verify the result. Only after
-   success remove the marker and fsync the directory, then release data and gate.
-   Retirement is committed by the durable `retiring` line, before account removal.
+The normal append path MUST complete within **1000 ms** from marker creation
+through marker removal **and its directory fsync**. The reference starts that
+same CLOCK_BOOTTIME budget before creating even the staging inode, so staging,
+publication, both lock waits, input/chain verification, append, all file and
+directory fsyncs, post-write verification and marker cleanup are included.
+There is no fresh timeout per stage or per process. The 500 ms classification
+margin in §6.3 does **not** extend this writer budget.
+
+1. Verify protected files and obtain boot ID and CLOCK_BOOTTIME milliseconds.
+   Build the exact marker (§6.3). Create a random `.pending-<32 lowercase hex>`
+   staging inode with `O_CREAT|O_EXCL|O_NOFOLLOW`, mode 0644, write the complete
+   record once and fsync it. Publish it as `writer.pending` using
+   `renameat2(RENAME_NOREPLACE)`, then fsync the directory. An existing marker
+   refuses; a second writer MUST NOT join, replace or clear it. Atomic
+   publication prevents transient empty/partial markers from being read.
+2. Open the existing gate and data locks read-only. Acquire exclusive gate,
+   then exclusive data, using nonblocking flock retries against the **remaining
+   part of the same 1000 ms budget**. A writer cannot extend the budget by
+   restarting a helper or acquiring the second lock. Linux permits these
+   exclusive locks on read-only descriptors too.
+3. Verify the complete history and the independently preserved checkpoint,
+   build the fixed-schema CCJ-1 line, and verify the proposed transition before
+   append. Append with exactly one `write` on an `O_APPEND` descriptor. Short
+   write is failure, not a retry. Fsync journal and directory, then re-read and
+   verify the result. Every normal helper parses and enforces the same marker's
+   boot/start/budget; chain validation also checks its remaining deadline
+   between records. Check the deadline immediately before append and before
+   removing the marker, and after each durability operation.
+4. `finish-intent` re-verifies the history, syncs journal and directory, removes
+   the parsed marker and fsyncs the directory within that same budget. Only a
+   still-within-budget result is normal success. Unlock data and gate **before**
+   writing the diagnostic view to stdout, so terminal/client backpressure
+   cannot hold the host-wide fence or generation locks. Retirement commits at
+   the durable `retiring` line, before any account removal.
+
+Version 1 deliberately limits the journal to **1 MiB**, rather than permitting
+64 MiB of repeated parsing under a host-wide fence. No cached prefix or unlocked
+verification is treated as authority. The bounded reference does four semantic
+verifications and one additional bounded read under exclusion, against at most
+1 MiB plus one byte per read. The lowered ceiling and deadline checks bound
+normal work by construction; a benchmark alone does not enforce the budget.
+This trades capacity for bounded host-wide admission loss: at the ceiling,
+writers MUST refuse further append, retain all evidence and require a published
+migration. They MUST NOT truncate history, reset floors or hide the limit.
+
+The qualification test constructs an exact 1048576-byte final journal with
+4232 records and runs the real manual append. One Linux local-storage run took
+198 ms from marker start through post-exit observation (a conservative upper
+bound on actual fence presence), with 202 ms for the whole runbook. This is one
+qualification measurement, not a universal device or scheduling guarantee.
+Installations MUST qualify maximum-size normal work on their own storage before
+admission; inability to meet the budget is closed admission, not a larger timeout.
 
 The two locks alone do not prove progress: Linux flock does not promise fair
-shared/exclusive queuing even at the gate. The **additional persistent intent
-marker** makes new readers stop competing before acquiring the gate. Readers
-that passed the first check race safely: the second check stops them, or they
-were already inside the bounded window and drain. Once the marker is visible,
-only the finite already-entered readers remain; no continuous signing stream
-can prolong admission. Under cooperative scheduling and functioning local
-storage the writer then acquires the drained locks. An arbitrarily suspended
-process or stuck kernel I/O has no wall-time progress guarantee; the writer
-fails its timeout, keeps the marker and MUST NOT remove the account. This
-explicit fail-closed degradation is required, not successful retirement.
+shared/exclusive queuing even at the gate. Atomic intent publication makes new
+readers stop competing before acquiring the gate. A reader that passed the
+first check either sees the marker at the second check under gate or already
+entered the bounded data window. The gate MUST remain held through data-lock
+acquisition. Only those finite already-entered readers remain; continuous new
+signing traffic cannot prolong admission.
 
-A writer MUST NOT clear the marker in a trap/finally block on failure. Timeout,
-partial append, journal fsync error or failed verification leaves admission
-closed for §8. Kernel process exit releases locks, not a present marker. If
-marker unlink succeeds and only its final directory fsync fails, the journal
-commit is already verified and durable: marker visibility is uncertain, so the
-writer reports failure and requires incident review before another write. A
-reader that sees no marker still verifies that durable history; a crash may
-restore the marker and close admission again. No promise to preserve a marker
-can survive arbitrary failing storage. A reader crash releases locks; a result
-already handed off is already issued. The marker
-is an admission fence, not a lifecycle record: an existing data-lock holder may
-finish a release while a writer is waiting. It MUST finish before retirement
-can append. Conversely a durable retirement prevents every later release.
-The tests exercise both winners and a writer waiting in the middle of a release.
+On any deadline failure before marker unlink, the writer MUST abort without a
+new append if append has not started, return `journal_writer_deadline`, and
+**leave the marker for root reconciliation**. A later stage MUST NOT continue
+or reset its start time. Keeping the fence avoids turning a partially completed
+or uncertain durable transition into authority. A writer that times out after
+append MUST preserve the outcome for inspection, never repeat it blindly.
+There is no automatic marker-clear trap, even for a known pre-append timeout.
+An expired marker is parseable evidence, not permission to resume a normal write.
+
+Cooperative deadline checks cannot interrupt a stuck filesystem syscall,
+suspension or an arbitrarily descheduled process. These are incidents outside
+the normal success bound: readers refuse while the marker remains; the writer
+fails at its next check and MUST NOT remove the account. A merely slow writer
+becomes stale to readers after §6.3's margin even if still alive. If marker
+unlink succeeded and only its final directory fsync/check fails, the journal
+was already verified durable; marker visibility is uncertain or absent. Report
+failure for incident review before another write. A reader seeing no marker
+still verifies the durable history; a crash may restore the marker and close
+admission again. Failing storage cannot promise preservation of a removed marker.
+
+Kernel process exit releases locks, not a present marker. A reader crash
+releases locks; a result already handed off is already issued. Intent is an
+admission fence, not a lifecycle record: an existing data-lock holder may finish
+a release while the writer waits, before retirement can append. Conversely a
+durable retirement prevents every later release. The tests exercise both
+winners and the exact first-check-to-gate race.
+
+### 6.3 Exact marker and retry classification
+
+The marker is one CCJ-1 object plus LF, at most **512 bytes including LF**.
+It has exactly four REQUIRED members in canonical order:
+
+| Member | Type | Exact rule |
+|---|---|---|
+| `boot_id` | string | Linux boot ID, 36 lowercase hexadecimal/hyphen characters in `8-4-4-4-12` form |
+| `budget_ms` | integer | Exactly 1000; unknown budgets refuse |
+| `format` | string | Exactly `gen-journal-pending/1` |
+| `started_ms` | integer | CLOCK_BOOTTIME milliseconds sampled before staging creation; 0 through 9007199254740991 |
+
+Unknown, duplicate or missing fields, wrong types/version/budget, invalid UTF-8,
+noncanonical bytes, missing LF, extra lines and the legacy empty marker MUST
+refuse `journal_pending_malformed`. Root reconciliation MUST preserve any marker
+it cannot parse, byte for byte, and preserve the journal. It MUST NOT delete a
+malformed marker as if it were a stale valid writer. Path/ownership/mode failures
+retain their path refusals. No record or marker contains secrets.
+
+A reader samples the current boot ID from `/proc/sys/kernel/random/boot_id` and
+CLOCK_BOOTTIME (which includes suspend). A valid marker returns:
+
+- `journal_writer_pending` when boot IDs match and
+  `0 ≤ now_ms - started_ms < 1500`: retryable advice with bounded backoff,
+  without holding any state lock; no response release is admitted.
+- `journal_writer_stale` when IDs differ, start is in the future, elapsed time
+  is at least **1000 + 500 = 1500 ms**, or local boot/time evidence is unavailable:
+  operator needed; consumers MUST stop automatic retries for that observation,
+  surface the incident and keep admission closed.
+
+The 500 ms margin absorbs observation/scheduling delay only. Neither verdict
+proves process liveness: a crashed fresh writer can appear pending until the
+threshold, and a slow live writer can appear stale. An incorrect retry
+classification cannot admit anything because **both verdicts refuse identically**.
+A consumer MUST re-read protected evidence on every retry, bound its own retry
+count/wait and escalate persistent refusal. PID existence, wall-clock age or a
+stale verdict MUST NOT authorize automatic clearing, killing or takeover.
+
+Root reconciliation (§8) requires all candidate writers stopped or confirmed
+quiescent, exclusive locks, the independent checkpoint and intact parsed marker.
+It can clear a valid stale marker only after reviewing uncertain outcomes; it
+never adopts a new normal writer's budget. A crash before staging publication
+may leave a `.pending-*` inode but has not changed the journal or claimed the
+fence. Such unused staging evidence needs reviewed cleanup, not recursive or
+automatic deletion. A crash after publication leaves the complete marker.
 
 The data window contains bounded local file/commit/transport work only; neither
 reader nor writer calls a remote service while holding it. This satisfies
@@ -429,18 +531,26 @@ arbitrary history rewrite, epoch reset or automatic fork-merge protocol.
 
 For an ordinary writer crash with intact compatible history, after reviewing
 all uncertain outcomes and preserving the independent checkpoint, an operator
-MAY clear a stale writer marker under both exclusive locks:
+MAY clear a valid stale writer marker under both exclusive locks, after
+confirming every candidate writer is stopped or quiescent. Unknown liveness
+MUST refuse reconciliation; elapsed time and a PID alone are not that proof.
+This explicit incident procedure and externally closed unused-genesis rollback
+are outside the normal append budget; their lock acquisition remains bounded
+to five seconds per lock, and any failure preserves closed admission:
+
 
 ```sh
 sh "$RUNBOOK" "$CHECKER" reconcile "$DIR" "$FLOOR_SEQ" "$FLOOR_HASH"
 ```
 
-This command verifies the complete file and floor, fsyncs the journal and
+This command strictly parses the marker (§6.3), verifies the complete file and floor, fsyncs the journal and
 directory to resolve uncertain durability, and clears only
 `writer.pending`; it does **not** reconcile an external restore, authorize a
 fork, reset any floor or reopen external admission. A malformed/partial journal
 requires a separately reviewed recovery preserving terminal evidence; until
-then both writer marker and external consumer fences stay closed. Only explicit
+then both writer marker and external consumer fences stay closed. A malformed
+marker is also preserved and needs a separate reviewed evidence-recovery act;
+reconcile never treats malformed bytes as a valid marker. Only explicit
 operator reconciliation with coverage proof releases all external fences.
 
 The hash chain detects corruption and changes relative to a preserved
@@ -472,7 +582,20 @@ an installation's ACLs, storage crash durability or filesystem implementation.
 
 Run `go test ./tools/...`; the bounded tests include all static/fixture cases,
 manual genesis/lifecycle/recycle/recovery, failing `set -e` guards, both ordering
-winners, writer admission under continuous new readers, and writer timeout.
+winners, the exact first-check-to-gate gap, marker parsing/preservation and
+retry/stale classification, writer admission under continuous new readers, and
+the one writer deadline. Marker fixtures cover empty/malformed/noncanonical,
+unknown-budget, duplicate-field, oversized, stale/cross-boot and future-start
+neighbors. All retain an unfenced valid journal control; valid-marker
+reconciliation and fresh-marker retry behavior have separate positive controls.
+`TestMaximumFenceDuration` runs only when explicitly requested:
+
+```sh
+GEN_JOURNAL_MEASURE=1 go test ./tools/genjournal -run '^TestMaximumFenceDuration$' -count=1 -v
+```
+
+`TestReviewLateBrokenChain` retains a third-line corruption witness paired with
+`retiring`, killing a predecessor check narrowed to sequence ≤2.
 `TestBrokenChainPlant` is a required negative control: the adjacent valid file
 must pass and a deliberately corrupted predecessor must fail `journal_chain`.
 A crash/setup error or skipped plant does not qualify that control.

@@ -56,7 +56,8 @@ Apache License 2.0 — see [LICENSE](LICENSE) and [NOTICE](NOTICE).
 ## Generation journal tools
 
 Linux and Go 1.26 or later are required. The Go module pins the format owner's
-CCJ-1 implementation; consumers should pin a reviewed landed commit of this
+CCJ-1 implementation and the Linux `x/sys/unix` boot-clock/atomic-rename APIs;
+consumers should pin a reviewed landed commit of this
 repository. These tools manage public generation metadata, never accounts.
 
 | Tool | Purpose | Command / entry point | Output |
@@ -70,3 +71,8 @@ repository. These tools manage public generation metadata, never accounts.
 checkpoint. Production consumers must preserve their durable high-water and
 external restore fence as specified; an offline success does not authorize
 admission. [Vectors](vectors/gen-journal/README.md) document the stable layout.
+
+The normal journal writer enforces one 1000 ms fence budget with a 1 MiB journal
+ceiling. Marker retry/stale advice never permits admission or automatic clearing.
+For one maximum-size local-storage qualification run:
+`GEN_JOURNAL_MEASURE=1 go test ./tools/genjournal -run '^TestMaximumFenceDuration$' -count=1 -v`.

@@ -54,30 +54,6 @@ func initialize(path string, p policy) error {
 	}
 	return nil
 }
-func makeIntent(path string, p policy) error {
-	d, e := openDirectory(path, p, true)
-	if e != nil {
-		return e
-	}
-	defer d.file.Close()
-	g, l, j, e := d.files()
-	if e != nil {
-		return e
-	}
-	g.Close()
-	l.Close()
-	j.Close()
-	f, e := d.create("writer.pending")
-	if e != nil {
-		return e
-	}
-	e = f.Sync()
-	f.Close()
-	if e != nil || d.file.Sync() != nil {
-		return refuse("journal_sync")
-	}
-	return nil
-}
 
 // appendRecord is called only while the runbook holds the exclusive gate and data locks.
 func appendRecord(path string, floor Floor, min, max, uid int64, generation, state, stamp string, p policy) error {
@@ -89,8 +65,12 @@ func appendRecord(path string, floor Floor, min, max, uid int64, generation, sta
 		return e
 	}
 	defer d.file.Close()
-	if r, ok := d.pending().(*Refusal); !ok || r.Code != "journal_writer_pending" {
-		return refuse("journal_intent_required")
+	m, e := requireMarker(d)
+	if e != nil {
+		return e
+	}
+	if e = m.check(); e != nil {
+		return e
 	}
 	if e = requireWriterLocks(d); e != nil {
 		return e
@@ -100,7 +80,7 @@ func appendRecord(path string, floor Floor, min, max, uid int64, generation, sta
 		return e
 	}
 	defer j.Close()
-	v, e := Verify(j, floor)
+	v, e := m.verify(j, floor)
 	if e != nil {
 		return e
 	}
@@ -119,20 +99,32 @@ func appendRecord(path string, floor Floor, min, max, uid int64, generation, sta
 	if len(all)+len(line) > MaxFile {
 		return refuse("journal_file_size")
 	}
-	if _, e = Verify(bytes.NewReader(append(all, line...)), floor); e != nil {
+	if _, e = m.verify(bytes.NewReader(append(all, line...)), floor); e != nil {
+		return e
+	}
+	if e = m.check(); e != nil {
 		return e
 	}
 	n, e := syscall.Write(int(j.Fd()), line)
 	if e != nil || n != len(line) {
 		return refuse("journal_append")
 	}
-	if j.Sync() != nil || d.file.Sync() != nil {
+	if j.Sync() != nil {
 		return refuse("journal_sync")
+	}
+	if e = m.check(); e != nil {
+		return e
+	}
+	if d.file.Sync() != nil {
+		return refuse("journal_sync")
+	}
+	if e = m.check(); e != nil {
+		return e
 	}
 	if _, e = j.Seek(0, 0); e != nil {
 		return refuse("journal_io")
 	}
-	_, e = Verify(j, floor)
+	_, e = m.verify(j, floor)
 	return e
 }
 func readBounded(f *os.File) ([]byte, error) {
@@ -147,18 +139,10 @@ func readBounded(f *os.File) ([]byte, error) {
 }
 func requireWriterLocks(d *directory) error {
 	for i, name := range []string{"gate.lock", "data.lock"} {
-		f, e := d.open(name, syscall.O_RDONLY)
-		if e != nil {
+		if e := matchWriterFD(d, name, 8+i); e != nil {
 			return e
 		}
-		var actual, held syscall.Stat_t
-		e = syscall.Fstat(int(f.Fd()), &actual)
-		f.Close()
-		fd := 8 + i
-		if e != nil || syscall.Fstat(fd, &held) != nil || actual.Dev != held.Dev || actual.Ino != held.Ino {
-			return refuse("journal_lock")
-		}
-		if syscall.Flock(fd, syscall.LOCK_EX|syscall.LOCK_NB) != nil {
+		if syscall.Flock(8+i, syscall.LOCK_EX|syscall.LOCK_NB) != nil {
 			return refuse("journal_lock")
 		}
 	}
@@ -183,10 +167,7 @@ func clearIntent(path string, floor Floor, p policy) error {
 	if _, e = Verify(j, floor); e != nil {
 		return e
 	}
-	if e = d.pending(); e == nil {
-		return refuse("journal_intent_required")
-	}
-	if r, ok := e.(*Refusal); !ok || r.Code != "journal_writer_pending" {
+	if _, e = requireMarker(d); e != nil {
 		return e
 	}
 	if j.Sync() != nil || d.file.Sync() != nil {
@@ -223,8 +204,8 @@ func rollbackGenesis(path string, p policy) error {
 	if v.Tail.Seq != 0 {
 		return refuse("journal_genesis_in_use")
 	}
-	if r, ok := d.pending().(*Refusal); !ok || r.Code != "journal_writer_pending" {
-		return refuse("journal_intent_required")
+	if _, e = requireMarker(d); e != nil {
+		return e
 	}
 	// Unknown directory entries refuse before removing anything.
 	entries, e := d.file.ReadDir(-1)
@@ -261,4 +242,55 @@ func rollbackGenesis(path string, p policy) error {
 		return refuse("journal_sync")
 	}
 	return nil
+}
+
+// finishIntent is the normal-path cleanup. Reconciliation separately permits a valid expired marker after operator review.
+func finishIntent(path string, floor Floor, p policy) (View, error) {
+	var v View
+	d, e := openDirectory(path, p, true)
+	if e != nil {
+		return v, e
+	}
+	defer d.file.Close()
+	if e = requireWriterLocks(d); e != nil {
+		return v, e
+	}
+	m, e := requireMarker(d)
+	if e != nil {
+		return v, e
+	}
+	if e = m.check(); e != nil {
+		return v, e
+	}
+	j, e := d.open("journal", syscall.O_RDWR)
+	if e != nil {
+		return v, e
+	}
+	defer j.Close()
+	v, e = m.verify(j, floor)
+	if e != nil {
+		return v, e
+	}
+	if j.Sync() != nil {
+		return v, refuse("journal_sync")
+	}
+	if e = m.check(); e != nil {
+		return v, e
+	}
+	if d.file.Sync() != nil {
+		return v, refuse("journal_sync")
+	}
+	if e = m.check(); e != nil {
+		return v, e
+	}
+	if syscall.Unlinkat(int(d.file.Fd()), "writer.pending") != nil {
+		return v, refuse("journal_io")
+	}
+	if d.file.Sync() != nil {
+		return v, refuse("journal_sync")
+	}
+	if e = m.check(); e != nil {
+		return v, e
+	}
+	return v, nil
 }
