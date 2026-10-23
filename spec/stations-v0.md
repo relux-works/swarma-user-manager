@@ -1,0 +1,669 @@
+# Station accounts: v0 slice
+
+- **Status:** draft for independent and content review; no implementation or activation.
+- **Base:** [helper design](helper.md), draft v0.14, narrowed as stated here.
+- **Public decisions:** [CIP-0024 revision 2](https://github.com/relux-works/curator-spec/blob/471ccc0d299473fbbce766c1ed6aa641a918a4c9/cips/CIP-0024-agent-stations.md), especially Owner decisions and Platform controls and approved updates.
+- **Generation authority:** the generation journal format (spec/generation-journal.md), `gen-journal/1`. Its reviewed revision, section references and adapter ordering MUST be aligned before implementation; this draft does not define alternative journal bytes.
+
+## 1. Scope and ownership
+
+One station is one agent, one OS account, one identity, its own signer binding,
+home and root context. Pooling, shared UIDs and adopting an existing unmanaged
+account are forbidden. Linux is the first backend. Only trusted `agent`
+allocations are in this slice; being a station does not establish trust.
+
+The user manager owns OS account allocation, ownership scaffolding, generation
+fences and account cleanup. Curator owns home composition, approved control
+content, digests and leases; curator-run owns station lifecycle; the dispatcher
+retains allocation/execution authority; the station registry owns station
+records; Keymaker owns keys and signing; the broker owns credentials. The helper
+MUST NOT become a second composer, signer, scheduler or launcher. It installs
+scaffolding and asks no synchronous platform service questions under its state
+lock. Composition uses Curator's separately authorized installer boundary.
+
+| In v0 | Explicitly outside this slice |
+|---|---|
+| `user.create` with `kind=agent`; `user.retire`; proposed `user.bump` | Service/workplace/donor provisioning; pooling; arbitrary UID/GID/path input |
+| Root-owned generation/effect evidence; duplicate-request recovery | General `user.list`, `effect.observe`, `exec.stop` APIs; their later contracts remain in helper.md |
+| Managed-home protection; local cleanup and generation fencing | Launcher installation/execution; credential binding, signing, identity registration/revocation |
+| Required preinstalled static UID-range deny | Firewall v1, per-account rule updates, web/network opt-ins |
+| Deletion after authoritative cleanup admission | Workspace import/export, metadata exports, archives/sweeps, home retention |
+| Explicit call-driven cleanup | ALLSTOP, usage watcher, automatic expiry retirement, macOS/Windows |
+
+These exclusions narrow the release, not the accepted later design. Refuse
+excluded operations as `operation_unsupported`, non-agent kinds as
+`kind_unsupported`, untrusted admission as `class_unsupported`, and non-Linux
+backends as `platform_unsupported` before reserving identity or changing state.
+There is no permissive fallback. Unsupported request members remain
+`request_invalid`; `grants` specifically refuses `grants_unsupported`.
+
+`active` means a locally provisioned account, not a usable or running station.
+No provider start is admitted by this slice. Later launch integration MUST
+retain helper.md's static range deny, ceilings, execution profile, lease and
+exact-start gates; narrowing the launcher out does not waive them. Provisioning
+refuses `qualification_required` if the configured range-deny verification or
+backend capability evidence is absent, stale, failed or unknown.
+
+## 2. Invocation and closed requests
+
+Retain `swarma-user-manager helper-op/1` and `helper-result/1` from
+[helper.md §2](helper.md#2-invocation). `user.*` keeps the existing account API:
+`station.*` would suggest ownership of station records and lifecycle that this
+helper does not have. `user.bump` is a proposed addition, gated by §6 and Q1.
+
+Only a root-configured dispatcher principal may create, retire or bump its own
+agent allocations, within its configured quota. The principal's protected
+service identity and generation MUST still match policy; numeric UID reuse
+cannot inherit caller authority. An installer is not an agent caller. This
+slice publishes no operator-entry adapter and admits no operator override;
+operator/service functions in helper.md remain later gated work.
+
+The binary is root-owned at a fixed absolute path with protected ancestors,
+not setuid. Its sudoers rule permits only that path with empty arguments, e.g.
+`<dispatcher> ALL=(root) NOPASSWD: /opt/swarma/libexec/swarma-user-manager ""`.
+This is sudoers notation, not a shell command. No station UID has this rule.
+Require effective UID zero, trusted sudo transition and decimal `SUDO_UID`;
+refuse `not_root`, `not_invoked_by_sudo`, `argv_not_allowed` or
+`caller_role_not_permitted` as appropriate. Clear the environment, fix cwd,
+umask and PATH, and use absolute backend paths without a shell. No caller path,
+command, environment, key, digest or account number is accepted.
+
+One UTF-8 JSON document, at most 16 KiB, within five seconds. Reject duplicate
+keys at every depth, unknown fields, trailing documents, invalid types, floats
+where integers are required and embedded NUL. Every object below is closed;
+all shown fields are mandatory, with no optional members or defaults. `v` is
+the integer 1 (not a boolean). Supported `op` strings are shown below; any
+other well-typed operation string refuses `operation_unsupported`.
+
+```json
+{"v":1,"op":"user.create","request_id":"create-example","args":{"kind":"agent","label":"dev-example"}}
+{"v":1,"op":"user.retire","request_id":"retire-example","args":{"generation":"b4e7ac8e9b954d54924ad23d9e040de1"}}
+{"v":1,"op":"user.bump","request_id":"bump-example","args":{"generation":"b4e7ac8e9b954d54924ad23d9e040de1"}}
+```
+
+`request_id` is 1–64 ASCII characters matching `[A-Za-z0-9][A-Za-z0-9._-]{0,63}`.
+`label` matches `[a-z0-9][a-z0-9-]{0,22}`. A generation is exactly 32 lowercase
+hexadecimal digits representing random 128-bit identity, never a counter.
+The request does not select a UID or generation for create/bump. Protected
+configuration selects the admitted agent class and approved skeleton; absence
+refuses, rather than choosing a caller-home or project profile.
+
+A success uses `{request_id,ok:true,result,state}`. For create, `result` has
+exactly `username,uid,gid,home,generation,state`; retire has exactly
+`username,generation,state`; bump has exactly
+`username,uid,gid,home,previous_generation,generation,state`. Result `state` is
+`active` or `removed` as appropriate. The envelope `state` is the target's
+**current** state, which can differ on terminal replay. For bump it describes
+the returned new generation, not whatever generation now occupies the UID.
+UID/GID are positive integers selected by policy; `home` is helper-derived.
+
+A refusal uses exactly `{request_id,ok:false,error:{code,message}}`; an
+unrecoverable or schema-invalid request ID is represented by JSON `null`;
+only a valid bounded identifier may be echoed. `message` is bounded
+to 256 ASCII bytes of service-generated text with no raw request, private path,
+key or filesystem contents. Errors go to stdout as one document; diagnostic
+and effect evidence remain in protected logs.
+
+| Refusal codes | Meaning and side effects |
+|---|---|
+| `request_invalid`, `label_invalid`, `request_too_large`, `request_timeout` | Intake/schema/bounds failure; no effect admitted |
+| `not_root`, `not_invoked_by_sudo`, `argv_not_allowed`, `caller_role_not_permitted`, `target_not_owned`, `quota_exceeded` | Invocation, owner or quota refusal; no new effect |
+| `operation_unsupported`, `kind_unsupported`, `class_unsupported`, `platform_unsupported`, `grants_unsupported`, `qualification_required`, `bump_not_enabled` | Feature/qualification gate; no new effect |
+| `request_id_conflict`, `effect_evidence_unavailable` | Conflicting ID or incomplete dedup evidence; never retry as a fresh effect |
+| `generation_unknown`, `generation_mismatch`, `generation_inactive`, `target_busy` | Target absent from authority, stale, non-active or reserved by another effect; no successor selected |
+| `user_exists_unmanaged`, `home_exists_unmanaged`, `uid_not_clean`, `identity_exhausted`, `entropy_unavailable` | Allocation/preflight refusal; no unmanaged object adopted |
+| `path_is_link`, `state_unavailable`, `state_contradictory`, `cleanup_not_admitted`, `processes_remain`, `cleanup_pending`, `backend_failed` | Integrity/cleanup/backend gate; an admitted effect can remain pending or rolled back as §3 specifies |
+
+`path_is_link` at intake does not admit work. After durable intent it prevents
+further unsafe action and leaves recoverable evidence. Nonzero execution status
+and an error are not evidence of rollback or absence. This table adds draft
+codes only for this slice; it does not silently standardize later-phase APIs.
+
+## 3. Durable effects and generation records
+
+The generation journal and the caller/effect step journal are distinct. No
+request IDs, step names, home paths or ad hoc rollback states are added to
+`gen-journal/1`. That format owns canonical record bytes, sequence allocation,
+`prev` hashing, genesis, writer identity, flush and tail-recovery rules. Each
+append below supplies only its next `seq`, preceding record hash `prev`,
+allocated `uid`, generation, named state and the configured writer identity;
+all additional required envelope members follow the reviewed format. There is
+no independent per-UID sequence or hash chain.
+
+Before an OS mutation, under the shared journal lock, persist caller-scoped
+effect identity, operation, exact arguments, selected identities, reservation
+and planned step; after the step persist its observed outcome. Canonical
+argument comparison in this closed slice is structural comparison of the
+validated field names, JSON types and exact ASCII string values, independent
+of JSON whitespace/member order. No generic JSON serializer's output is a
+signature or journal canonicalization. The effect store and generation chain
+must reconcile after a crash before any new work. Their concrete on-disk
+encoding remains a publication gate; generation records alone cannot dedup.
+
+For `(caller principal,request_id)`, same operation/arguments resume admitted
+pending work or return the recorded terminal result plus current target state.
+Different operation/arguments refuse `request_id_conflict`, even if the old
+generation is removed. A lost create/bump response MUST NOT allocate another
+identity. Retain effects, results and removed-generation tombstones without
+sweeping in this slice; missing evidence closes admission as
+`effect_evidence_unavailable`, never proves no effect. A different request ID
+cannot adopt or replace another pending effect. Failed create compensation is
+pending until verified; a verified rollback is a terminal failure for that ID.
+
+Every step is finite and configured: lock wait, recovery, termination grace,
+quiet interval, deletion entries/depth/work and cooperative elapsed time.
+No implicit numeric defaults are admitted. Yield the lock between deletion
+batches, retaining the generation/UID reservation, quota charge and a durable
+in-flight marker. Revalidate identity, quiescence and trusted descriptors on
+reacquisition. Never wait on another platform service under this lock.
+
+| Effect step | Required generation append, in order | Required evidence before proceeding |
+|---|---|---|
+| Create reservation | `(u,g,creating)` before group/account creation | Fresh random `g`, name/UID/GID/home exclusivity, quota and intent durable |
+| Create commit | `(u,g,active)` after provisioning | Exact OS identity, protected skeleton, persistence denial and static deny verified |
+| Create compensation | `(u,g,retiring)` then `(u,g,removed)` | Fence first, stop/absence, descriptor cleanup, account/group absence; never a fabricated `rolled_back` chain state |
+| Retire admission | `(u,g,retiring)` before stop or deletion | Authorized cleanup admission, exact active identity, effect durable |
+| Retire commit | `(u,g,removed)` after cleanup and account/group removal | Home/temp cleanup and complete OS absence verified |
+| Bump old generation | `(u,g_old,retiring)` then `(u,g_old,removed)` | Stop/absence and reset verified; account intentionally retained and reserved |
+| Bump successor | `(u,g_new,creating)` then `(u,g_new,active)` | `g_old` already removed; reset scaffold and OS identity verified; distinct new token |
+| Successor compensation | `(u,g_new,retiring)` then `(u,g_new,removed)` | No old-generation resurrection; account remains reserved for reconciliation |
+
+These are exact state append sequences, not illustrative step-by-step
+synthetic journal lines. Do not append a state record for every filesystem
+entry, repeated retry, signal or observation. Those belong in the effect log.
+A retry recognizes an already durable append and advances from it without
+writing it again. Crash after `creating` follows the rollback policy even if
+OS provisioning happened; crash after durable `active` replays success.
+If intent exists but an append outcome is uncertain, validate the chain and
+match its recorded identity before taking any action.
+
+The reviewed journal MUST permit an interrupted `creating` generation to be
+fenced and removed and MUST define how a bump can retain a reserved OS account
+while the old generation is `removed`. Here `removed` means no admission for
+that generation, not necessarily absence of its reusable numeric UID. Any
+incompatible journal transition requires joint correction before activation.
+
+## 4. Linux account allocation and create
+
+Root policy supplies station UID and GID ranges and protected home roots, not
+caller requests. Use the configured agent range from helper.md §4.1, without
+assuming its sample numbers are installations' actual ranges. Select a number
+free in both UID and GID namespaces and the effect ledger, with the persistent
+round-robin cursor; each account's dedicated primary group uses that number.
+Reject NSS ambiguity, range overlaps with services/test identities, pending
+reservations and failed cleanliness scans. Never recycle a number until the
+whole range cycle and helper.md's platform/system/per-user temporary-area UID
+hygiene checks pass. Bump retains its reservation and is not allocation reuse.
+
+Derive `worker-<label>` and `<platform-root>/workers/worker-<label>`;
+no name or home collision outside the ledger is adopted. Use a fresh CSPRNG
+128-bit token, check every retained generation for collision, and draw again
+on collision before intent. Failed entropy refuses without using time or IDs.
+
+The qualified backend invokes the absolute distro-provisioned tool paths with
+these literal argument vectors, substituting only validated derived values:
+
+```text
+groupadd --gid <selected-gid> -- <derived-name>
+useradd --uid <selected-uid> --gid <selected-gid> --no-user-group
+        --home-dir <derived-home> --no-create-home --shell /usr/sbin/nologin
+        --password ! --no-log-init --groups ''
+        --key CREATE_MAIL_SPOOL=no --key CREATE_HOME=no -- <derived-name>
+```
+
+The empty `--groups` value is one empty argv element, not shell syntax; `!` is
+one literal locked-password argument. Run no shell. A distro that does not
+support these options or creates extra state refuses qualification rather
+than dropping flags. Verify passwd/shadow/group/NSS results, locked password,
+non-login shell and empty supplementary-group membership before `active`.
+No authorized_keys, PAM login, sudo group, auto-home/mail skeleton, cron/at job,
+user systemd service or lingering permission is created.
+
+Create the home by trusted descriptors (§7), never `useradd -m` or recursive
+chown. Add exact derived names to root-owned cron/at deny files atomically,
+preserving unrelated entries; if allow files exist, qualify their precedence
+and verify the station is excluded. Disable/verify lingering, no user manager
+or preexisting session, and no path for the station to enable them. Unknown
+persistence controls refuse activation. Create failure compensates only
+objects this effect proves it created, in reverse dependency order (§3).
+
+## 5. Retirement and local cleanup
+
+Admission requires an authoritative dispatcher cleanup record: launches,
+a2a/runner ingress and home-mutating leases fenced; work stopped or stop
+admitted; all required durable handover/output custody and separate broker
+unbind obligations satisfied. In this slice, no workspace/export workflow is
+implemented: only an allocation with authoritative evidence of no such pending
+obligation is admissible. Missing evidence refuses `cleanup_not_admitted`.
+A lifecycle caller cannot invent an operator waiver or use retirement to
+silently discard unresolved work. The exact cleanup admission adapter remains
+Q3; until it exists, no deployed retirement is claimed.
+
+1. Persist the effect and append `retiring` under the shared lock. Consumers
+   MUST refuse new starts, leases and signing for this generation from this
+   point. Every bounded action checks generation and exact OS account identity.
+2. Disable ingress and per-user persistence, stop the qualified UID process
+   domain, TERM all UID processes, wait the configured grace, KILL survivors,
+   and verify complete zero UID processes for the configured quiet interval.
+   Non-delegated Linux containment and UID inventory must cover double fork,
+   `setsid` and escaped descendants; PID reuse uses stable process handles.
+   Denied/partial observations, stuck tasks or any survivor leave `retiring`
+   with `processes_remain`; no home deletion or new generation is permitted.
+3. Revalidate absence, rename the home through trusted parent descriptors into
+   same-filesystem root-only quarantine, and delete in bounded batches without
+   following links. Also clean the configured platform/system/per-user temp
+   areas. Check mount/device boundaries; refuse foreign mounts, never recurse
+   into them. Reacquired locks require renewed quiescence checks.
+4. This station layout holds no private keys. A declaration of home-resident
+   key material or legacy key paths is out of this slice and refuses cleanup
+   admission until helper.md §4.4.1's key-destruction path is qualified.
+   Keymaker keys remain outside the home; the helper only closes generation
+   admission. It cannot claim key erasure, identity revocation or token recall.
+5. After full verified deletion, invoke qualified absolute `userdel -- <name>`
+   without `--remove`/`--force`, verify account absence, then
+   `groupdel -- <name>` and verify group absence. Clean only helper-owned
+   persistence entries; static range deny remains. Append `removed` and record
+   the terminal result. Any intermediate failure resumes forward with the
+   reservation retained, never reactivating the old generation.
+
+Retirement never calls Keymaker or the broker under the helper lock. Binding
+cleanup and identity lifetime stay with their owners. In particular persistent
+identity revocation is not an implied account-retirement effect.
+
+## 6. Proposed same-account generation bump
+
+**Pending curator ruling (Q1).** Disabled as `bump_not_enabled` until explicitly
+accepted and the journal/consumer adapters qualify it. CIP-0024 conversation
+`recycle` preserves the account and admitted home; it does not itself authorize
+this destructive account-generation reset. A new conversation alone MUST NOT
+cause `user.bump`.
+
+The same owner, name, UID/GID and home path remain exclusively reserved for
+one station. Quota is charged once, but all removed-generation evidence stays.
+The caller targets exactly the old generation. Admission, output/lease gates
+and full UID process absence are identical to retirement. Append
+`g_old:retiring`; stop and prove absence; reset below; append `g_old:removed`;
+only then draw and persist a distinct `g_new:creating`, verify the rebuilt
+scaffold and unchanged OS identity, and append `g_new:active`. The lock and
+reservation exclude competing create/bump/retire calls across the entire
+forward transaction, with bounded cleanup yields. No point has two
+non-removed generations for that UID. There can be a gap with no active
+one; no consumer may infer authority from OS account existence in that gap.
+
+| Reset before old `removed` | Retain outside the deleted generation |
+|---|---|
+| Entire `work/`, `tmp/`, `.harness/state/`; all station-created names, hidden files, repositories, caches, session locks, history and native resume/memory state | Same OS account/group, locked login/persistence denial, fixed home pathname and exclusive reservation |
+| Entire old home inode, including old approved controls/pin; all configured UID-owned temporary-area residue | Root-owned account/effect history and tombstones; separately held durable accepted outputs |
+| Old signing/credential endpoints in the home, public-key caches and client state | Platform-approved release identity in protected configuration; external registry/identity history under its owner |
+
+Recreate a new root-owned home/scaffold from the current approved composition;
+never copy station content or old control bytes back. A fresh trust pin must
+be installed through Curator's approved-release path; no new approval is
+inferred. If composition cannot be prepared, remain fenced. The helper does
+not mint a key or copy an old binding. Keymaker bindings use `(uid,generation)`
+and [Keymaker §§3.1–3.2](https://github.com/relux-works/swarma-keymaker/blob/243a330d331c07c57aa0497c348995f66c74d08e/spec/keymaker.md#3-principals-generations-and-bindings): old connections cannot adopt the new
+generation. Persistent identity can only be re-registered by its authorized
+owner under Keymaker's policy; no automatic key carry-over is promised.
+
+A crash after the old `retiring` always moves forward. After old `removed`,
+the old generation stays dead even if successor provisioning fails. Roll back
+an interrupted successor via its own `retiring`/`removed`, retain the OS account
+and reservation as a visible fenced partial effect, and require explicit
+reconciliation; do not draw another successor under the same completed-failure
+request or silently delete the retained account. A retry after new `active`
+returns the same new token. Failure before the old `retiring` admits no reset.
+
+**Alternative:** retire the old account completely under §5 and create a new
+account under §4 with a fresh token and newly allocated UID/GID. Correlate both
+effects in curator-run; never assume the allocator returns the same UID. This
+uses the existing lifecycle without retained-account semantics, at the cost of
+account/name/home migration and explicit registry, signer, broker and Curator
+rebinding. Until Q1 is resolved, use only this separately authorized alternative,
+not an emulation of same-UID bump or pooling.
+
+## 7. Managed-home layout and installation
+
+Let `R` be the root-owned platform root, `S` the station's dedicated group,
+and `U` its UID. Root is UID zero; all other IDs are policy-derived. No default
+or inherited ACL may widen these permissions. All entries are on the qualified
+filesystem, with no foreign bind mount under the home.
+
+| Path relative to R | Owner:group | Mode | Contract |
+|---|---|---|---|
+| `.`; `workers/` | root:root | 0755; 0711 | Fixed protected ancestors; no station create/rename authority |
+| `workers/<name>/` (H) | root:S | 0750 | Home root is **never** owned by U |
+| `H/AGENTS.md`, `H/CLAUDE.md` when selected by approved runtime mapping | root:S | 0640 | Platform root context; mandatory selected entry cannot be missing |
+| `H/.platform/`; `H/.platform/skills/` and every skill directory | root:S | 0750 | Closed approved inventory; skill files 0640, approved executable assets 0750 |
+| `H/.platform/trust-pin.json` | root:S | 0640 | Pin selects approved release, control inventory and digests; not a station-selected digest |
+| `H/.harness/` | root:S | 1770 | Root-owned sticky writable native directory |
+| `H/.harness/settings.json` | root:S | 0640 | Managed hook/settings bytes; sticky parent protects this root-owned entry |
+| `H/.harness/state/`; `H/work/`; `H/tmp/` | U:S | 0700 | Per-generation writable data; no managed controls below U-owned ancestors |
+| `etc/user-manager.json`; trusted Curator release metadata | root:root | 0600 files, 0755 parent | Caller roles, ranges and approved-release selection outside home authority |
+| `lib/user-manager/journal/`; effect evidence; quarantine | root:root | 0700 dirs, 0600 files | Admission authority, cleanup and dedup evidence, not station-readable |
+| Generation-consumer snapshot, if published by the journal format | root:root | 0644 file, 0755 parent | Derived read-only projection only; format owns actual names and reader contract |
+
+The two context names are reserved only when the selected runtime mapping uses
+them. Actual settings/skill discovery paths must be published per runtime;
+`.harness` illustrates a fixed protected adapter destination, not an assertion
+that every runtime discovers it. An adapter MUST map every effective platform
+control to an approved fixed path with this ownership chain, and reject
+unsupported discovery/override paths before launch. It MUST NOT put managed
+controls under the station-owned work, state or temporary directories.
+
+Installation and updates open R and every parent through trusted descriptors,
+with Linux `openat2(RESOLVE_BENEATH|RESOLVE_NO_SYMLINKS|RESOLVE_NO_XDEV)` or a
+qualified equivalent. Check type, owner, permissions, device and expected inode
+via `fstat`; reject control symlinks, special files, widened ACLs and unexpected
+hardlinks (`st_nlink != 1` for managed regular files). Create missing fixed
+entries via `mkdirat`, set owner/mode by descriptor, and never recursively
+chown station-controlled content. Exclusive temporary files are created in a
+root-only staging directory on the same filesystem, populated from approved
+bytes, ownership/mode checked, fsynced and renamed descriptor-relative over
+the destination without following its existing entry. Fsync affected parents.
+In sticky native directories do not expose a writable temporary file or
+unchecked destination; the root-owned parent and live lease interlock prevent
+station replacement of the final root-owned entry.
+
+Curator publishes a consistent release under a closed/absent home lease and a
+shared composition/start interlock; an unknown or live lease refuses mutation.
+Per-file atomic replace alone is not an atomic multi-file release. Persist
+composition intent and publish the pin last only after all controls are durable;
+partial updates keep admission closed until recovered. Only an already-approved
+release may be installed; a self-update request with no approved release is a
+no-op. This slice publishes no arbitrary file-write or profile-update API.
+
+Before **every** physical start, restart and native resume, the later launcher
+must acquire the same interlock, verify the protected pin against trusted
+approved-release metadata, verify the complete control inventory/ownership/
+mode/type/link count and exact digests from trusted handles, and bind those
+objects to that admitted execution. Missing/unreadable/extra effective controls,
+drift or an unknown lease refuses. Retain handles or lease protection through
+their last use; never check one path then consume a station replacement.
+Runtime-managed extra hooks/settings and alternate discovery paths must be
+covered by the adapter; a digest of only the expected file does not qualify
+that runtime. This is a start gate, not continuous integrity or strict
+project-source isolation. Native-project and strict remain distinct modes.
+
+| Attempt by station | Why it fails; qualification limit |
+|---|---|
+| Write/truncate/chmod/chown managed file | U is not owner; group read only; no writable ACL/capability |
+| Unlink or rename managed entry | Protected parents are not writable, or root-owned sticky parent denies deletion of root-owned entry by U |
+| Replace/move an ancestor or home root | Every managed ancestor is root-owned; `workers/` has no write permission for U |
+| Hardlink to change content or confuse replacement | New hardlink to managed files must be denied by qualified `fs.protected_hardlinks=1`; install/start rejects unexpected link counts and replaces inodes, never writes through a station alias |
+| Symlink redirect of managed operation | Trusted no-follow descriptor walk, fixed leaf names, checked device/type/inode; existing destination links are refused, not dereferenced |
+| Cross-station read | Distinct S with no supplementary membership; H 0750 and data 0700 deny traversal/read |
+
+A protected file inside a station-owned directory, including a station-owned
+sticky directory, fails this contract: the directory owner can remove it.
+Read-only files alone and digest checks alone do not fix that ownership flaw.
+
+## 8. Journal consumers and restoration
+
+The generation journal format (spec/generation-journal.md) is authoritative;
+helper.md §4.5's ledger is a projection, never a second generation writer.
+Keymaker's `lookup` validates authoritative provenance, integrity and ordering;
+only `active` admits. Its `with_active` final check, durable result and release
+must serialize against `retiring` using the published journal ordering, not a
+cached ledger check. A release ordered first is already issued; a retirement
+ordered first prevents release. The concrete lock path/mode and cross-process
+bounded critical section remain Q2 until the journal owner publishes them.
+No externally visible generation change is committed without that exclusion.
+
+Use helper.md §4.6.1's external restore fence before exposing restored bytes.
+Missing/corrupt/ambiguous state, sequence/hash failure, reader-floor regression
+or restored-but-unreconciled history closes all consumers. Never synthesize an
+empty journal from OS accounts, infer activity from UID existence, append a
+counter token, or resurrect a removed generation. Surviving evidence of
+retirement wins. A locally coherent whole-machine rollback remains outside
+local detectability; an in-domain hash chain is not an anti-rollback oracle.
+
+## 9. Qualification plan: negative cases first
+
+These are required test specifications, **not passing implementation tests**.
+Run only narrow cases in an isolated fixture. The unprivileged runner plays
+platform owner; `platform-test-a` and `platform-test-b` play stations through
+existing `sudo -n -u <configured-name>`. Resolve names/UIDs/groups from reviewed
+fixture configuration and NSS at run time, compare them, and refuse mismatch;
+never publish fixed station/test IDs. These generic accounts are test fixtures,
+not production station allocations; existing supplementary memberships cannot
+qualify the no-supplementary-groups backend claim.
+
+| Named case and forbidden outcome | Nearby positive control | Evidence / prerequisite |
+|---|---|---|
+| `ManagedFileMutationDenied`: write/truncate/chmod/unlink/rename/replacement of context, hook settings and skill leaves must fail EACCES/EPERM; bytes, inode and digest remain unchanged | Same station writes/renames its own work file | Runner-owned scaffold plus station-owned work; include root-owned sticky-parent analogue |
+| `ManagedAncestorReplacementDenied`: home, managed directory and protected sticky entry cannot be moved/replaced, even via work symlinks | Station creates/removes its own entry in sticky native directory | Descriptor operations and before/after tree inventory |
+| `ManagedLinkConfusionDenied`: links to outside sentinels cannot redirect install/delete; hardlink attempt denied or start refuses unexpected link count | Approved single-link regular file installs and verifies | Real no-follow updater/start paths; PENDING implementation and root fixture |
+| `StationHomeIsolation`: other station cannot traverse/read home or state, including guessed filenames | Each station reads its own context and writes its own state | Exact root:S 0750 fixture PENDING §10; runner surrogate with broader traversal is not this proof |
+| `RetiredGenerationRefused`: fresh and existing signer/broker connections cannot use retired generation or adopt new binding | Active generation succeeds under same protocol method | Real consumer adapter; PENDING journal/Keymaker/broker integration |
+| `BumpUniqueGeneration`: never two non-removed generations for one UID, including crash/retry at each append | Two consecutive distinct tokens, old removed before successor creating | Chain replay + OS identity checks; PENDING Q1, writer and root backend |
+| `BumpResetComplete`: no old work/cache/session/native lock or UID-temp residue; persistent signing binding not inherited | New empty writable directories and freshly admitted binding work | PENDING reset writer and consumer qualification; external durable outputs retained |
+| `RequestClosedAndReplaySafe`: extra/duplicate members, UID/path/grant injection, wrong kind/owner, stale target and changed-ID arguments cause intended refusal without new OS objects or appends | Valid create and exact same-ID replay yield one account/token | Narrow parser/effect tests PENDING implementation; whitespace/order equivalent requests included |
+| `CreateRollbackAndRetireForward`: inject backend/deletion failures; no adopted unmanaged object, premature removed or success on unknown absence | Clean create/retire plus retry of admitted cleanup | Isolated fixtures; crash every journal/effect durability boundary |
+| `ProcessAbsenceRequired`: double fork, setsid, PID reuse and failed inventory cannot pass stop or reset/delete home | Known quiescent allocation reaches removal | PENDING exact root process backend, controlled child PIDs only |
+| `LinuxAccountPolicy`: no caller-selected UID/GID, login, supplementary groups, cron/at or lingering | Configured free-range allocation has exact passwd/group/home/shell properties | PENDING helper implementation and disposable root-qualified environment |
+| `StartDigestAndLeaseGate`: mismatched/missing/extra effective controls, changed pin, native override and live/unknown lease refuse before provider execution | Approved immutable controls and free lease admit one test executable | PENDING launcher/runtime adapter; no provider or live session needed |
+| `RestoreFence`: corrupt/torn/rollback/unavailable history never admits work or proves no effect | Verified authoritative active history admits | Journal reader fixtures plus explicit restore-mark controls |
+
+Each case must assert its specific refusal and preserved state, not merely a
+nonzero command. Kill only recorded fixture PIDs. Backend/root fault injection
+never touches live station accounts or shared services. For each permission
+checker, a bounded deliberately station-owned/writable control file must be
+successfully modified by the test station, proving the checker can detect that
+violation; then the protected variant must deny the same mutation. Parser and
+journal gates likewise need a known-invalid fixture with the named refusal
+and a valid neighbor. Surviving mutants are reported with their actual bound;
+a crash/setup failure is not a killed mutant.
+
+Unprivileged DAC probes do not qualify useradd, real root ownership, exact
+primary-group isolation, persistence denial, process termination, journal
+serialization, runtime discovery or the production writer. No full suite,
+implementation build, provider run or activation is part of this spec slice.
+
+## 10. One owner-run root fixture step
+
+This is the exact additional root fixture step, **PENDING owner execution and
+review**. It prepares only the generic test homes, with real root-owned controls;
+it creates/deletes no OS accounts, changes no service, policy, firewall or
+sudoers file, and starts no process as root beyond the fixture script itself.
+The existing test-account sudo delegation is a prerequisite; without it,
+qualification remains pending. Real `useradd`/`groupadd`, persistence and stop
+qualification remain PENDING a later implemented backend in a disposable root
+runner; this fixture step is not evidence for those properties.
+
+Extract the single `station-root-fixture` fenced script below to a trusted
+owner-controlled file, inspect its exact bytes and run `bash -n` on that file.
+Its reviewed repository path is `spec/stations-v0.md`, this section. Use an
+owner-controlled shell and verify the checkout/signature before granting root;
+do not execute a mutable station checkout as root.
+
+```sh
+# In an owner-controlled copy of the reviewed revision:
+python3 - <<'EXTRACT'
+from pathlib import Path
+text = Path('spec/stations-v0.md').read_text()
+marker = '```bash station-root-fixture' + '\n'
+start = text.index(marker) + len(marker)
+end = text.index('\n```', start)
+Path('station-root-fixture.sh').write_text(text[start:end] + '\n')
+EXTRACT
+# Inspect this extracted file before running these commands:
+bash -n ./station-root-fixture.sh
+sudo -- /bin/bash ./station-root-fixture.sh apply
+sudo -- /bin/bash ./station-root-fixture.sh verify
+# Rollback removes only the guarded disposable fixture tree:
+sudo -- /bin/bash ./station-root-fixture.sh rollback
+```
+
+No drop-in is needed by this procedure. If the prerequisite sudo delegation
+must be separately installed, that is a new reviewed owner step: render only
+exact test-account Runas entries (never root), require `visudo -cf` success
+against sudo-rs **before** installation, use a root-owned temporary filename
+ignored by sudoers in `/etc/sudoers.d/`, then `mv -T` to the reviewed final
+name. Validate the full sudoers configuration and intended positive/forbidden
+Runas probes; rollback removes only that new file and revalidates. A failure
+leaves the old policy unchanged. Do not infer sudo-rs compatibility from
+another sudo implementation or append unvalidated policy.
+
+The script accepts only `apply`, `verify` or `rollback`, has no path/UID input,
+and resolves the two configured generic account names at execution. It refuses
+root identities, equal IDs, shared primary groups or cross-membership. Root
+zero is the privilege identity, never a fixed station allocation. `apply`
+refuses any preexisting fixture, including a symlink. The parent chain is
+root-owned and non-writable. Failure leaves a visibly partial fixture for
+explicit guarded rollback; it never reports clean success.
+
+```bash station-root-fixture
+#!/bin/bash
+set -euo pipefail
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+umask 077
+if [ "$#" -ne 1 ]; then
+    echo 'expected apply, verify or rollback' >&2
+    exit 64
+fi
+case "$1" in apply|verify|rollback) ;; *) exit 64 ;; esac
+if [ "$(id -u)" -ne 0 ]; then
+    echo 'root required; no changes made' >&2
+    exit 77
+fi
+exec /usr/bin/python3 - "$1" <<'PY'
+import os
+import pwd
+import shutil
+import stat
+import sys
+
+# Fixed qualification configuration; identities are resolved, never allocated.
+names = ('platform-test-a', 'platform-test-b')
+base = '/var/lib/swarma-station-qualification'
+marker = b'station-permission-fixture/1\n'
+
+def require(ok, reason):
+    if not ok:
+        raise SystemExit(reason)
+
+def checked(path, mode, uid, gid, directory):
+    value = os.lstat(path)
+    require((stat.S_ISDIR(value.st_mode) if directory else
+             stat.S_ISREG(value.st_mode)), 'unexpected fixture type')
+    require(value.st_uid == uid and value.st_gid == gid,
+            'unexpected fixture ownership')
+    require(stat.S_IMODE(value.st_mode) == mode, 'unexpected fixture mode')
+    if not directory:
+        require(value.st_nlink == 1, 'unexpected hardlink')
+
+for parent in ('/', '/var', '/var/lib'):
+    info = os.lstat(parent)
+    require(stat.S_ISDIR(info.st_mode) and info.st_uid == 0 and
+            info.st_mode & 0o022 == 0, 'unsafe fixture ancestor')
+accounts = [pwd.getpwnam(name) for name in names]
+require(all(p.pw_uid != 0 and p.pw_gid != 0 for p in accounts),
+        'root test identity refused')
+require(len({p.pw_uid for p in accounts}) == 2 and
+        len({p.pw_gid for p in accounts}) == 2, 'identities overlap')
+for own, other in ((accounts[0], accounts[1]), (accounts[1], accounts[0])):
+    require(other.pw_gid not in os.getgrouplist(own.pw_name, own.pw_gid),
+            'cross-station primary-group membership')
+
+mode = sys.argv[1]
+if mode == 'apply':
+    require(not os.path.lexists(base), 'fixture already exists')
+    os.mkdir(base, 0o711)
+    os.chmod(base, 0o711)
+    with open(base + '/.fixture', 'xb') as stream:
+        stream.write(marker)
+    os.chmod(base + '/.fixture', 0o600)
+    for account in accounts:
+        home = base + '/' + account.pw_name
+        os.mkdir(home, 0o750)
+        os.chown(home, 0, account.pw_gid)
+        os.chmod(home, 0o750)
+        for relative, sticky in (('.platform', False),
+                                 ('.platform/skills', False),
+                                 ('.harness', True)):
+            path = home + '/' + relative
+            os.mkdir(path, 0o700)
+            os.chown(path, 0, account.pw_gid)
+            os.chmod(path, 0o1770 if sticky else 0o750)
+        for relative in ('AGENTS.md', '.platform/trust-pin.json',
+                         '.platform/skills/example.md',
+                         '.harness/settings.json'):
+            path = home + '/' + relative
+            with open(path, 'xb') as stream:
+                stream.write(b'qualification-control\n')
+            os.chown(path, 0, account.pw_gid)
+            os.chmod(path, 0o640)
+        for relative in ('work', 'tmp', '.harness/state'):
+            path = home + '/' + relative
+            os.mkdir(path, 0o700)
+            os.chmod(path, 0o700)
+            # Ownership transfer is last: a station can then move its state entry.
+            os.chown(path, account.pw_uid, account.pw_gid)
+
+checked(base, 0o711, 0, 0, True)
+checked(base + '/.fixture', 0o600, 0, 0, False)
+with open(base + '/.fixture', 'rb') as stream:
+    require(stream.read() == marker, 'wrong fixture marker')
+if mode == 'rollback':
+    require(shutil.rmtree.avoids_symlink_attacks,
+            'descriptor-safe removal unavailable')
+    # Fixed root-owned top-level names only; rmtree unlinks internal links.
+    require(set(os.listdir(base)) <= set(names) | {'.fixture'},
+            'unexpected root fixture entries')
+    for name in names:
+        path = base + '/' + name
+        if os.path.lexists(path):
+            info = os.lstat(path)
+            require(stat.S_ISDIR(info.st_mode) and info.st_uid == 0,
+                    'unsafe fixture home')
+            shutil.rmtree(path)
+    os.unlink(base + '/.fixture')
+    os.rmdir(base)
+    print('fixture rollback verified')
+    raise SystemExit(0)
+
+require(set(os.listdir(base)) == set(names) | {'.fixture'},
+        'incomplete fixture root')
+for account in accounts:
+    home = base + '/' + account.pw_name
+    checked(home, 0o750, 0, account.pw_gid, True)
+    for relative, expected in (('.platform', 0o750),
+                               ('.platform/skills', 0o750),
+                               ('.harness', 0o1770)):
+        checked(home + '/' + relative, expected, 0, account.pw_gid, True)
+    for relative in ('AGENTS.md', '.platform/trust-pin.json',
+                     '.platform/skills/example.md', '.harness/settings.json'):
+        path = home + '/' + relative
+        checked(path, 0o640, 0, account.pw_gid, False)
+        with open(path, 'rb') as stream:
+            require(stream.read() == b'qualification-control\n',
+                    'changed managed control')
+    for relative in ('work', 'tmp', '.harness/state'):
+        checked(home + '/' + relative, 0o700,
+                account.pw_uid, account.pw_gid, True)
+print('fixture ownership and managed bytes verified')
+PY
+```
+
+`verify` checks the real owner/group/mode, link count and control bytes; follow
+it with the named §9 unprivileged probes against these fixed fixture homes,
+then `verify` again. It is not a digest/start gate test. `rollback` permits
+station-written content only below guarded fixed homes and uses Python's
+symlink-resistant descriptor deletion; it refuses foreign top-level entries.
+The fixture is disposable and must not hold real work or keys. No root execution
+is claimed by syntax checking or by the script's non-root refusal control.
+
+## 11. Activation and handoff gates
+
+Independent spec review and content review precede implementation. Q1's bump
+ruling, the reviewed `gen-journal/1` revision/sections, effect and cleanup
+admission encodings, Curator composition/start interlock and per-runtime
+mapping, configured bounds and Linux qualification evidence are explicit gates.
+A fixture pass does not close an integration gate. Record every unrun test as
+PENDING with its missing dependency; do not publish production readiness or
+claim a local root fixture qualifies a complete station.
+
+The [open-question register](../UNRESOLVED_QUESTIONS.md) tracks these remaining
+decisions and publication prerequisites. Later helper features are preserved;
+only this closed subset is proposed for the first station account writer.

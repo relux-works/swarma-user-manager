@@ -1,8 +1,12 @@
 # swarma-user-manager: specification
 
-- **Status:** draft v0.13 (2026-10-13). Nothing is implemented.
+- **Status:** draft v0.14 (2026-10-23). Nothing is implemented.
 - **Normative language:** MUST, MUST NOT, SHOULD and MAY are used as in RFC 2119.
 - **Companions:** [swarma-credential-broker](https://github.com/relux-works/swarma-credential-broker) (binds the OS accounts this helper creates), [curator-network-profiles](https://github.com/relux-works/curator-network-profiles) (the egress an agent may use).
+
+### Revision 0.14
+
+Adds the proposed [station-account v0 slice](stations-v0.md): one OS account per trusted agent station, closed account operations and a pending same-account generation bump. Corrects station homes to root-owned skeletons with private writable children and protected managed controls. The slice explicitly narrows the broader phased design below; it does not activate a launcher, workplace, service provisioning, exports, watcher or ALLSTOP. The generation journal format (spec/generation-journal.md), `gen-journal/1`, owns authoritative generation encoding and consumer ordering; alignment with its reviewed revision remains an implementation gate. No implementation or qualification is claimed.
 
 ### Revision 0.13 follow-up
 
@@ -45,6 +49,8 @@ Applies the accepted review findings: retirement deletes the home after quiescen
 Revisions 0.2–0.5 introduced the separate launcher, per-caller policy, account lifecycle and retirement fence, descriptor-relative file operations, exact sudo/input bounds, platform layout, execution receipts and authorised stop, firewall evidence, separate donor provisioning, wire naming and the caller-composed executor plan. Revisions 0.6–0.10 supersede their retirement, process-scope/recovery, session-host permit, operator-custody and dispatcher transport policies. Identity revocation remains separate from account retirement.
 
 ## 1. Purpose
+
+**First station writer scope.** [Station accounts v0](stations-v0.md), §§1–3, defines the proposed closed Linux station-only subset of this broader design. Its explicit refusals and activation gates take precedence for that slice; later-phase contracts below remain design requirements, not available operations. In particular conversation recycle does not authorize account-generation reset, which remains pending curator ruling.
 
 Figure [M-UM1: privileged components and process boundaries](../diagrams/components.puml) maps the responsibilities below; it describes the design, not implemented components.
 
@@ -160,6 +166,8 @@ Figure [M-UM4: storage layout and owners](../diagrams/storage-layout.puml) expan
   archive/                   root 0700: closed-schema service-generated metadata exports; files root 0600
 ```
 
+For station agents, [stations-v0.md §7](stations-v0.md#7-managed-home-layout-and-installation) refines this schematic tree: each home root and every managed ancestor is root-owned, with dedicated station-group traversal, root-owned read-only context/skills/settings/trust pin and separately station-owned writable data. A station-owned home root cannot protect managed entries against unlink/rename, even with a sticky bit. Older figures and non-station layout sketches are not station ownership authority.
+
 The root is chosen at installation (for example on a separate volume); every path below is relative to it. The machine-owned network binding policy lives beside `etc/user-manager.json`; its filename and encoding remain unpublished (§8, R-NETBIND).
 
 These phases identify each component's platform placement, not a shared release number. The dispatcher is an unprivileged Unix-socket service from its first slice, using the broker's connection/framing rules; its service entry point does not use stdin command requests. It still invokes the helper and launcher through sudo as their root-helper caller. SH1 extraction of the session host does not activate its SH2+ service-account layout. Companion components own their binaries and socket contracts; the helper/launcher installer scope remains §11.
@@ -197,7 +205,7 @@ result: { username: "worker-dev-7f3", uid: 30412, gid: 30412, home: "/opt/swarma
           generation: "9ac67d3418e04b0aafe89c6d72b54103", state: "active" }
 ```
 
-Agent and ordinary service accounts have no usable password, no login shell (`/usr/bin/false` on macOS, `/usr/sbin/nologin` on Linux) and no supplementary groups. Creation and activation refuse under the persisted R-ALLSTOP receiver mark; already-issued creates are reconciled behind the closed inventory frontier (§8.3). The home is created empty under a fixed root (agents/workplaces and services have separate roots), owned by the account, mode 0700, through descriptors (§6). The helper refuses when the name or home already exists outside its ledger (`user_exists_unmanaged`, `home_exists_unmanaged`).
+Agent and ordinary service accounts have no usable password, no login shell (`/usr/bin/false` on macOS, `/usr/sbin/nologin` on Linux) and no supplementary groups. Creation and activation refuse under the persisted R-ALLSTOP receiver mark; already-issued creates are reconciled behind the closed inventory frontier (§8.3). Homes are created under fixed, separate roots through descriptors (§6). Station-agent homes use the root-owned skeleton and private writable children in [stations-v0.md §7](stations-v0.md#7-managed-home-layout-and-installation); the account-owned mode-0700 home sketch applies only outside that station slice and cannot protect platform-managed entries. The helper refuses when the name or home already exists outside its ledger (`user_exists_unmanaged`, `home_exists_unmanaged`).
 
 The user manager creates `swarma-operator` and `swarma-observer` as protected **service** accounts under the service naming/range rules (§4.1), never agent or workplace accounts. Only a configured installer naming these services in root policy, or the configured operator, may create them; a dispatcher cannot. The installer bootstraps them before pinning their UIDs and provisioning operator authority (§11). Neither account may host a harness session or use the launcher. Neither has password SSH login or an interactive shell. The operator's device-key-only forced entry (§11) is an explicit exception to ordinary service authentication denial; the observer's read-only entry would need publication. Per-platform account/shell/sshd settings for those narrow entries would need publication and qualification (§14, question 17), rather than claiming the ordinary non-login shell admits an SSH forced command.
 
@@ -245,11 +253,15 @@ Figure [M-UM3: receipt evidence and retirement fate](../diagrams/receipt-archive
 
 ### 4.5 `user.list` and the ledger
 
+For the station slice, the generation journal format (spec/generation-journal.md), `gen-journal/1`, is authoritative; the ledger described below is a derived projection, never an independent generation writer. [Stations-v0.md §§3, 8](stations-v0.md#3-durable-effects-and-generation-records) separates generation records from caller/effect evidence. The journal's reviewed projection/reader sections must be aligned before implementation; the record sketch below does not override them. General `user.list` is outside that first writer's API.
+
 The ledger is a root-owned, world-readable file with one record per generation: `{ generation, username, uid, gid, kind, label, state, created_at, created_by, retired_at? }`. It contains no secrets. It is replaced atomically (temporary file, flush, rename, directory flush) in a root-owned directory. Other components (broker, launcher, dispatcher and session host) read it directly; `user.list` returns the same records. Readability is not authority. Neither an `active`/idle lifecycle label nor a missing receipt proves that a generation was never launched or is currently absent (§8.3). The ledger alone does not establish whether an effect was recorded: `effect.observe` consults the receiver-owned caller/effect journal mapping under the shared lock (§4.6), never infers absence from a missing reusable UID or label.
 
 **Ledger store epoch (R-GEN).** The ledger carries a monotonic store epoch; each direct reader durably records its highest observed epoch in its own state and refuses a lower one until operator reconciliation. Epoch envelope/floor encoding is unpublished (§14, question 9), so the record sketch assigns no new member. A floor helps only if it survives outside the restored failure domain; it complements the external restore fence and coverage proof. Missing/invalid shared state closes admission, never an empty ledger. `user.list`, receipts and retained records support dispatcher reverse inventory; an orphan requires operator decision, never automatic adoption/deletion by name or UID.
 
 ### 4.6 Lock, journal and idempotency
+
+Station generation transitions use the generation journal format (spec/generation-journal.md), `gen-journal/1`; its canonical append, durability, recovery and consumer-ordering sections own those bytes and exclusion rules. [Stations-v0.md §3](stations-v0.md#3-durable-effects-and-generation-records) specifies the required state append sequences and keeps mutation-step/idempotency evidence separate. Final cross-process release exclusion and effect encoding must be jointly published and reviewed; an append-only chain alone does not establish either property.
 
 Figure [M-UM2: provision, retire and recovery](../diagrams/provision-retire-recovery.puml) distinguishes creation rollback from retirement recovery and effect replay.
 
@@ -276,6 +288,8 @@ Figure [M-UM2: provision, retire and recovery](../diagrams/provision-retire-reco
 The published wait/lock graph must stay acyclic; bounds and concurrency qualify before activation. No other synchronous platform-service wait is admitted under the shared lock.
 
 #### 4.6.1 State loss and restore (R-GEN)
+
+The generation journal format (spec/generation-journal.md), `gen-journal/1`, must retain this external restore-fence requirement in its restore/reader-floor contract. [Stations-v0.md §8](stations-v0.md#8-journal-consumers-and-restoration) refuses missing, contradictory or unreconciled generation evidence; hash-chain consistency is not proof against a coherent whole-machine rollback. Reviewed journal section references remain an explicit alignment gate.
 
 A declared restore or state loss is an operator incident, not ordinary journal crash recovery. Before restored bytes become visible, install a restore mark outside the restored domain and close **all** ledger consumers: broker, launcher, dispatcher and session host. Keep new dispatcher admission closed. A snapshot, same-domain audit or epoch counter cannot certify its own rollback.
 
