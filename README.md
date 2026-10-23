@@ -5,7 +5,7 @@ Two minimal privileged components for agent systems. Each runs as root for one o
 - **swarma-user-manager** creates, lists and retires per-agent, per-service and qualified workplace OS accounts, owns the static UID-range default deny from v0, and (v1) narrows trusted agents to their bound model-provider proxy and workplaces to zero egress;
 - **swarma-user-launcher** starts one approved executor under one active agent or qualified workplace account, so that an unprivileged dispatcher can run an agent as that account without general `sudo` rights.
 
-**Status: design in progress.** Accepted architecture-review findings (2026-10-13) are reflected in draft v0.13 and its figures; publication/qualification gates remain open. Nothing is implemented yet. The specification is [`spec/helper.md`](spec/helper.md); diagrams are in [`diagrams/`](diagrams/).
+**Status: design in progress.** Accepted architecture-review findings (2026-10-13) are reflected in draft v0.13 and its figures; publication/qualification gates remain open. The [generation journal format `gen-journal/1`](spec/generation-journal.md), vectors and Linux offline checker are published here; account-management services and production consumer adapters are not implemented. The helper specification is [`spec/helper.md`](spec/helper.md); diagrams are in [`diagrams/`](diagrams/).
 
 ## Principles
 
@@ -52,3 +52,21 @@ PlantUML sources map the current [specification](spec/helper.md#appendix-b-diagr
 ## License
 
 Apache License 2.0 — see [LICENSE](LICENSE) and [NOTICE](NOTICE).
+
+## Generation journal tools
+
+Linux and Go 1.26 or later are required. The Go module pins the format owner's
+CCJ-1 implementation; consumers should pin a reviewed landed commit of this
+repository. These tools manage public generation metadata, never accounts.
+
+| Tool | Purpose | Command / entry point | Output |
+|---|---|---|---|
+| Go checker | Validate bytes, protected paths, checkpoints; emit per-UID view | `go build -o .temp/gen-journal ./tools/cmd/gen-journal`; `.temp/gen-journal bytes vectors/gen-journal/active.jsonl 0 "$ZERO_HASH"` | Binary in `.temp/`; view on stdout or typed refusal on stderr |
+| Go narrow tests | Vectors, negative control, manual runbook, Linux lock ordering | `go test ./tools/...` | Test verdicts on stdout |
+| Go vector runner | Stable vectors and corrupt-link plant | `go test ./tools/genjournal -run '^(TestVectors|TestBrokenChainPlant)$' -count=1` | Named verdicts; fixture files in Go temporary directories |
+| POSIX sh, coreutils, util-linux flock | Reviewed manual writer and genesis/reconciliation | `sh tools/manual-journal.sh /protected/libexec/gen-journal init "$DIR"`; append/reconcile arguments in [the runbook](spec/generation-journal.md#7-reviewed-root-run-manual-procedure) | Root-owned generation directory; per-UID diagnostic view |
+
+`ZERO_HASH` is exactly 64 zeroes and is only an explicitly approved initial
+checkpoint. Production consumers must preserve their durable high-water and
+external restore fence as specified; an offline success does not authorize
+admission. [Vectors](vectors/gen-journal/README.md) document the stable layout.
