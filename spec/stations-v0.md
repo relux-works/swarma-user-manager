@@ -161,12 +161,12 @@ reacquisition. Never wait on another platform service under this lock.
 |---|---|---|
 | Create reservation | `(u,g,creating)` before group/account creation | Fresh random `g`, name/UID/GID/home exclusivity, quota and intent durable |
 | Create commit | `(u,g,active)` after provisioning | Exact OS identity, protected skeleton, persistence denial and static deny verified |
-| Create compensation | `(u,g,retiring)` then `(u,g,removed)` | Fence first, stop/absence, descriptor cleanup, account/group absence; never a fabricated `rolled_back` chain state |
+| Create compensation | `(u,g,removed)` after the earlier `creating` | Never-active generation stays inadmissible; stop/absence, descriptor cleanup and account/group absence precede removal; no `retiring` or fabricated `rolled_back` state |
 | Retire admission | `(u,g,retiring)` before stop or deletion | Authorized cleanup admission, exact active identity, effect durable |
 | Retire commit | `(u,g,removed)` after cleanup and account/group removal | Home/temp cleanup and complete OS absence verified |
 | Bump old generation | `(u,g_old,retiring)` then `(u,g_old,removed)` | Stop/absence and reset verified; account intentionally retained and reserved |
 | Bump successor | `(u,g_new,creating)` then `(u,g_new,active)` | `g_old` already removed; reset scaffold and OS identity verified; distinct new token |
-| Successor compensation | `(u,g_new,retiring)` then `(u,g_new,removed)` | No old-generation resurrection; account remains reserved for reconciliation |
+| Successor compensation | `(u,g_new,removed)` after its earlier `creating` | Never-active successor stays inadmissible; verified cleanup, no old-generation resurrection; account remains reserved for reconciliation |
 
 These are exact state append sequences, not illustrative step-by-step
 synthetic journal lines. Do not append a state record for every filesystem
@@ -177,8 +177,10 @@ OS provisioning happened; crash after durable `active` replays success.
 If intent exists but an append outcome is uncertain, validate the chain and
 match its recorded identity before taking any action.
 
-The reviewed journal MUST permit an interrupted `creating` generation to be
-fenced and removed and MUST define how a bump can retain a reserved OS account
+An interrupted `creating` generation rolls back directly to `removed`, with
+no intervening `retiring`: it never became active and remains fenced throughout
+cleanup. Only a generation that became `active` follows `retiring -> removed`.
+The reviewed journal MUST define how a bump can retain a reserved OS account
 while the old generation is `removed`. Here `removed` means no admission for
 that generation, not necessarily absence of its reusable numeric UID. Any
 incompatible journal transition requires joint correction before activation.
@@ -307,8 +309,8 @@ owner under Keymaker's policy; no automatic key carry-over is promised.
 
 A crash after the old `retiring` always moves forward. After old `removed`,
 the old generation stays dead even if successor provisioning fails. Roll back
-an interrupted successor via its own `retiring`/`removed`, retain the OS account
-and reservation as a visible fenced partial effect, and require explicit
+an interrupted, never-active successor via `creating -> removed`, retain the OS
+account and reservation as a visible fenced partial effect, and require explicit
 reconciliation; do not draw another successor under the same completed-failure
 request or silently delete the retained account. A retry after new `active`
 returns the same new token. Failure before the old `retiring` admits no reset.
@@ -451,6 +453,7 @@ qualify the no-supplementary-groups backend claim.
 | `ManagedAncestorReplacementDenied`: home, managed directory and protected sticky entry cannot be moved/replaced, even via work symlinks | Station creates/removes its own entry in sticky native directory | Descriptor operations and before/after tree inventory |
 | `ManagedLinkConfusionDenied`: links to outside sentinels cannot redirect install/delete; hardlink attempt denied or start refuses unexpected link count | Approved single-link regular file installs and verifies | Real no-follow updater/start paths; PENDING implementation and root fixture |
 | `InheritedNamedACLRejected`: a default named-user ACL on an ancestor/staging parent must refuse before publication; inherited or explicitly planted access/default ACLs on any fixture path must fail verification, including mode-masked grants | ACL-free ancestor/staging/home/control passes inspection; unrelated station read is denied | Real Linux inherited ACL and test-account peer on runner-owned surrogate; unreadable/unsupported metadata refuses; root invocation remains PENDING §10 |
+| `RecursiveInspectionComplete`: descendant-open and cached-dirent-type fault variants must never hide an ACL-bearing leaf; listing/open/descriptor-stat/xattr/read/close errors, missing paths and unexpected paths refuse | Complete ACL-free fixed fixture passes; the same visible ACL refuses without injected faults | Named regressions retain both walker bypasses, exercise direct-descriptor failures and kill an error-suppression mutant; root invocation remains PENDING §10 |
 | `StationHomeIsolation`: other station cannot traverse/read home or state, including guessed filenames | Each station reads its own context and writes its own state | Exact root:S 0750 fixture PENDING §10; runner surrogate with broader traversal is not this proof |
 | `RetiredGenerationRefused`: fresh and existing signer/broker connections cannot use retired generation or adopt new binding | Active generation succeeds under same protocol method | Real consumer adapter; PENDING journal/Keymaker/broker integration |
 | `BumpUniqueGeneration`: never two non-removed generations for one UID, including crash/retry at each append | Two consecutive distinct tokens, old removed before successor creating | Chain replay + OS identity checks; PENDING Q1, writer and root backend |
@@ -530,6 +533,14 @@ refuses any preexisting fixture or staging wrapper, including symlinks. Run
 one owner invocation at a time. The parent chain is root-owned, non-writable
 and ACL/capability-free. Every created path is checked before exposure; verify
 checks every descendant as well as the ancestors and any staging wrapper.
+The complete fixture has a closed expected inventory, including empty writable
+directories: remove disposable probe artifacts before verification. Each entry
+name is opened relative to its directory descriptor with no symlink following;
+only `fstat` of that opened descriptor classifies it. Cached dirent type hints
+and walkers that may skip errors are not completeness evidence. Any listing,
+open, stat, access-attribute read, content read or close error refuses. The set
+of inspected objects MUST equal the fixed expected tree; missing or unexpected
+entries refuse, and incomplete inspection never reaches the success message.
 Only an explicit ENODATA result means an attribute is absent: permission, I/O
 and unsupported-filesystem errors refuse. Any stored POSIX access/default ACL
 or file-capability attribute refuses; the script never edits ancestor ACLs.
@@ -581,6 +592,13 @@ def require(ok, reason):
     if not ok:
         raise SystemExit(reason)
 
+def present(path):
+    try:
+        os.lstat(path)
+    except FileNotFoundError:
+        return False
+    return True
+
 def no_extra_access(path):
     import errno
     for attribute in ('system.posix_acl_access', 'system.posix_acl_default',
@@ -595,7 +613,7 @@ def no_extra_access(path):
                     'security.capability' else 'stored ACL refused')
 
 def checked(path, mode, uid, gid, directory):
-    value = os.lstat(path)
+    value = os.fstat(path) if isinstance(path, int) else os.lstat(path)
     require((stat.S_ISDIR(value.st_mode) if directory else
              stat.S_ISREG(value.st_mode)), 'unexpected fixture type')
     require(value.st_uid == uid and value.st_gid == gid,
@@ -605,57 +623,79 @@ def checked(path, mode, uid, gid, directory):
         require(value.st_nlink == 1, 'unexpected hardlink')
     no_extra_access(path)
 
-def access_tree(root):
-    # Every descendant is checked by descriptor, including station-written files.
-    device = os.lstat(root).st_dev
-    for _, directories, files, descriptor in os.fwalk(root, follow_symlinks=False):
-        no_extra_access(descriptor)
-        for name in directories + files:
-            value = os.stat(name, dir_fd=descriptor, follow_symlinks=False)
-            require(value.st_dev == device and
-                    (stat.S_ISDIR(value.st_mode) or stat.S_ISREG(value.st_mode)),
-                    'unexpected fixture link, mount or special file')
+def fixture_entries():
+    entries = {'': (True, 0o711, 0, 0, None),
+               '.fixture': (False, 0o600, 0, 0, marker)}
+    for account in accounts:
+        home = account.pw_name
+        entries[home] = (True, 0o750, 0, account.pw_gid, None)
+        for relative, permissions in (('.platform', 0o750),
+                                      ('.platform/skills', 0o750),
+                                      ('.harness', 0o1770)):
+            entries[home + '/' + relative] = (
+                True, permissions, 0, account.pw_gid, None)
+        for relative in ('AGENTS.md', '.platform/trust-pin.json',
+                         '.platform/skills/example.md', '.harness/settings.json'):
+            entries[home + '/' + relative] = (
+                False, 0o640, 0, account.pw_gid, b'qualification-control\n')
+        for relative in ('work', 'tmp', '.harness/state'):
+            entries[home + '/' + relative] = (
+                True, 0o700, account.pw_uid, account.pw_gid, None)
+    return entries
+
+def access_tree(root, expected):
+    inspected = set()
+    device = None
+
+    def visit(descriptor, relative):
+        value = os.fstat(descriptor)
+        require(value.st_dev == device, 'unexpected fixture device')
+        require(relative in expected and relative not in inspected,
+                'unexpected or duplicate fixture entry')
+        directory, permissions, uid, gid, contents = expected[relative]
+        # Classification comes only from the opened descriptor, never dirent type.
+        require(stat.S_ISDIR(value.st_mode) if directory else
+                stat.S_ISREG(value.st_mode), 'unexpected fixture type')
+        checked(descriptor, permissions, uid, gid, directory)
+        inspected.add(relative)
+        if not directory:
+            require(value.st_size == len(contents) and
+                    os.read(descriptor, len(contents) + 1) == contents,
+                    'changed managed control')
+            return
+        with os.scandir(descriptor) as entries:
+            labels = [entry.name for entry in entries]
+        require(len(labels) == len(set(labels)), 'duplicate directory entry')
+        for name in labels:
+            require(name not in ('.', '..') and '/' not in name,
+                    'invalid directory entry')
+            child_relative = relative + '/' + name if relative else name
             child = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
                             dir_fd=descriptor)
             try:
-                opened = os.fstat(child)
-                require((opened.st_dev, opened.st_ino) ==
-                        (value.st_dev, value.st_ino), 'fixture changed during check')
-                no_extra_access(child)
+                visit(child, child_relative)
             finally:
                 os.close(child)
 
+    try:
+        descriptor = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            device = os.fstat(descriptor).st_dev
+            visit(descriptor, '')
+        finally:
+            os.close(descriptor)
+        require(inspected == set(expected), 'missing fixture entries')
+    except OSError:
+        require(False, 'fixture inspection unavailable')
+
 def complete_tree(root):
-    checked(root, 0o711, 0, 0, True)
-    checked(root + '/.fixture', 0o600, 0, 0, False)
-    with open(root + '/.fixture', 'rb') as stream:
-        require(stream.read() == marker, 'wrong fixture marker')
-    require(set(os.listdir(root)) == set(names) | {'.fixture'},
-            'incomplete fixture root')
-    for account in accounts:
-        home = root + '/' + account.pw_name
-        checked(home, 0o750, 0, account.pw_gid, True)
-        for relative, expected in (('.platform', 0o750),
-                                   ('.platform/skills', 0o750),
-                                   ('.harness', 0o1770)):
-            checked(home + '/' + relative, expected, 0, account.pw_gid, True)
-        for relative in ('AGENTS.md', '.platform/trust-pin.json',
-                         '.platform/skills/example.md', '.harness/settings.json'):
-            path = home + '/' + relative
-            checked(path, 0o640, 0, account.pw_gid, False)
-            with open(path, 'rb') as stream:
-                require(stream.read() == b'qualification-control\n',
-                        'changed managed control')
-        for relative in ('work', 'tmp', '.harness/state'):
-            checked(home + '/' + relative, 0o700,
-                    account.pw_uid, account.pw_gid, True)
-    access_tree(root)
+    access_tree(root, fixture_entries())
 
 def staged_tree():
     checked(staging, 0o700, 0, 0, True)
     require(set(os.listdir(staging)) <= {'fixture'}, 'unexpected staging entries')
     tree = staging + '/fixture'
-    if os.path.lexists(tree):
+    if present(tree):
         info = os.lstat(tree)
         require(stat.S_IMODE(info.st_mode) in (0o700, 0o711),
                 'unexpected staging tree mode')
@@ -683,8 +723,8 @@ mode = sys.argv[1]
 if mode == 'rollback':
     require(shutil.rmtree.avoids_symlink_attacks,
             'descriptor-safe removal unavailable')
-    tree = staged_tree() if os.path.lexists(staging) else None
-    published = os.path.lexists(base)
+    tree = staged_tree() if present(staging) else None
+    published = present(base)
     if published:
         checked(base, 0o711, 0, 0, True)
         checked(base + '/.fixture', 0o600, 0, 0, False)
@@ -692,18 +732,20 @@ if mode == 'rollback':
             require(stream.read() == marker, 'wrong fixture marker')
         require(set(os.listdir(base)) <= set(names) | {'.fixture'},
                 'unexpected root fixture entries')
-    require(published or os.path.lexists(staging), 'no fixture to roll back')
+    require(published or present(staging), 'no fixture to roll back')
     if published:
         shutil.rmtree(base)
     if tree is not None:
         shutil.rmtree(tree)
-    if os.path.lexists(staging):
+    if present(staging):
         os.rmdir(staging)
+    require(not present(base) and not present(staging),
+            'fixture rollback incomplete')
     print('fixture rollback verified')
     raise SystemExit(0)
 
 if mode == 'apply':
-    require(not os.path.lexists(base) and not os.path.lexists(staging),
+    require(not present(base) and not present(staging),
             'fixture or staging already exists')
     os.mkdir(staging, 0o700)
     checked(staging, 0o700, 0, 0, True)
@@ -750,7 +792,7 @@ if mode == 'apply':
     os.rename(tree, base)
     os.rmdir(staging)
 
-if os.path.lexists(staging):
+if present(staging):
     require(staged_tree() is None, 'unfinished staging; rollback required')
 complete_tree(base)
 print('fixture ownership, access metadata and managed bytes verified')
@@ -760,14 +802,25 @@ PY
 `verify` checks the real owner/group/mode, link count, every path's access
 attributes and control bytes; follow it with the named §9 unprivileged probes
 against these fixed fixture homes, then `verify` again. The fixture verifier
-also refuses links, special files or mounts among descendant probe artifacts;
-remove those disposable artifacts as their test owner before verification.
+also refuses missing/extra objects, links, special files or foreign devices;
+remove disposable probe artifacts as their test owner before verification.
 This does not change production home deletion's link-unlink contract. It is
 not a digest/start gate test. `rollback` deletes only the guarded published
 fixture and/or private staging tree using Python's symlink-resistant descriptor
 deletion; foreign top-level entries refuse. The private staging guard supplies
 recovery authority before its marker exists; it does not authorize deletion
 of an unmarked published tree.
+
+Rollback's `shutil.rmtree` walk has a different contract: it only unlinks objects
+inside guarded disposable roots and never changes ownership, permissions,
+ACLs or admission. A skipped or failed deletion cannot widen access or certify
+a tree as inspected. Symlink-resistant descriptor deletion does not follow
+external targets; errors abort, and both guarded roots must be absent before
+rollback reports success. Unlike verification, rollback deliberately accepts
+partial trees and disposable probe content; it grants no permission to publish
+or activate an incompletely inspected tree. The staging/top-level `listdir`
+guards also propagate listing errors; existence checks accept only an explicit
+missing-path result as absence. Neither makes a recursive inspection claim.
 The fixture is disposable and must not hold real work or keys. No root execution
 is claimed by syntax checking or by the script's non-root refusal control.
 
