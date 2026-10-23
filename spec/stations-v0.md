@@ -1,7 +1,7 @@
 # Station accounts: v0 slice
 
 - **Status:** draft for independent and content review; no implementation or activation.
-- **Base:** [helper design](helper.md), draft v0.14, narrowed as stated here.
+- **Base:** [helper design](helper.md), draft v0.15, narrowed as stated here.
 - **Public decisions:** [CIP-0024 revision 2](https://github.com/relux-works/curator-spec/blob/471ccc0d299473fbbce766c1ed6aa641a918a4c9/cips/CIP-0024-agent-stations.md), especially Owner decisions and Platform controls and approved updates.
 - **Generation authority:** the generation journal format (spec/generation-journal.md), `gen-journal/1`. Its reviewed revision, section references and adapter ordering MUST be aligned before implementation; this draft does not define alternative journal bytes.
 
@@ -23,7 +23,7 @@ lock. Composition uses Curator's separately authorized installer boundary.
 
 | In v0 | Explicitly outside this slice |
 |---|---|
-| `user.create` with `kind=agent`; `user.retire`; proposed `user.bump` | Service/workplace/donor provisioning; pooling; arbitrary UID/GID/path input |
+| `user.create` with `kind=agent`; `user.retire`; same-account `user.bump` | Service/workplace/donor provisioning; pooling; arbitrary UID/GID/path input |
 | Root-owned generation/effect evidence; duplicate-request recovery | General `user.list`, `effect.observe`, `exec.stop` APIs; their later contracts remain in helper.md |
 | Managed-home protection; local cleanup and generation fencing | Launcher installation/execution; credential binding, signing, identity registration/revocation |
 | Required preinstalled static UID-range deny | Firewall v1, per-account rule updates, web/network opt-ins |
@@ -49,7 +49,8 @@ backend capability evidence is absent, stale, failed or unknown.
 Retain `swarma-user-manager helper-op/1` and `helper-result/1` from
 [helper.md §2](helper.md#2-invocation). `user.*` keeps the existing account API:
 `station.*` would suggest ownership of station records and lifecycle that this
-helper does not have. `user.bump` is a proposed addition, gated by §6 and Q1.
+helper does not have. `user.bump` follows the decided same-account model in §6; its implementation
+and cross-service qualification gates remain closed until satisfied.
 
 Only a root-configured dispatcher principal may create, retire or bump its own
 agent allocations, within its configured quota. The principal's protected
@@ -108,10 +109,12 @@ and effect evidence remain in protected logs.
 |---|---|
 | `request_invalid`, `label_invalid`, `request_too_large`, `request_timeout` | Intake/schema/bounds failure; no effect admitted |
 | `not_root`, `not_invoked_by_sudo`, `argv_not_allowed`, `caller_role_not_permitted`, `target_not_owned`, `quota_exceeded` | Invocation, owner or quota refusal; no new effect |
-| `operation_unsupported`, `kind_unsupported`, `class_unsupported`, `platform_unsupported`, `grants_unsupported`, `qualification_required`, `bump_not_enabled` | Feature/qualification gate; no new effect |
+| `operation_unsupported`, `kind_unsupported`, `class_unsupported`, `platform_unsupported`, `grants_unsupported`, `qualification_required` | Feature/qualification gate; no new effect |
 | `request_id_conflict`, `effect_evidence_unavailable` | Conflicting ID or incomplete dedup evidence; never retry as a fresh effect |
 | `generation_unknown`, `generation_mismatch`, `generation_inactive`, `target_busy` | Target absent from authority, stale, non-active or reserved by another effect; no successor selected |
 | `user_exists_unmanaged`, `home_exists_unmanaged`, `uid_not_clean`, `identity_exhausted`, `entropy_unavailable` | Allocation/preflight refusal; no unmanaged object adopted |
+| `bump_uid_not_clean` | Outside-home UID residue or incomplete inventory; same-account bump refuses, account stays fenced for ordinary-retirement fallback (§6.1) |
+| `bump_key_admission_unconfirmed` | Required Keymaker re-admission or new-binding confirmation absent/invalid; no successor activation, pending effect stays fenced (§6.2) |
 | `path_is_link`, `state_unavailable`, `state_contradictory`, `cleanup_not_admitted`, `processes_remain`, `cleanup_pending`, `backend_failed` | Integrity/cleanup/backend gate; an admitted effect can remain pending or rolled back as §3 specifies |
 
 `path_is_link` at intake does not admit work. After durable intent it prevents
@@ -120,6 +123,13 @@ and an error are not evidence of rollback or absence. This table adds draft
 codes only for this slice; it does not silently standardize later-phase APIs.
 
 ## 3. Durable effects and generation records
+
+The generation journal is authoritative for lifecycle state. `ledger.json` is
+a derived view: on divergence rebuild it from the verified journal under the
+shared lock; never rewrite the journal to match the ledger or authorize from
+the divergent view. Join non-generation metadata only from protected effect
+evidence; if replay or that evidence is unavailable, refuse `state_unavailable`.
+Rebuilding a view neither repairs a corrupt journal nor releases restore fences.
 
 The generation journal and the caller/effect step journal are distinct. No
 request IDs, step names, home paths or ad hoc rollback states are added to
@@ -165,7 +175,7 @@ reacquisition. Never wait on another platform service under this lock.
 | Retire admission | `(u,g,retiring)` before stop or deletion | Authorized cleanup admission, exact active identity, effect durable |
 | Retire commit | `(u,g,removed)` after cleanup and account/group removal | Home/temp cleanup and complete OS absence verified |
 | Bump old generation | `(u,g_old,retiring)` then `(u,g_old,removed)` | Stop/absence and reset verified; account intentionally retained and reserved |
-| Bump successor | `(u,g_new,creating)` then `(u,g_new,active)` | `g_old` already removed; reset scaffold and OS identity verified; distinct new token |
+| Bump successor | `(u,g_new,creating)` then `(u,g_new,active)` | `g_old` already removed; distinct new token, reset scaffold/OS identity, clean UID inventories and ordered Keymaker confirmations (§6) verified before active |
 | Successor compensation | `(u,g_new,removed)` after its earlier `creating` | Never-active successor stays inadmissible; verified cleanup, no old-generation resurrection; account remains reserved for reconciliation |
 
 These are exact state append sequences, not illustrative step-by-step
@@ -272,25 +282,25 @@ Retirement never calls Keymaker or the broker under the helper lock. Binding
 cleanup and identity lifetime stay with their owners. In particular persistent
 identity revocation is not an implied account-retirement effect.
 
-## 6. Proposed same-account generation bump
+## 6. Same-account generation bump
 
-**Pending curator ruling (Q1).** Disabled as `bump_not_enabled` until explicitly
-accepted and the journal/consumer adapters qualify it. CIP-0024 conversation
-`recycle` preserves the account and admitted home; it does not itself authorize
-this destructive account-generation reset. A new conversation alone MUST NOT
-cause `user.bump`.
+**Decided (Q1): same-account bump.** The same owner, name, UID/GID and home path
+remain exclusively reserved for one station. Quota is charged once, and all
+removed-generation evidence stays. Backend, inventory and cross-service
+handoff qualification still gate implementation as `qualification_required`;
+there is no pending choice of bump model. CIP-0024 conversation `recycle`
+preserves the admitted home and does not itself request this destructive
+reset. A new conversation alone MUST NOT cause `user.bump`.
 
-The same owner, name, UID/GID and home path remain exclusively reserved for
-one station. Quota is charged once, but all removed-generation evidence stays.
-The caller targets exactly the old generation. Admission, output/lease gates
-and full UID process absence are identical to retirement. Append
-`g_old:retiring`; stop and prove absence; reset below; append `g_old:removed`;
-only then draw and persist a distinct `g_new:creating`, verify the rebuilt
-scaffold and unchanged OS identity, and append `g_new:active`. The lock and
-reservation exclude competing create/bump/retire calls across the entire
-forward transaction, with bounded cleanup yields. No point has two
-non-removed generations for that UID. There can be a gap with no active
-one; no consumer may infer authority from OS account existence in that gap.
+The caller targets exactly the old generation. Admission, output/lease gates,
+ingress/persistence fencing and full UID process absence are identical to
+retirement. Append `g_old:retiring`; stop and prove absence; reset below; append
+`g_old:removed`. Only then draw and persist a fresh random, distinct
+`g_new:creating`. The reservation and durable in-flight effect exclude
+competing create/bump/retire calls across the transaction, including bounded
+cleanup yields and external handoff waits. No point has two non-removed
+generations for that UID. OS account existence during the inactive gap grants
+no authority. No old key or binding carries over.
 
 | Reset before old `removed` | Retain outside the deleted generation |
 |---|---|
@@ -298,30 +308,125 @@ one; no consumer may infer authority from OS account existence in that gap.
 | Entire old home inode, including old approved controls/pin; all configured UID-owned temporary-area residue | Root-owned account/effect history and tombstones; separately held durable accepted outputs |
 | Old signing/credential endpoints in the home, public-key caches and client state | Platform-approved release identity in protected configuration; external registry/identity history under its owner |
 
-Recreate a new root-owned home/scaffold from the current approved composition;
-never copy station content or old control bytes back. A fresh trust pin must
-be installed through Curator's approved-release path; no new approval is
-inferred. If composition cannot be prepared, remain fenced. The helper does
-not mint a key or copy an old binding. Keymaker bindings use `(uid,generation)`
-and [Keymaker §§3.1–3.2](https://github.com/relux-works/swarma-keymaker/blob/243a330d331c07c57aa0497c348995f66c74d08e/spec/keymaker.md#3-principals-generations-and-bindings): old connections cannot adopt the new
-generation. Persistent identity can only be re-registered by its authorized
-owner under Keymaker's policy; no automatic key carry-over is promised.
+Recreate a root-owned home/scaffold from the current approved composition;
+never copy station content, keys or old control bytes back. Install a fresh
+trust pin through Curator's approved-release path; no new approval is inferred.
+Verify the unchanged OS identity and rebuilt scaffold. If composition cannot
+be prepared, remain fenced. External Keymaker keys and persistent identity
+revocation remain their owner's responsibility (§5).
 
-A crash after the old `retiring` always moves forward. After old `removed`,
-the old generation stays dead even if successor provisioning fails. Roll back
-an interrupted, never-active successor via `creating -> removed`, retain the OS
-account and reservation as a visible fenced partial effect, and require explicit
-reconciliation; do not draw another successor under the same completed-failure
-request or silently delete the retained account. A retry after new `active`
-returns the same new token. Failure before the old `retiring` admits no reset.
+### 6.1 UID absence and external-object inventory
 
-**Alternative:** retire the old account completely under §5 and create a new
-account under §4 with a fresh token and newly allocated UID/GID. Correlate both
-effects in curator-run; never assume the allocator returns the same UID. This
-uses the existing lifecycle without retained-account semantics, at the cost of
-account/name/home migration and explicit registry, signer, broker and Curator
-rebinding. Until Q1 is resolved, use only this separately authorized alternative,
-not an emulation of same-UID bump or pooling.
+Before the successor's `active` append, there MUST be zero processes of the
+UID and zero UID-owned objects outside its home. Stopping a known process
+tree or deleting only configured temp names is insufficient. Revalidate full
+UID absence over the configured quiet interval and maintain the trusted
+creation/ingress fence through inventory, external waits and activation.
+Renew the complete inventory after a cleanup yield, interrupted scan, changed
+mount/namespace view or external handoff; its earlier success is not cached
+authority for the final append.
+
+The qualified Linux backend MUST inventory each class below by numeric UID,
+using trusted descriptors or authenticated administrative interfaces rather
+than station output, guessed names or environment-selected tools. Interfaces
+and their supported host/mount/IPC/network namespace coverage are pinned by
+backend qualification. Missing access, partial enumeration, timeout, unknown
+class/namespace or an unavailable interface counts as objects remaining;
+absence is never inferred from an empty filtered listing or an error.
+
+| Class | Required trusted UID inventory and absence evidence |
+|---|---|
+| Processes, sessions and service domains | Complete root-readable `/proc` task inventory by real/effective/saved/filesystem UID, stable process handles and the qualified containment/session interfaces of §5; no matching task throughout the quiet interval |
+| Files and directories, including `/tmp`, `/var/tmp`, per-user temp and other mounts outside the home | Descriptor-relative no-follow enumeration of every qualified local filesystem/mount namespace where the UID can leave objects, inspecting inode UID, including unlinked inodes reached through trusted process descriptor/mapping inventories across all holders; inventory symlink/socket inodes without following targets. Foreign, inaccessible or unenumerated mounts refuse; checking only platform paths cannot prove global absence |
+| System V IPC | Kernel administrative shared-memory, semaphore and message-queue inventories (Linux `/proc/sysvipc` and qualified `IPC_STAT` interfaces); match both owner and creator UID, including unattached objects |
+| POSIX IPC | Trusted mount/IPC-namespace enumeration of shared-memory and named-semaphore objects (including the qualified `/dev/shm` backing) and message queues through the qualified mqueue filesystem/kernel interfaces; inspect numeric ownership. Unlinked live objects require trusted descriptor/mapping inventories across all holders, verified zero UID processes and complete namespace coverage |
+| Unix sockets | Filesystem socket inodes in the file inventory plus kernel socket diagnostics for every qualified network namespace, matching creator/owner UID; include bound, abstract, listening and connected sockets. `/proc/net/unix` names alone do not provide UID ownership proof |
+| Cron and at jobs | Root-authenticated scheduler/spool interfaces enumerate jobs and their execution UID, not only spool-file ownership; system crontab/fragments that target the UID also count. Verify no job and effective deny policy remains in force |
+| systemd user units/timers, runtime and lingering state | System manager/logind administrative interfaces plus trusted unit/search-path and state inventories for the UID; no user manager/session, loaded or queued unit/timer, UID-owned runtime object or lingering admission. An inactive unit file or root-owned linger marker associated with the UID also counts |
+| Other retirement object classes | Include every persistence, temporary-area, declared key-path and service-domain class required by §5 and helper.md §§4.3–4.4, 4.7; root-owned scheduler records acting as the UID cannot escape this gate merely because inode ownership differs |
+
+The backend MUST establish that this inventory covers every UID-owned object
+class supported on the admitted host. An unqualified resource provider closes
+same-account bump; adding a provider requires qualification, not an assumed
+empty result. The user manager cleans only objects authorized by its effect;
+it MUST NOT broaden deletion authority to erase unrelated external residue.
+If any UID process survives or its inventory is incomplete, refuse
+`processes_remain`. If any outside-home object remains or any external-object
+inventory is unknown/unreadable, refuse
+`bump_uid_not_clean`. Both are terminal refusals of same-account bump: record
+the fenced cleanup handoff, preserve reservations and evidence, and never
+append successor `active` or reactivate the old generation.
+
+The caller then uses ordinary retirement (§5) followed by a separately
+admitted new account (§4). The protected handoff links the terminal bump to
+that same owner's `user.retire` of the original target generation, allowing
+only forward teardown of its still-reserved account. It does not adopt an
+unrelated pending effect or report account absence from a `removed` label.
+Finish any already-started successor rollback as `creating -> removed`;
+continue an old `retiring -> removed` only after ordinary retirement cleanup,
+and never repeat or reverse an already durable `removed` append. The cleanup
+admission/effect encoding remains Q3; without that adapter, refuse cleanup
+admission rather than guessing a target. New allocation obeys the normal
+round-robin and `uid_not_clean` rules; do not immediately reuse the dirty UID.
+
+### 6.2 Keymaker handoff and activation order
+
+The following order is mandatory; `creating` is not signing authority:
+
+1. **User manager:** durably record `g_old:removed` after the required reset.
+   Reserve a fresh `g_new:creating`, prepare its scaffold and establish §6.1.
+2. **Keymaker's authorized owner:** explicitly review and re-admit `g_new` for
+   this UID in Keymaker's protected enrollment-pin policy. User manager waits
+   for trusted confirmation of this exact UID/generation and policy decision.
+3. **Keymaker's authorized owner:** establish a new key binding for that exact
+   UID/generation under Keymaker policy, after re-admission. User manager waits
+   for trusted confirmation of the new binding, not an old registration or a
+   claim from the station. It never mints keys, changes the pin policy or calls
+   Keymaker registration on the owner's behalf.
+4. **User manager:** renew §6.1 inventories after the external handoff,
+   retaining the creation fence and reservation without holding its lock
+   across administrative service calls. Reacquire the lock and revalidate
+   the same pending effect, exact identities, current confirmations and
+   unchanged fences/scaffold under the qualified final ordering; only then
+   durably append `g_new:active`. A changed or unknown inventory/fence requires
+   another bounded check, never activation. Only subsequently may qualified
+   consumers admit the new generation.
+
+Persist the handoff intent before releasing the lock. External waits are
+bounded and occur without the user-manager lock; no temporary `active`
+record is allowed to obtain the confirmations. Missing, stale, mismatched,
+untrusted or unavailable re-admission/binding evidence refuses
+`bump_key_admission_unconfirmed` and leaves the effect fenced/pending for its
+same-ID continuation or verified rollback. One confirmation cannot stand in
+for the other. Their authenticated adapter, durable correlation, confirmation
+validity through activation and revocation ordering are an implementation
+gate: no receipt wire format is invented here.
+
+[Keymaker §§3.1–3.2, 5 and 8](https://github.com/relux-works/swarma-keymaker/blob/243a330d331c07c57aa0497c348995f66c74d08e/spec/keymaker.md)
+own generation-bound connections, bindings and local enrollment-pin policy.
+The referenced draft's ordinary `register` requires an already-active target;
+it cannot implement step 3 before step 4. A jointly reviewed Keymaker
+provisioning contract must resolve this before bump activation can qualify.
+Do not reorder these steps, use the old binding, mark a generation briefly
+active or weaken Keymaker's active-only signing rule to work around it.
+
+The `registration/1` signing key belongs to the host registration helper and
+is shared across the host, not a separate registrar key per station generation.
+The registrar cannot distinguish these generations from that host signature.
+A generation-only bump therefore requires no registrar registry revision;
+changes to the host key or `uid_map` names require their normal reviewed
+registration/enrollment updates. Per-UID admitted generation remains a local
+Keymaker enrollment-pin decision, not a new `enrollment/1` wire member.
+
+A crash after old `retiring` always moves forward. After old `removed`, the
+old generation stays dead even if successor preparation or handoff fails.
+An interrupted, never-active successor rolls back via `creating -> removed`;
+retain its OS account and reservation fenced for explicit reconciliation or
+the ordinary-retirement fallback above. Do not draw another successor under
+the same completed-failure request or silently delete the retained account.
+A retry after new `active` returns the same new token. Failure before old
+`retiring` admits no reset. Keys and persistent identities never carry over
+implicitly; re-registration requires their owner's authority.
 
 ## 7. Managed-home layout and installation
 
@@ -419,7 +524,9 @@ Read-only files alone and digest checks alone do not fix that ownership flaw.
 ## 8. Journal consumers and restoration
 
 The generation journal format (spec/generation-journal.md) is authoritative;
-helper.md §4.5's ledger is a projection, never a second generation writer.
+helper.md §4.5's `ledger.json` is a derived view, never a second generation
+writer. Divergence is resolved by rebuilding the view from the verified
+journal under §3, with the journal winning every lifecycle disagreement.
 Keymaker's `lookup` validates authoritative provenance, integrity and ordering;
 only `active` admits. Its `with_active` final check, durable result and release
 must serialize against `retiring` using the published journal ordering, not a
@@ -456,8 +563,13 @@ qualify the no-supplementary-groups backend claim.
 | `RecursiveInspectionComplete`: descendant-open and cached-dirent-type fault variants must never hide an ACL-bearing leaf; listing/open/descriptor-stat/xattr/read/close errors, missing paths and unexpected paths refuse | Complete ACL-free fixed fixture passes; the same visible ACL refuses without injected faults | Named regressions retain both walker bypasses, exercise direct-descriptor failures and kill an error-suppression mutant; root invocation remains PENDING §10 |
 | `StationHomeIsolation`: other station cannot traverse/read home or state, including guessed filenames | Each station reads its own context and writes its own state | Exact root:S 0750 fixture PENDING §10; runner surrogate with broader traversal is not this proof |
 | `RetiredGenerationRefused`: fresh and existing signer/broker connections cannot use retired generation or adopt new binding | Active generation succeeds under same protocol method | Real consumer adapter; PENDING journal/Keymaker/broker integration |
-| `BumpUniqueGeneration`: never two non-removed generations for one UID, including crash/retry at each append | Two consecutive distinct tokens, old removed before successor creating | Chain replay + OS identity checks; PENDING Q1, writer and root backend |
+| `BumpUniqueGeneration`: never two non-removed generations for one UID, including crash/retry at each append | Two consecutive distinct tokens, old removed before successor creating | Chain replay + OS identity checks; PENDING writer, ordered Keymaker handoff and root backend |
 | `BumpResetComplete`: no old work/cache/session/native lock or UID-temp residue; persistent signing binding not inherited | New empty writable directories and freshly admitted binding work | PENDING reset writer and consumer qualification; external durable outputs retained |
+| `BumpTempResidueRefused`: a file owned by the UID in `/tmp` survives the reset; refuse `bump_uid_not_clean`, no successor `active`, old generation remains fenced | Remove only the planted file, repeat complete inventories with zero UID processes; a qualified handoff may reach one new `active` | Planned real UID-owned temporary-file surrogate for the inventory boundary; backend/journal integration PENDING |
+| `BumpIPCResidueRefused`: a UID-owned POSIX shared-memory object survives; same typed refusal and no activation, including unknown/denied IPC inventory | Unlink the planted object and release fixture mappings/handles; complete clean inventory admits the next gate | Planned unprivileged exclusive object under the qualified `/dev/shm` mount, UID from NSS; no real backend success claimed |
+| `BumpSocketResidueRefused`: a UID-owned Unix socket inode remains outside the home after its process/socket closes; same typed refusal and no activation | Remove only that socket inode, repeat clean filesystem and kernel socket inventories; next gate admits | Planned unprivileged filesystem socket surrogate; live/abstract sockets require separate kernel-UID inventory qualification |
+| `BumpKeyAdmissionOrdered`: missing/stale/wrong-UID or generation confirmation, binding before re-admission, or active before either confirmation refuses `bump_key_admission_unconfirmed` with no active append | Old removed, reviewed pin re-admission, fresh binding and renewed clean inventories precede exactly one new active append | Contract fixtures PENDING joint Keymaker provisioning/confirmation adapter; existing active-target-only register is insufficient |
+| `JournalWinsLedgerDivergence`: an active derived row cannot resurrect a journal-removed generation; a corrupt journal cannot be repaired from a clean ledger | Valid replay rebuilds the derived view, preserving removed tombstones and restore fences | Narrow divergent-view/replay fixtures PENDING production writer; protected non-generation metadata stays separate |
 | `RequestClosedAndReplaySafe`: extra/duplicate members, UID/path/grant injection, wrong kind/owner, stale target and changed-ID arguments cause intended refusal without new OS objects or appends | Valid create and exact same-ID replay yield one account/token | Narrow parser/effect tests PENDING implementation; whitespace/order equivalent requests included |
 | `CreateRollbackAndRetireForward`: inject backend/deletion failures; no adopted unmanaged object, premature removed or success on unknown absence | Clean create/retire plus retry of admitted cleanup | Isolated fixtures; crash every journal/effect durability boundary |
 | `ProcessAbsenceRequired`: double fork, setsid, PID reuse and failed inventory cannot pass stop or reset/delete home | Known quiescent allocation reaches removal | PENDING exact root process backend, controlled child PIDs only |
@@ -826,9 +938,11 @@ is claimed by syntax checking or by the script's non-root refusal control.
 
 ## 11. Activation and handoff gates
 
-Independent spec review and content review precede implementation. Q1's bump
-ruling, the reviewed `gen-journal/1` revision/sections, effect and cleanup
-admission encodings, Curator composition/start interlock and per-runtime
+Independent spec review and content review precede implementation. The bump
+model and journal-over-ledger authority are decided. The reviewed
+`gen-journal/1` adapter alignment, ordered Keymaker pre-active provisioning
+and confirmation contract (§6.2), complete UID inventory backend, effect and
+cleanup admission encodings, Curator composition/start interlock and per-runtime
 mapping, configured bounds and Linux qualification evidence are explicit gates.
 A fixture pass does not close an integration gate. Record every unrun test as
 PENDING with its missing dependency; do not publish production readiness or

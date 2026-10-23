@@ -1,8 +1,12 @@
 # swarma-user-manager: specification
 
-- **Status:** draft v0.14 (2026-10-23). Nothing is implemented.
+- **Status:** draft v0.15 (2026-10-23). Nothing is implemented.
 - **Normative language:** MUST, MUST NOT, SHOULD and MAY are used as in RFC 2119.
 - **Companions:** [swarma-credential-broker](https://github.com/relux-works/swarma-credential-broker) (binds the OS accounts this helper creates), [curator-network-profiles](https://github.com/relux-works/curator-network-profiles) (the egress an agent may use).
+
+### Revision 0.15
+
+Records the decided [same-account station bump](stations-v0.md#6-same-account-generation-bump): reset the home/temporary areas, require zero UID processes and no outside-home UID-owned objects, then old journal removal, reviewed Keymaker generation re-admission, new key binding and successor activation in that order. Residue or unknown inventory refuses bump and routes to ordinary retirement plus a newly allocated account; old keys/generations never carry over. Keymaker provisioning/confirmation and backend qualification remain gates. The generation journal wins divergence; `ledger.json` is a derived view rebuilt from it (§4.5). No implementation or activation is claimed.
 
 ### Revision 0.14
 
@@ -81,7 +85,7 @@ Both run as root for one operation at a time, are invoked through `sudo` by conf
 ```
 swarma-user-manager helper-op/1
 { v: 1,
-  op:         "user.create" | "user.retire" | "user.list" | "effect.observe" | "exec.stop" | "archive.sweep" | "fw.apply" | "fw.remove",
+  op:         "user.create" | "user.retire" | "user.bump" | "user.list" | "effect.observe" | "exec.stop" | "archive.sweep" | "fw.apply" | "fw.remove",
   request_id: string (≤ 64),           // mutation: caller-scoped effect key; read: correlation, §§4.6, 5
   args:       { … per operation … } }
 
@@ -89,6 +93,8 @@ swarma-user-manager helper-result/1
 { request_id, ok: true, result: { … }, state: current state of the target }
 | { request_id, ok: false, error: { code, message } }
 ```
+
+`user.bump` is the closed station-agent operation in [stations-v0.md §6](stations-v0.md#6-same-account-generation-bump); it adds no caller-selected UID, path or key and remains subject to that slice's qualification gates.
 
 `effect.observe` is a read-only operation in `helper-op/1` (R-OBS). Its arguments identify the original effect's `request_id`, operation and digest of its canonical arguments; the outer `request_id` remains request correlation and does not admit a new effect. The exact argument/result member encoding and canonical digest bytes are unpublished (§14, question 8); no additional wire fields or refusal codes are assigned here. Its observation result is exactly one of:
 
@@ -253,7 +259,7 @@ Figure [M-UM3: receipt evidence and retirement fate](../diagrams/receipt-archive
 
 ### 4.5 `user.list` and the ledger
 
-For the station slice, the generation journal format (spec/generation-journal.md), `gen-journal/1`, is authoritative; the ledger described below is a derived projection, never an independent generation writer. [Stations-v0.md §§3, 8](stations-v0.md#3-durable-effects-and-generation-records) separates generation records from caller/effect evidence. The journal's reviewed projection/reader sections must be aligned before implementation; the record sketch below does not override them. General `user.list` is outside that first writer's API.
+The generation journal format (spec/generation-journal.md), `gen-journal/1`, is authoritative for lifecycle state; `ledger.json` is a derived view, never an independent generation writer. On divergence, the journal wins: validate and replay it under the shared lock, rebuild the ledger and atomically replace the derived view before admitting dependent work. Never change the journal to match a ledger or accept ledger `active` over journal `retiring`/`removed`. Invalid/unavailable journal evidence closes admission, even if the ledger is readable. Non-generation fields are joined from protected account/effect evidence; missing metadata refuses rather than guessing from OS accounts. View reconstruction does not release restore fences or recreate lost effect evidence. [Stations-v0.md §§3, 8](stations-v0.md#3-durable-effects-and-generation-records) separates generation records from caller/effect evidence. The journal's reviewed projection/reader sections must be aligned before implementation; the record sketch below does not override them. General `user.list` is outside that first writer's API.
 
 The ledger is a root-owned, world-readable file with one record per generation: `{ generation, username, uid, gid, kind, label, state, created_at, created_by, retired_at? }`. It contains no secrets. It is replaced atomically (temporary file, flush, rename, directory flush) in a root-owned directory. Other components (broker, launcher, dispatcher and session host) read it directly; `user.list` returns the same records. Readability is not authority. Neither an `active`/idle lifecycle label nor a missing receipt proves that a generation was never launched or is currently absent (§8.3). The ledger alone does not establish whether an effect was recorded: `effect.observe` consults the receiver-owned caller/effect journal mapping under the shared lock (§4.6), never infers absence from a missing reusable UID or label.
 
