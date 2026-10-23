@@ -73,6 +73,10 @@ external restore fence as specified; an offline success does not authorize
 admission. [Vectors](vectors/gen-journal/README.md) document the stable layout.
 
 The normal journal writer enforces one 1000 ms fence budget with a 1 MiB journal
-ceiling. Marker retry/stale advice never permits admission or automatic clearing.
+ceiling and a lifecycle retirement reserve (529 bytes per creating/active
+generation, 264 per retiring generation). A fresh host conservatively budgets
+992 simultaneously active station accounts; retained history reduces that budget.
+Reserve deficits close admission and reconciliation until qualified migration.
+Marker retry/stale advice never permits admission or automatic clearing.
 For one maximum-size local-storage qualification run:
 `GEN_JOURNAL_MEASURE=1 go test ./tools/genjournal -run '^TestMaximumFenceDuration$' -count=1 -v`.

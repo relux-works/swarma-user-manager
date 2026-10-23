@@ -65,9 +65,10 @@ MUST remain open through use. Locks and journal MUST NOT be replaced, renamed,
 rotated or unlinked while consumers can run. Root is trusted to honor this
 contract; path hardening does not defend against concurrent malicious root.
 
-There is no segment rotation, truncation or compaction in version 1. Exhausted
-capacity closes admission until a compatible format/migration is published and
-qualified. Root MUST NOT clear history or floors to recover capacity.
+There is no segment rotation, truncation or compaction in version 1. Writers
+MUST preserve the retirement reserve (§3.1) before exhausting capacity. A reserve
+violation closes admission for every UID until a compatible format/migration is
+published and qualified. Root MUST NOT clear history or floors to recover capacity.
 
 ## 3. Exact record bytes
 
@@ -114,6 +115,75 @@ Example (the first line, including its final LF, is normative in the
 ```json
 {"format":"gen-journal/1","generation":"11111111111111111111111111111111","prev":"0000000000000000000000000000000000000000000000000000000000000000","seq":1,"state":"creating","time":"2026-10-01T00:00:00Z","uid":30001,"writer":"operator-manual"}
 ```
+
+
+### 3.1 Retirement reserve and station capacity
+
+Let `B` be the verified journal size in bytes, `C=1048576`, `A` the number of
+latest rows in `creating` or `active`, and `T` the number in `retiring`. Removed
+rows have no remaining lifecycle obligation. The reserve invariant is exactly:
+
+```text
+R = A * (265 + 264) + T * 264
+B + R <= C
+```
+
+The exact maximum canonical `retiring` record is **265 bytes including LF**;
+`removed` is **264**. These maxima use a 16-digit maximum sequence, 10-digit UID,
+15-byte `operator-manual`, 32-byte generation, 64-byte predecessor, fixed
+20-byte UTC timestamp, fixed field names/punctuation and the state (8 or 7
+bytes). Each maximum is attained by a legal isolated record. Shorter values
+or `user-manager` can only reduce length. These are canonical schema maxima,
+not the 4096-byte parser safety limit. The maximum creating/active records are
+265/263 bytes respectively.
+
+Every writer MUST verify both the current invariant and the proposed complete
+history's invariant **before append**, returning `journal_capacity_reserve`
+without changing the journal on violation. The hard byte ceiling still returns
+`journal_file_size` first if the proposed file exceeds it. A reserve refusal
+retains the writer marker for explicit reconciliation; it is not partial success.
+This check applies to creating, activation and every other growth, including
+manual writers. Creating can therefore succeed while later activation refuses;
+its safe rollback remains `creating→removed` after actual rollback.
+
+The pair is reserved for every not-yet-retiring generation, including creating.
+An already-retiring generation reserves only its still-needed removed record.
+Reserving another retiring record after that state is recorded would incorrectly
+prevent spending its reserve. This lifecycle accounting is necessary for the
+progress proof: `active→retiring` adds at most 265 bytes and releases exactly
+265 reserved bytes; `retiring→removed` adds at most 264 and releases 264.
+`creating→removed` adds at most 264 and releases 529. Thus, while the invariant
+holds, every non-removed generation can reach removed through its permitted
+lifecycle without exhausting byte capacity, in any retirement order. Activation
+and new creation MUST independently pass the invariant and cannot spend another
+generation's reserve. Contiguous sequences beginning at one in this bounded
+file cannot approach the 53-bit sequence limit. This proof concerns byte/sequence
+capacity, not successful OS cleanup, entropy, deadlines or filesystem durability.
+
+A protected reader MUST check the invariant before any active-identity release,
+for every UID. Any deficit, even one byte below the hard ceiling, returns
+`journal_capacity_reserve` without invoking the release callback. This includes
+legacy/manual files and failed retirements. Structural byte/path diagnostics
+(`Verify`, `bytes`, `Inspect`, `verify`) MAY accept an intact reserve-deficient
+history; their success is never admission. `View.Active` performs the reserve
+check as does `WithActive`. A consumer MUST NOT infer admission merely from
+`View.Rows`. Ordinary reconciliation and normal marker cleanup MUST refuse
+an invalid reserve and preserve the marker. Clearing a marker externally cannot
+bypass the reader check. Only a published, qualified migration may recover such
+a state; version 1 supplies no migration or history/floor reset command.
+
+At 1 MiB, a fresh host can conservatively budget **992 simultaneously active
+first-incarnation station accounts**, one generation per station:
+`floor(1048576 / (265 + 263 + 529)) = 992`. This uses maximum-size creating and
+active records plus each full retirement pair, rather than promising capacity
+from unusually short records. A creating-only budget is 1320 at 794 bytes each,
+but does not guarantee subsequent activation of all of them. These are shared
+per-host budgets, not per-station history allowances or perpetual churn capacity.
+Actual byte accounting governs admission; prior removed history consumes space
+permanently and reduces the remaining station budget. Deployments with more
+accounts per station must divide the account budget accordingly. New allocations
+will be refused before the ceiling; reserve for existing retirement remains.
+
 
 ## 4. Lifecycle and generation bump
 
@@ -207,6 +277,7 @@ ignored even if it contains a verified prefix.
 | `journal_generation`, `journal_state`, `journal_writer`, `journal_time` | Invalid typed member |
 | `journal_noncanonical` | Parsed bytes differ from CCJ-1 |
 | `journal_genesis`, `journal_chain` | Wrong first or later predecessor hash |
+| `journal_capacity_reserve` | Current or proposed history lacks the remaining retirement/removal reserve; no release, append or marker clear |
 | `journal_generation_reuse` | Previously seen token introduced for a different incarnation |
 | `journal_overlap` | New token introduced before the UID's previous incarnation is removed |
 | `journal_transition` | Forbidden lifecycle edge or non-creating first state |
@@ -249,7 +320,8 @@ writer that ignores them. Never upgrade a reader lock to a writer lock.
    The data window, including verification, floor persistence, final binding
    check, durable result/audit commit and response release, MUST fit **250 ms**
    of cooperative monotonic elapsed time. No remote wait is allowed inside it.
-5. Re-read and verify evidence and floor, check exact active tuple, durably
+5. Re-read and verify evidence and floor, require the retirement reserve (§3.1),
+   check exact active tuple, durably
    advance the floor, revalidate binding/revocation under the consumer's local
    commit lock, commit its durable result/audit, then release the response.
    A deadline or local failure before release discards the unreleased result.
@@ -293,14 +365,16 @@ margin in §6.3 does **not** extend this writer budget.
    restarting a helper or acquiring the second lock. Linux permits these
    exclusive locks on read-only descriptors too.
 3. Verify the complete history and the independently preserved checkpoint,
-   build the fixed-schema CCJ-1 line, and verify the proposed transition before
-   append. Append with exactly one `write` on an `O_APPEND` descriptor. Short
+   build the fixed-schema CCJ-1 line, and verify the proposed transition and
+   both current/proposed retirement reserves (§3.1) before append. Append with
+   exactly one `write` on an `O_APPEND` descriptor. Short
    write is failure, not a retry. Fsync journal and directory, then re-read and
    verify the result. Every normal helper parses and enforces the same marker's
    boot/start/budget; chain validation also checks its remaining deadline
    between records. Check the deadline immediately before append and before
    removing the marker, and after each durability operation.
-4. `finish-intent` re-verifies the history, syncs journal and directory, removes
+4. `finish-intent` re-verifies history and retirement reserve, syncs journal and
+   directory, removes
    the parsed marker and fsyncs the directory within that same budget. Only a
    still-within-budget result is normal success. Unlock data and gate **before**
    writing the diagnostic view to stdout, so terminal/client backpressure
@@ -313,17 +387,22 @@ verification is treated as authority. The bounded reference does four semantic
 verifications and one additional bounded read under exclusion, against at most
 1 MiB plus one byte per read. The lowered ceiling and deadline checks bound
 normal work by construction; a benchmark alone does not enforce the budget.
-This trades capacity for bounded host-wide admission loss: at the ceiling,
-writers MUST refuse further append, retain all evidence and require a published
-migration. They MUST NOT truncate history, reset floors or hide the limit.
+This trades capacity for bounded host-wide admission loss: the §3.1 reserve
+refuses new growth before the ceiling, while preserving retirement progress.
+Reserve-deficient existing files close admission and require a published
+migration. Writers MUST NOT truncate history, reset floors or hide the limit.
 
-The qualification test constructs an exact 1048576-byte final journal with
-4232 records and runs the real manual append. One Linux local-storage run took
-198 ms from marker start through post-exit observation (a conservative upper
-bound on actual fence presence), with 202 ms for the whole runbook. This is one
-qualification measurement, not a universal device or scheduling guarantee.
-Installations MUST qualify maximum-size normal work on their own storage before
-admission; inability to meet the budget is closed admission, not a larger timeout.
+The qualification test now starts with 1048312 bytes, the maximum history with
+one retiring generation's 264-byte removal reserve, and appends its removal.
+One Linux local-storage run produced 1048564 bytes / 4310 records in 174 ms from
+marker start through post-exit observation (a conservative upper bound on fence
+presence), with 176.589728 ms for the whole runbook. The final 12 bytes remain
+because the actual sequence is shorter than the maximum canonical sequence.
+The earlier exact-ceiling fixture lacked retirement reserve and is no longer a
+valid normal-writer qualification. This is one local measurement, not a
+universal device or scheduling guarantee. Installations MUST qualify maximum-size
+normal work on their own storage before admission; inability to meet the budget
+is closed admission, not a larger timeout.
 
 The two locks alone do not prove progress: Linux flock does not promise fair
 shared/exclusive queuing even at the gate. Atomic intent publication makes new
@@ -471,6 +550,14 @@ requires inherited FDs 8 and 9 to identify the verified lock inodes and obtain
 exclusive locks; direct `append-locked` without them refuses. Inputs are never
 `eval`ed, interpreted as JSON fragments, or copied into free text members.
 
+The checker returns `journal_capacity_reserve` before new growth consumes the
+space reserved for terminal lifecycle records. Leave the fence intact, inspect
+the unchanged history and approved floor, and reconcile only if the current
+reserve still holds. Stop new allocations; existing reserved retirement can
+continue after reviewed reconciliation. If the current invariant itself is
+violated, reconciliation refuses and preserves the fence; keep admission closed
+until a qualified migration. Never delete history or reduce a floor to make room.
+
 For retirement, append `retiring` with the current token and preserved floor,
 **wait for durable success**, then perform the separately reviewed account-wide
 stop/cleanup/removal. Only after verified cleanup append `removed`. For failed
@@ -543,7 +630,8 @@ to five seconds per lock, and any failure preserves closed admission:
 sh "$RUNBOOK" "$CHECKER" reconcile "$DIR" "$FLOOR_SEQ" "$FLOOR_HASH"
 ```
 
-This command strictly parses the marker (§6.3), verifies the complete file and floor, fsyncs the journal and
+This command strictly parses the marker (§6.3), verifies the complete file, floor
+and retirement reserve (§3.1), fsyncs the journal and
 directory to resolve uncertain durability, and clears only
 `writer.pending`; it does **not** reconcile an external restore, authorize a
 fork, reset any floor or reopen external admission. A malformed/partial journal
@@ -593,6 +681,13 @@ reconciliation and fresh-marker retry behavior have separate positive controls.
 ```sh
 GEN_JOURNAL_MEASURE=1 go test ./tools/genjournal -run '^TestMaximumFenceDuration$' -count=1 -v
 ```
+
+Capacity fixtures materialize a valid equality-boundary history, a one-byte
+reserve deficit and an exact-ceiling active history. Named regressions
+`TestReviewR2CapacityAdmission`, `TestCapacityReserveLifecycle` and
+`TestCapacityReserveDeficit` exercise both protected release and the real manual
+writer/reconciliation, including unchanged history, floors and retained markers.
+The valid boundary releases; new creating refuses while retiring/removed succeed.
 
 `TestReviewLateBrokenChain` retains a third-line corruption witness paired with
 `retiring`, killing a predecessor check narrowed to sequence ≤2.

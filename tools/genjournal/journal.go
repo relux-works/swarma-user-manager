@@ -15,11 +15,13 @@ import (
 )
 
 const (
-	Format   = "gen-journal/1"
-	MaxLine  = 4096 // Includes LF.
-	MaxFile  = 1024 * 1024
-	MaxSeq   = int64(9007199254740991)
-	ZeroHash = "0000000000000000000000000000000000000000000000000000000000000000"
+	Format            = "gen-journal/1"
+	MaxLine           = 4096 // Includes LF.
+	MaxFile           = 1024 * 1024
+	MaxRetiringRecord = 265 // Exact canonical maximum, including LF.
+	MaxRemovedRecord  = 264
+	MaxSeq            = int64(9007199254740991)
+	ZeroHash          = "0000000000000000000000000000000000000000000000000000000000000000"
 )
 
 // Refusal contains only a stable code and a one-based line (zero for file errors).
@@ -53,8 +55,9 @@ type Row struct {
 
 // View includes tombstones and the verified checkpoint; it is never an authority cache.
 type View struct {
-	Tail Floor `json:"tail"`
-	Rows []Row `json:"rows"`
+	Tail  Floor `json:"tail"`
+	Rows  []Row `json:"rows"`
+	bytes int   // Verified full-history size; diagnostic views never bypass admission checks.
 }
 
 // Record has exactly the eight members defined by the format.
@@ -190,6 +193,7 @@ func verifyUntil(src io.Reader, floor Floor, deadline time.Time) (View, error) {
 	if len(b) > MaxFile {
 		return view, refuse("journal_file_size")
 	}
+	view.bytes = len(b)
 	rows := map[int64]Row{}
 	seen := map[string]bool{}
 	floorSeen := floor.Seq == 0
@@ -266,8 +270,29 @@ func verifyUntil(src io.Reader, floor Floor, deadline time.Time) (View, error) {
 	return view, nil
 }
 
+// Capacity checks the remaining lifecycle obligations against verified byte capacity.
+// Creating reserves a full future retirement pair; retiring has already consumed its first part.
+func (v View) Capacity() error {
+	reserve := 0
+	for _, r := range v.Rows {
+		switch r.State {
+		case "creating", "active":
+			reserve += MaxRetiringRecord + MaxRemovedRecord
+		case "retiring":
+			reserve += MaxRemovedRecord
+		}
+	}
+	if v.bytes > MaxFile-reserve {
+		return refuse("journal_capacity_reserve")
+	}
+	return nil
+}
+
 // Active distinguishes absent identity, reused UID and inactive lifecycle evidence.
 func (v View) Active(uid int64, generation string) error {
+	if e := v.Capacity(); e != nil {
+		return e
+	}
 	for _, r := range v.Rows {
 		if r.UID == uid {
 			if r.Generation != generation {

@@ -48,7 +48,23 @@ Run the maximum-size qualification once on the installation's local storage:
 GEN_JOURNAL_MEASURE=1 go test ./tools/genjournal -run '^TestMaximumFenceDuration$' -count=1 -v
 ```
 
-The fixture's final journal fills exactly 1048576 bytes. This diagnostic test is
+The fixture starts at 1048576 minus the 264-byte removal reserve with one
+retiring generation, then appends its removal. The canonical sequence width
+leaves a few bytes below the hard ceiling. This diagnostic test is
 opt-in and is not rerun by the ordinary vector/order checks. It measures the
 real runbook and checks the complete final history and removed marker; no
 single timing observation proves performance on all storage or under faults.
+
+Capacity fixtures materialize `capacity-reserve-valid` (529 bytes free and one
+active generation), `capacity-reserve-deficit` (528 free), and
+`capacity-exact-ceiling`. The latter two refuse `journal_capacity_reserve` on
+protected release, even though raw diagnostic verification can succeed.
+`TestCapacityReserveLifecycle` uses the real manual writer to refuse new
+creating without mutation, reconcile the valid current reserve, and then
+successfully append retiring and removed using the reserved space.
+`TestReviewR2CapacityAdmission` retains exact-ceiling and failed-retirement then
+reconciliation witnesses; reconciliation cannot erase their fence.
+
+```sh
+go test ./tools/genjournal -run '^(TestReviewR2CapacityAdmission|TestCapacityRecordBounds|TestCapacityReserveLifecycle|TestCapacityReserveDeficit)$' -count=1 -v
+```

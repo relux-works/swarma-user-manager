@@ -46,6 +46,7 @@ case "$operation" in
         exec 9<"$dir/data.lock"
         if [ "$operation" = append ]; then
             "$tool" lock-writer "$dir"
+            # Enforce post-append retirement reserve before any write; refusal keeps the marker.
             "$tool" append-locked "$dir" "$@"
             "$tool" finish-intent "$dir" "$1" "$2"
         else
@@ -53,6 +54,7 @@ case "$operation" in
             flock -x -w 5 -E 75 8
             flock -x -w 5 -E 75 9
             "$tool" verify-locked "$dir" "$1" "$2"
+            # Invalid retirement reserve is an incident requiring migration; never clear its fence.
             "$tool" clear-intent "$dir" "$1" "$2"
         fi
         # Exit closes both descriptors; finish-intent already unlocks before diagnostic output.

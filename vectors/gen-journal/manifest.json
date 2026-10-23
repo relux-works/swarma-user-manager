@@ -454,6 +454,32 @@
         "target": "writer.pending",
         "violation": "future-start"
       }
+    },
+    {
+      "name": "capacity-reserve-valid",
+      "expect": "ok",
+      "fixture": {
+        "target": "capacity",
+        "violation": "valid"
+      }
+    },
+    {
+      "name": "capacity-reserve-deficit",
+      "expect": "journal_capacity_reserve",
+      "control": "capacity-reserve-valid",
+      "fixture": {
+        "target": "capacity",
+        "violation": "deficit"
+      }
+    },
+    {
+      "name": "capacity-exact-ceiling",
+      "expect": "journal_capacity_reserve",
+      "control": "capacity-reserve-valid",
+      "fixture": {
+        "target": "capacity",
+        "violation": "full"
+      }
     }
   ]
 }

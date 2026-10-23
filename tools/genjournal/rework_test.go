@@ -193,54 +193,19 @@ func TestReviewLateBrokenChain(t *testing.T) {
 	wantCode(t, e, "journal_chain")
 }
 
-// TestMaximumFenceDuration qualifies one exact-capacity normal append on this local filesystem; it is not a universal latency or power-loss proof.
+// TestMaximumFenceDuration qualifies one maximum reserved retiring-state normal append on this local filesystem; it is not a universal latency or power-loss proof.
 func TestMaximumFenceDuration(t *testing.T) {
 	if os.Getenv("GEN_JOURNAL_MEASURE") != "1" {
 		t.Skip("explicit one-run maximum-size qualification only")
 	}
 	const stamp = "2026-10-01T00:00:00Z"
-	record := func(seq, uid int64, state, prev string) []byte {
-		b, e := Encode(Record{seq, prev, uid, fmt.Sprintf("%032x", seq), state, "operator-manual", stamp})
-		if e != nil {
-			t.Fatal(e)
-		}
-		return b
-	}
-	// Distinct creating rows permit changing a few UID widths to fill the exact byte ceiling without padding or schema exceptions.
-	n, total := int64(0), 0
-	for {
-		next := record(n+1, 30000+n, "creating", ZeroHash)
-		tail := record(n+2, 30000+n, "active", ZeroHash)
-		if total+len(next)+len(tail) > MaxFile {
-			break
-		}
-		n++
-		total += len(next)
-	}
-	last := record(n+1, 30000+n-1, "active", ZeroHash)
-	gap := MaxFile - total - len(last)
-	if gap < 0 || int64(gap) >= n-1 {
-		t.Fatalf("cannot fill exact fixture: rows=%d gap=%d", n, gap)
-	}
-	data := make([]byte, 0, MaxFile)
-	prev := ZeroHash
-	for i := int64(1); i <= n; i++ {
-		uid := 30000 + i - 1
-		if i <= int64(gap) {
-			uid = 100000 + i
-		}
-		b := record(i, uid, "creating", prev)
-		data = append(data, b...)
-		prev = Digest(b)
-	}
-	// Final active uses the last creating token, not its own sequence.
-	final, e := Encode(Record{n + 1, prev, 30000 + n - 1, fmt.Sprintf("%032x", n), "active", "operator-manual", stamp})
-	if e != nil {
-		t.Fatal(e)
-	}
-	if len(data)+len(final) != MaxFile {
-		t.Fatalf("fixture size %d", len(data)+len(final))
-	}
+	// Start at the largest permitted retiring-state history: one worst-case removed record remains reserved.
+	data := sizedCapacityHistory(t, MaxFile-MaxRemovedRecord, "retiring")
+	before, e := Verify(bytes.NewReader(data), genesis)
+	wantCode(t, e, "ok")
+	wantCode(t, before.Capacity(), "ok")
+	final, e := Encode(Record{before.Tail.Seq + 1, before.Tail.Hash, capacityUID, capacityToken, "removed", "operator-manual", stamp})
+	wantCode(t, e, "ok")
 	dir, p := fixture(t, data)
 	tool := testTool(t, p)
 	// Reuse the actual shell runbook; wrapper timestamps the marker's boot clock start and the successful finish before stdout.
@@ -251,7 +216,7 @@ func TestMaximumFenceDuration(t *testing.T) {
 		t.Fatal(e)
 	}
 	started := time.Now()
-	out, e := runbook(t, wrapper, p, "append", dir, "0", ZeroHash, "1", "4294967294", fmt.Sprint(30000+n-1), fmt.Sprintf("%032x", n), "active", stamp)
+	out, e := runbook(t, wrapper, p, "append", dir, "0", ZeroHash, "1", "4294967294", fmt.Sprint(capacityUID), capacityToken, "removed", stamp)
 	if e != nil {
 		t.Fatalf("maximum-size append: %v %s", e, out)
 	}
@@ -274,13 +239,13 @@ func TestMaximumFenceDuration(t *testing.T) {
 	}
 	v, e := Verify(bytes.NewReader(stored), genesis)
 	wantCode(t, e, "ok")
-	if len(stored) != MaxFile || v.Tail.Seq != n+1 {
-		t.Fatal("measurement was not at the exact file ceiling")
+	if len(stored) != len(data)+len(final) || v.Tail.Seq != before.Tail.Seq+1 {
+		t.Fatal("measurement was not at the maximum reserved retiring-state boundary")
 	}
 	if _, e = os.Stat(filepath.Join(dir, "writer.pending")); !os.IsNotExist(e) {
 		t.Fatal("successful measured writer retained marker")
 	}
-	t.Logf("exact final bytes=%d records=%d; complete runbook=%s; conservative marker-start through post-exit observation=%d ms; published normal fence budget=%d ms", len(stored), v.Tail.Seq, elapsed, now-m.StartedMS, WriterBudgetMS)
+	t.Logf("final bytes=%d records=%d; complete runbook=%s; conservative marker-start through post-exit observation=%d ms; published normal fence budget=%d ms", len(stored), v.Tail.Seq, elapsed, now-m.StartedMS, WriterBudgetMS)
 	if now-m.StartedMS >= WriterBudgetMS {
 		t.Fatalf("qualification includes process exit overhead and exceeded budget: %d ms", now-m.StartedMS)
 	}

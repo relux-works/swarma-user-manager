@@ -97,6 +97,20 @@ func checkCase(t *testing.T, c vectorCase) error {
 		_, e = Verify(bytes.NewReader(b), floor)
 		return e
 	}
+	if c.Fixture.Target == "capacity" {
+		size := MaxFile - 529
+		switch c.Fixture.Violation {
+		case "valid":
+		case "deficit":
+			size++
+		case "full":
+			size = MaxFile
+		default:
+			t.Fatal("unknown capacity fixture")
+		}
+		dir, p := fixture(t, sizedCapacityHistory(t, size, "active"))
+		return withActive(context.Background(), dir, floor, capacityUID, capacityToken, p, func(View, time.Time) error { return nil })
+	}
 	dir, p := fixture(t, vector(t, "active"))
 	_, positiveErr := inspect(context.Background(), dir, genesis, p)
 	wantCode(t, positiveErr, "ok")

@@ -99,7 +99,14 @@ func appendRecord(path string, floor Floor, min, max, uid int64, generation, sta
 	if len(all)+len(line) > MaxFile {
 		return refuse("journal_file_size")
 	}
-	if _, e = m.verify(bytes.NewReader(append(all, line...)), floor); e != nil {
+	proposed, e := m.verify(bytes.NewReader(append(all, line...)), floor)
+	if e != nil {
+		return e
+	}
+	if e = v.Capacity(); e != nil {
+		return e
+	}
+	if e = proposed.Capacity(); e != nil {
 		return e
 	}
 	if e = m.check(); e != nil {
@@ -164,7 +171,11 @@ func clearIntent(path string, floor Floor, p policy) error {
 		return e
 	}
 	defer j.Close()
-	if _, e = Verify(j, floor); e != nil {
+	v, e := Verify(j, floor)
+	if e != nil {
+		return e
+	}
+	if e = v.Capacity(); e != nil {
 		return e
 	}
 	if _, e = requireMarker(d); e != nil {
@@ -269,6 +280,9 @@ func finishIntent(path string, floor Floor, p policy) (View, error) {
 	defer j.Close()
 	v, e = m.verify(j, floor)
 	if e != nil {
+		return v, e
+	}
+	if e = v.Capacity(); e != nil {
 		return v, e
 	}
 	if j.Sync() != nil {
