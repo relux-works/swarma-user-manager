@@ -324,9 +324,24 @@ not an emulation of same-UID bump or pooling.
 ## 7. Managed-home layout and installation
 
 Let `R` be the root-owned platform root, `S` the station's dedicated group,
-and `U` its UID. Root is UID zero; all other IDs are policy-derived. No default
-or inherited ACL may widen these permissions. All entries are on the qualified
-filesystem, with no foreign bind mount under the home.
+and `U` its UID. Root is UID zero; all other IDs are policy-derived. Homes,
+managed files and every protected ancestor and staging path MUST have no
+extended access ACL entries and no default ACL. The installer MUST inspect
+these access attributes before exposing a new path, after replacement and at
+verification; mode bits alone do not establish this condition. An unreadable
+or unsupported ACL inspection MUST refuse, never mean ACL-free. Reject stored
+POSIX access/default ACL attributes rather than stripping administrator policy;
+this deliberately rejects even a masked or redundant stored ACL. All entries
+are on a qualified local Linux filesystem with the POSIX ACL model; an opaque
+or different access-control model is unqualified. No foreign bind mount is
+allowed under the home.
+
+Managed objects and protected ancestors/staging paths MUST also have no
+`security.capability` attribute: executable file capabilities could grant a
+station DAC-bypass powers. Unreadable capability metadata likewise refuses.
+Ordinary `user.*` metadata and Linux MAC labels cannot widen POSIX DAC access,
+so the installer need not erase them; labels may impose further restrictions.
+This is an access-widening check, not a blanket extended-attribute prohibition.
 
 | Path relative to R | Owner:group | Mode | Contract |
 |---|---|---|---|
@@ -353,7 +368,8 @@ controls under the station-owned work, state or temporary directories.
 Installation and updates open R and every parent through trusted descriptors,
 with Linux `openat2(RESOLVE_BENEATH|RESOLVE_NO_SYMLINKS|RESOLVE_NO_XDEV)` or a
 qualified equivalent. Check type, owner, permissions, device and expected inode
-via `fstat`; reject control symlinks, special files, widened ACLs and unexpected
+via `fstat`; inspect ACL/capability metadata through the same trusted handles;
+reject control symlinks, special files, stored ACLs/capabilities and unexpected
 hardlinks (`st_nlink != 1` for managed regular files). Create missing fixed
 entries via `mkdirat`, set owner/mode by descriptor, and never recursively
 chown station-controlled content. Exclusive temporary files are created in a
@@ -375,7 +391,8 @@ no-op. This slice publishes no arbitrary file-write or profile-update API.
 Before **every** physical start, restart and native resume, the later launcher
 must acquire the same interlock, verify the protected pin against trusted
 approved-release metadata, verify the complete control inventory/ownership/
-mode/type/link count and exact digests from trusted handles, and bind those
+mode/type/link count, absence of stored ACLs/capabilities and exact digests
+from trusted handles, and bind those
 objects to that admitted execution. Missing/unreadable/extra effective controls,
 drift or an unknown lease refuses. Retain handles or lease protection through
 their last use; never check one path then consume a station replacement.
@@ -433,6 +450,7 @@ qualify the no-supplementary-groups backend claim.
 | `ManagedFileMutationDenied`: write/truncate/chmod/unlink/rename/replacement of context, hook settings and skill leaves must fail EACCES/EPERM; bytes, inode and digest remain unchanged | Same station writes/renames its own work file | Runner-owned scaffold plus station-owned work; include root-owned sticky-parent analogue |
 | `ManagedAncestorReplacementDenied`: home, managed directory and protected sticky entry cannot be moved/replaced, even via work symlinks | Station creates/removes its own entry in sticky native directory | Descriptor operations and before/after tree inventory |
 | `ManagedLinkConfusionDenied`: links to outside sentinels cannot redirect install/delete; hardlink attempt denied or start refuses unexpected link count | Approved single-link regular file installs and verifies | Real no-follow updater/start paths; PENDING implementation and root fixture |
+| `InheritedNamedACLRejected`: a default named-user ACL on an ancestor/staging parent must refuse before publication; inherited or explicitly planted access/default ACLs on any fixture path must fail verification, including mode-masked grants | ACL-free ancestor/staging/home/control passes inspection; unrelated station read is denied | Real Linux inherited ACL and test-account peer on runner-owned surrogate; unreadable/unsupported metadata refuses; root invocation remains PENDING §10 |
 | `StationHomeIsolation`: other station cannot traverse/read home or state, including guessed filenames | Each station reads its own context and writes its own state | Exact root:S 0750 fixture PENDING §10; runner surrogate with broader traversal is not this proof |
 | `RetiredGenerationRefused`: fresh and existing signer/broker connections cannot use retired generation or adopt new binding | Active generation succeeds under same protocol method | Real consumer adapter; PENDING journal/Keymaker/broker integration |
 | `BumpUniqueGeneration`: never two non-removed generations for one UID, including crash/retry at each append | Two consecutive distinct tokens, old removed before successor creating | Chain replay + OS identity checks; PENDING Q1, writer and root backend |
@@ -508,9 +526,28 @@ The script accepts only `apply`, `verify` or `rollback`, has no path/UID input,
 and resolves the two configured generic account names at execution. It refuses
 root identities, equal IDs, shared primary groups or cross-membership. Root
 zero is the privilege identity, never a fixed station allocation. `apply`
-refuses any preexisting fixture, including a symlink. The parent chain is
-root-owned and non-writable. Failure leaves a visibly partial fixture for
-explicit guarded rollback; it never reports clean success.
+refuses any preexisting fixture or staging wrapper, including symlinks. Run
+one owner invocation at a time. The parent chain is root-owned, non-writable
+and ACL/capability-free. Every created path is checked before exposure; verify
+checks every descendant as well as the ancestors and any staging wrapper.
+Only an explicit ENODATA result means an attribute is absent: permission, I/O
+and unsupported-filesystem errors refuse. Any stored POSIX access/default ACL
+or file-capability attribute refuses; the script never edits ancestor ACLs.
+
+Construction occurs under the fixed root-owned 0700 wrapper
+`/var/lib/.swarma-station-qualification.stage`, reserved exclusively for this
+fixture. Its child `fixture` remains unreachable to stations while the marker
+is written and the complete tree is verified. A single same-filesystem rename
+publishes that child at the final path; it never publishes an incomplete marker.
+On interruption, stop this invocation before recovery, then use the same
+`rollback` command: an empty wrapper, partial child, missing/short marker in
+that unpublished child, completed unpublished tree, or empty wrapper after
+publication are all covered. Rollback guards the wrapper's owner/mode/access
+metadata and fixed names; unpublished staging needs no marker. Published-tree
+rollback still requires the complete marker. An unexpected path, ownership,
+ACL/capability or unreadable guard refuses for owner investigation, without
+loosening permissions or guessing a deletion target. Apply never adopts a
+partial tree; after verified rollback the owner may rerun apply.
 
 ```bash station-root-fixture
 #!/bin/bash
@@ -537,11 +574,25 @@ import sys
 # Fixed qualification configuration; identities are resolved, never allocated.
 names = ('platform-test-a', 'platform-test-b')
 base = '/var/lib/swarma-station-qualification'
+staging = '/var/lib/.swarma-station-qualification.stage'
 marker = b'station-permission-fixture/1\n'
 
 def require(ok, reason):
     if not ok:
         raise SystemExit(reason)
+
+def no_extra_access(path):
+    import errno
+    for attribute in ('system.posix_acl_access', 'system.posix_acl_default',
+                      'security.capability'):
+        try:
+            options = {} if isinstance(path, int) else {'follow_symlinks': False}
+            os.getxattr(path, attribute, **options)
+        except OSError as error:
+            require(error.errno == errno.ENODATA, 'access metadata unavailable')
+        else:
+            require(False, 'file capabilities refused' if attribute ==
+                    'security.capability' else 'stored ACL refused')
 
 def checked(path, mode, uid, gid, directory):
     value = os.lstat(path)
@@ -552,11 +603,73 @@ def checked(path, mode, uid, gid, directory):
     require(stat.S_IMODE(value.st_mode) == mode, 'unexpected fixture mode')
     if not directory:
         require(value.st_nlink == 1, 'unexpected hardlink')
+    no_extra_access(path)
+
+def access_tree(root):
+    # Every descendant is checked by descriptor, including station-written files.
+    device = os.lstat(root).st_dev
+    for _, directories, files, descriptor in os.fwalk(root, follow_symlinks=False):
+        no_extra_access(descriptor)
+        for name in directories + files:
+            value = os.stat(name, dir_fd=descriptor, follow_symlinks=False)
+            require(value.st_dev == device and
+                    (stat.S_ISDIR(value.st_mode) or stat.S_ISREG(value.st_mode)),
+                    'unexpected fixture link, mount or special file')
+            child = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
+                            dir_fd=descriptor)
+            try:
+                opened = os.fstat(child)
+                require((opened.st_dev, opened.st_ino) ==
+                        (value.st_dev, value.st_ino), 'fixture changed during check')
+                no_extra_access(child)
+            finally:
+                os.close(child)
+
+def complete_tree(root):
+    checked(root, 0o711, 0, 0, True)
+    checked(root + '/.fixture', 0o600, 0, 0, False)
+    with open(root + '/.fixture', 'rb') as stream:
+        require(stream.read() == marker, 'wrong fixture marker')
+    require(set(os.listdir(root)) == set(names) | {'.fixture'},
+            'incomplete fixture root')
+    for account in accounts:
+        home = root + '/' + account.pw_name
+        checked(home, 0o750, 0, account.pw_gid, True)
+        for relative, expected in (('.platform', 0o750),
+                                   ('.platform/skills', 0o750),
+                                   ('.harness', 0o1770)):
+            checked(home + '/' + relative, expected, 0, account.pw_gid, True)
+        for relative in ('AGENTS.md', '.platform/trust-pin.json',
+                         '.platform/skills/example.md', '.harness/settings.json'):
+            path = home + '/' + relative
+            checked(path, 0o640, 0, account.pw_gid, False)
+            with open(path, 'rb') as stream:
+                require(stream.read() == b'qualification-control\n',
+                        'changed managed control')
+        for relative in ('work', 'tmp', '.harness/state'):
+            checked(home + '/' + relative, 0o700,
+                    account.pw_uid, account.pw_gid, True)
+    access_tree(root)
+
+def staged_tree():
+    checked(staging, 0o700, 0, 0, True)
+    require(set(os.listdir(staging)) <= {'fixture'}, 'unexpected staging entries')
+    tree = staging + '/fixture'
+    if os.path.lexists(tree):
+        info = os.lstat(tree)
+        require(stat.S_IMODE(info.st_mode) in (0o700, 0o711),
+                'unexpected staging tree mode')
+        checked(tree, stat.S_IMODE(info.st_mode), 0, 0, True)
+        require(set(os.listdir(tree)) <= set(names) | {'.fixture'},
+                'unexpected staging tree entries')
+        return tree
+    return None
 
 for parent in ('/', '/var', '/var/lib'):
     info = os.lstat(parent)
     require(stat.S_ISDIR(info.st_mode) and info.st_uid == 0 and
             info.st_mode & 0o022 == 0, 'unsafe fixture ancestor')
+    no_extra_access(parent)
 accounts = [pwd.getpwnam(name) for name in names]
 require(all(p.pw_uid != 0 and p.pw_gid != 0 for p in accounts),
         'root test identity refused')
@@ -567,16 +680,45 @@ for own, other in ((accounts[0], accounts[1]), (accounts[1], accounts[0])):
             'cross-station primary-group membership')
 
 mode = sys.argv[1]
+if mode == 'rollback':
+    require(shutil.rmtree.avoids_symlink_attacks,
+            'descriptor-safe removal unavailable')
+    tree = staged_tree() if os.path.lexists(staging) else None
+    published = os.path.lexists(base)
+    if published:
+        checked(base, 0o711, 0, 0, True)
+        checked(base + '/.fixture', 0o600, 0, 0, False)
+        with open(base + '/.fixture', 'rb') as stream:
+            require(stream.read() == marker, 'wrong fixture marker')
+        require(set(os.listdir(base)) <= set(names) | {'.fixture'},
+                'unexpected root fixture entries')
+    require(published or os.path.lexists(staging), 'no fixture to roll back')
+    if published:
+        shutil.rmtree(base)
+    if tree is not None:
+        shutil.rmtree(tree)
+    if os.path.lexists(staging):
+        os.rmdir(staging)
+    print('fixture rollback verified')
+    raise SystemExit(0)
+
 if mode == 'apply':
-    require(not os.path.lexists(base), 'fixture already exists')
-    os.mkdir(base, 0o711)
-    os.chmod(base, 0o711)
-    with open(base + '/.fixture', 'xb') as stream:
+    require(not os.path.lexists(base) and not os.path.lexists(staging),
+            'fixture or staging already exists')
+    os.mkdir(staging, 0o700)
+    checked(staging, 0o700, 0, 0, True)
+    tree = staging + '/fixture'
+    os.mkdir(tree, 0o700)
+    checked(tree, 0o700, 0, 0, True)
+    with open(tree + '/.fixture', 'xb') as stream:
         stream.write(marker)
-    os.chmod(base + '/.fixture', 0o600)
+        stream.flush()
+        os.fsync(stream.fileno())
+    checked(tree + '/.fixture', 0o600, 0, 0, False)
     for account in accounts:
-        home = base + '/' + account.pw_name
-        os.mkdir(home, 0o750)
+        home = tree + '/' + account.pw_name
+        os.mkdir(home, 0o700)
+        checked(home, 0o700, 0, 0, True)
         os.chown(home, 0, account.pw_gid)
         os.chmod(home, 0o750)
         for relative, sticky in (('.platform', False),
@@ -584,6 +726,7 @@ if mode == 'apply':
                                  ('.harness', True)):
             path = home + '/' + relative
             os.mkdir(path, 0o700)
+            checked(path, 0o700, 0, 0, True)
             os.chown(path, 0, account.pw_gid)
             os.chmod(path, 0o1770 if sticky else 0o750)
         for relative in ('AGENTS.md', '.platform/trust-pin.json',
@@ -592,65 +735,39 @@ if mode == 'apply':
             path = home + '/' + relative
             with open(path, 'xb') as stream:
                 stream.write(b'qualification-control\n')
+            checked(path, 0o600, 0, 0, False)
             os.chown(path, 0, account.pw_gid)
             os.chmod(path, 0o640)
         for relative in ('work', 'tmp', '.harness/state'):
             path = home + '/' + relative
             os.mkdir(path, 0o700)
-            os.chmod(path, 0o700)
-            # Ownership transfer is last: a station can then move its state entry.
+            checked(path, 0o700, 0, 0, True)
+            # Ownership transfer is last, inside the sealed staging wrapper.
             os.chown(path, account.pw_uid, account.pw_gid)
+    os.chmod(tree, 0o711)
+    complete_tree(tree)
+    # The complete marker and verified tree become visible in one rename.
+    os.rename(tree, base)
+    os.rmdir(staging)
 
-checked(base, 0o711, 0, 0, True)
-checked(base + '/.fixture', 0o600, 0, 0, False)
-with open(base + '/.fixture', 'rb') as stream:
-    require(stream.read() == marker, 'wrong fixture marker')
-if mode == 'rollback':
-    require(shutil.rmtree.avoids_symlink_attacks,
-            'descriptor-safe removal unavailable')
-    # Fixed root-owned top-level names only; rmtree unlinks internal links.
-    require(set(os.listdir(base)) <= set(names) | {'.fixture'},
-            'unexpected root fixture entries')
-    for name in names:
-        path = base + '/' + name
-        if os.path.lexists(path):
-            info = os.lstat(path)
-            require(stat.S_ISDIR(info.st_mode) and info.st_uid == 0,
-                    'unsafe fixture home')
-            shutil.rmtree(path)
-    os.unlink(base + '/.fixture')
-    os.rmdir(base)
-    print('fixture rollback verified')
-    raise SystemExit(0)
-
-require(set(os.listdir(base)) == set(names) | {'.fixture'},
-        'incomplete fixture root')
-for account in accounts:
-    home = base + '/' + account.pw_name
-    checked(home, 0o750, 0, account.pw_gid, True)
-    for relative, expected in (('.platform', 0o750),
-                               ('.platform/skills', 0o750),
-                               ('.harness', 0o1770)):
-        checked(home + '/' + relative, expected, 0, account.pw_gid, True)
-    for relative in ('AGENTS.md', '.platform/trust-pin.json',
-                     '.platform/skills/example.md', '.harness/settings.json'):
-        path = home + '/' + relative
-        checked(path, 0o640, 0, account.pw_gid, False)
-        with open(path, 'rb') as stream:
-            require(stream.read() == b'qualification-control\n',
-                    'changed managed control')
-    for relative in ('work', 'tmp', '.harness/state'):
-        checked(home + '/' + relative, 0o700,
-                account.pw_uid, account.pw_gid, True)
-print('fixture ownership and managed bytes verified')
+if os.path.lexists(staging):
+    require(staged_tree() is None, 'unfinished staging; rollback required')
+complete_tree(base)
+print('fixture ownership, access metadata and managed bytes verified')
 PY
 ```
 
-`verify` checks the real owner/group/mode, link count and control bytes; follow
-it with the named §9 unprivileged probes against these fixed fixture homes,
-then `verify` again. It is not a digest/start gate test. `rollback` permits
-station-written content only below guarded fixed homes and uses Python's
-symlink-resistant descriptor deletion; it refuses foreign top-level entries.
+`verify` checks the real owner/group/mode, link count, every path's access
+attributes and control bytes; follow it with the named §9 unprivileged probes
+against these fixed fixture homes, then `verify` again. The fixture verifier
+also refuses links, special files or mounts among descendant probe artifacts;
+remove those disposable artifacts as their test owner before verification.
+This does not change production home deletion's link-unlink contract. It is
+not a digest/start gate test. `rollback` deletes only the guarded published
+fixture and/or private staging tree using Python's symlink-resistant descriptor
+deletion; foreign top-level entries refuse. The private staging guard supplies
+recovery authority before its marker exists; it does not authorize deletion
+of an unmarked published tree.
 The fixture is disposable and must not hold real work or keys. No root execution
 is claimed by syntax checking or by the script's non-root refusal control.
 
