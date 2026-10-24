@@ -412,9 +412,12 @@ close new starts immediately. Running work MUST either be narrowed only through
 an independently verified narrowing path or be stopped within a published finite
 deadline. Verified narrowing MUST also complete within that deadline.
 An unverified or failed narrowing path MUST take the bounded stop path;
-it cannot justify continued execution. The deadline, affected-work scope, stop
-completion evidence and failure response MUST be published and qualified before
-execution admission; this draft chooses no numeric deadline or new mechanism.
+it cannot justify continued execution. Restart, resume or failed narrowing MUST
+NOT restart the response clock. The deadline, clock and suspend/wake semantics,
+triggering event, affected-work set, response owner, verified-narrowing
+preconditions, stop-completion evidence and failure response MUST be published
+and qualified before execution admission. This draft chooses no numeric deadline
+or new mechanism.
 Until those obligations qualify, running-work admission stays closed. The same
 response applies when drift, an update or failed renewal revokes qualification.
 
@@ -517,8 +520,13 @@ setup errors and skipped plants prove nothing.
 | `MacExternalResidueRefused` — temp/cache, root-owned scheduled job, live unlinked IPC/socket/Mach residue or unknown scope admits reuse/bump | Remove only planted fixture-owned residue and repeat complete coverage; Keymaker bump gate still stays closed |
 | `MacIssuerBindingRefused` — manual issuer, stale boot/PID, replaced plist or failed latest job appears qualified | Actual bound successful renewal admits the next local gate, without launching a station |
 | `MacTaskScopeRefused` — unnamed/untrusted or hard-limit-required task admitted on macOS, or soft observation presented as a hard guarantee | Explicit named trusted soft-limit task passes the admission fixture; hard-limit tasks refuse or use independently qualified Linux placement |
-| `MacRevocationDeadlineRefused` — new start after revocation, unverified narrowing or unnarrowed work surviving the published response deadline | Valid qualification admits the controlled task; revoke and prove immediate start closure plus verified narrowing or bounded completed stop, including failed-narrowing and absent-deadline refusal |
+| `MacRevocationDeadlineRefused` — new start after revocation, unverified narrowing, clock reset by restart/resume/failed narrowing or unnarrowed work surviving the published response deadline | Valid qualification admits the controlled task; revoke and prove immediate start closure plus verified narrowing or bounded completed stop against the original clock, including failed-narrowing and absent-deadline refusal |
 | `MacJournalCrashRestoreRefused` — partial sync, stale tail/floor or coherent restore bypasses fences | Shared vectors/canonical bytes and qualified native ordering pass; independent restore custody remains required |
+| `MacUpdateTrustRefused` — invalid or unknown trust/revocation evidence admits an update or publishes a qualified record | Authentic pre-approved-target control with complete valid trust/revocation evidence reaches the next qualification gate; each invalid/unknown variant leaves admission closed and publishes no qualified record |
+| `MacUpdateTargetRefused` — an authentic update for the wrong release/build/architecture or mismatched installed target admits | Authentic pre-approved-target control with matching installed system/seal/Cryptex identities reaches the next qualification gate; the wrong-target plant remains closed without accepting new pins |
+| `MacUpdateHistoryOnlyRefused` — installation history/receipts substitute for authenticity and installed-state verification | Authentic pre-approved-target control supplies independently verified trust and installed-state evidence and reaches the next qualification gate; history-only evidence leaves admission closed |
+| `MacUpdatePinTransitionRefused` — an authentic update silently replaces a policy pin without maintenance authorization | Authentic pre-approved-target control with an explicitly authorized exact pin transition reaches the next qualification gate; the unapproved transition leaves pins unchanged and admission closed |
+| `MacUpdateRenewalInterruptedRefused` — interrupted requalification or failed latest renewal admits through a cached green record | Authentic pre-approved-target control completes a fresh bound successful renewal and reaches the next qualification gate; interruption/failure plants retain recovery evidence and keep admission closed, with P7's original response clock preserved |
 
 ## 9. Verified platform tools
 
@@ -562,15 +570,19 @@ not evidence for this build, a production backend or permission to execute it.
 
 ## 10. Architect decisions and publication gates
 
+The recommendations below are proposals for resolving M1–M7, not approvals or
+new owner decisions. P5 and P7 retain their settled scope; the recommended
+mechanisms, profiles and procedures remain unselected and unqualified.
+
 | Gate | Required decision/evidence | State until resolved |
 |---|---|---|
-| M1 — Supported directory profile | Local-only search observed despite a Platform SSO node; approve exact local/system/synthetic provider and implicit-group bounds. Review PROPOSED station range 30000–59999; local absence >=1000 is not approval | Unknown provider/membership closes qualification; no host range approved |
-| M2 — Filesystem root and metadata | APFS ownership, system/Data split and OS flags observed; approve R, actual case/alias profile, ACL-free feasibility and per-attribute policy; retain root/TCC visibility bounds | No installation or complete-inventory claim; do not strip observed OS metadata |
-| M3 — Shared platform binding and revocation | Readable launchctl print fields do not prove issuer invocation. Jointly publish typed OpenDirectory/dyld/boot/launchd fields and latest-invocation proof; P7 selects immediate new-start closure plus verified narrowing or stop within a published deadline, whose value/adapter/evidence remain open | Linux codec unchanged; no macOS issuer/reader or running-work admission before qualification |
-| M4 — Cleanup/stop coverage | ps/SysV/cron metadata are diagnostics; qualify saved-UID/holder visibility, process/respawn fence, per-user temp mapping and every outside-home provider | No removal/reuse from incomplete evidence; bump stays closed |
-| M5 — Native journal/durability | APFS observations do not qualify native locks/sync: prove shared reader/writer locking, durable publication, budgets and external restore custody | No production journal writer/consumer claim |
-| M6 — Key, root qualification and task scope | Select root-test host/procedure, jointly publish Keymaker pre-active provision/confirm and qualify static UID-range deny. P5 settles macOS scope to explicitly named trusted tasks with soft limits; publish task names/soft bounds and qualify admission, refusing hard-limit tasks or placing them on Linux | `user.bump` closed; no mutations, execution or hard-limit claim from read-only facts |
-| M7 — Authentic update/requalification | History readable and sealed snapshot reported, but trust/seal/Cryptex verification not performed. Approve publisher/target policy, reviewed root verification, automatic maintenance/pin authority and failure/rollback behavior | No automatic acceptance of unverified updates; admission closed and P7 response applies on revocation |
+| M1 — Supported directory profile | Recommendation: approve exact finite local/system/synthetic providers, collision/range and implicit-group rules, including review of PROPOSED range 30000–59999. Own lifecycle-wide authentication/token/volume-owner exclusions across later Platform SSO, MDM and bootstrap-token changes. Require distinct lifetime evidence for login-window hiding, password/session denial, Secure Token, FileVault and volume ownership; hidden or tokenless at creation is insufficient | Unknown provider/membership or privilege transition closes qualification; no host range approved |
+| M2 — Filesystem root and metadata | Recommendation: select R/volume and case/alias profile; establish ACL-free, metadata and hardlink-protection feasibility before promising equivalence, retaining root/TCC visibility bounds. An unavailable primitive requires an explicit architecture decision, never stripping OS policy | No installation or complete-inventory claim; do not strip observed OS metadata |
+| M3 — Shared platform binding and revocation | Recommendation: jointly publish typed OpenDirectory/dyld/boot/launchd and latest-invocation proof; diagnostic print/PID/exit fields are insufficient. Resolve P7 with the finite deadline, clock and suspend/wake semantics, triggering event, affected-work set, response owner, verified-narrowing preconditions and stop-completion evidence. Restart, resume or failed narrowing MUST NOT restart the response clock | Linux codec unchanged; immediate new-start closure under P7; no macOS issuer/reader or running-work admission before qualification |
+| M4 — Cleanup/stop coverage | Recommendation: publish complete credential (real/effective/saved UID), holder, respawn and Mach scopes, actual per-user /var/folders mapping including stale UUID mappings, detached storage and every outside-home provider. Diagnostic ps/SysV/cron views are insufficient; unknown ownership never authorizes deletion | No removal/reuse from incomplete evidence; bump stays closed |
+| M5 — Native journal/durability | Recommendation: jointly qualify native reader/writer locking, sync/publication/crash semantics, original budgets and external restore custody with direct consumers. APFS metadata observations do not establish these guarantees | No production journal writer/consumer claim |
+| M6 — Key, root qualification and task scope | Recommendation: select the root-test host/procedure separately; publish task names/soft bounds, qualify admission and static UID-range deny, and retain the shared Keymaker pre-active provision/confirm activation gate. P5 is settled scope: explicitly named trusted soft-limit tasks; hard-limit tasks refuse or use Linux, with no waiver | `user.bump` closed; no mutations, execution or hard-limit claim from read-only facts |
+| M7 — Authentic update/requalification | Recommendation: publish authentic publisher/target/trust policy, update-writer exclusion including automatic/MDM/background updates, installed seal/Cryptex evidence, authorized pin-transition and interrupted failure/rollback rules. Qualify reviewed root verification and the five named MacUpdate cases, each paired with an authentic pre-approved-target control; history and a reported sealed snapshot are insufficient | No automatic acceptance of unverified updates; admission closed and P7 response applies on revocation |
 
 These gates do not reopen one-account-per-station, platform-owned managed
 ancestors, destructive same-account bump ordering or Keymaker ownership. If a
