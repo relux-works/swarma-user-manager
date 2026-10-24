@@ -279,23 +279,34 @@ func (x *execution) admit(c Caller, r Request) (Effect, error) {
 		x.effect = nil
 		return f, nil
 	}
-	charged := map[int64]bool{}
+	type allocationIdentity struct {
+		uid        int64
+		generation string
+	}
+	// Ownership and names follow the exact live or unreleased generation, never UID reuse.
+	charged := map[allocationIdentity]bool{}
 	for _, v := range x.view.Rows {
 		if v.State != "removed" {
-			charged[v.UID] = true
+			charged[allocationIdentity{v.UID, v.Generation}] = true
 		}
 	}
 	for _, old := range x.state.Effects {
 		if !old.Terminal || (old.Request.Op == "user.bump" && old.Failure != "") {
-			charged[old.Account.UID] = true
+			charged[allocationIdentity{old.Account.UID, old.Account.Generation}] = true
 		}
+	}
+	// OS allocation still excludes a numeric UID occupied by any charged generation.
+	occupied := map[int64]bool{}
+	for identity := range charged {
+		occupied[identity.uid] = true
 	}
 	owned := map[int64]bool{}
 	for _, old := range x.state.Effects {
-		if old.Owner == c.key() && charged[old.Account.UID] {
+		isCharged := charged[allocationIdentity{old.Account.UID, old.Account.Generation}]
+		if old.Owner == c.key() && isCharged {
 			owned[old.Account.UID] = true
 		}
-		if old.Account.Username == "worker-"+r.Args.Label && charged[old.Account.UID] {
+		if old.Account.Username == "worker-"+r.Args.Label && isCharged {
 			return f, fail("user_exists_unmanaged")
 		}
 	}
@@ -316,7 +327,7 @@ func (x *execution) admit(c Caller, r Request) (Effect, error) {
 		if next > p.UIDMax {
 			next = p.UIDMin
 		}
-		if !charged[uid] && uid >= p.GIDMin && uid <= p.GIDMax {
+		if !occupied[uid] && uid >= p.GIDMin && uid <= p.GIDMax {
 			a := p.account(r.Args.Label, uid, g)
 			stepCtx, cancel := bounded(x.ctx, p.Limits.StepMS)
 			err = x.engine.Backend.Available(stepCtx, a)
