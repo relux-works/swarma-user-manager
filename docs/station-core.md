@@ -152,6 +152,53 @@ operation outside the specification's closed OS-intent vocabulary. A backend
 requiring mutating stop behavior must use a separately reviewed protocol,
 rather than performing signals from read-only `Plan`.
 
+## Mapping the Linux primitive boundary
+
+The core stays independent of `linuxos`; a trusted adapter translates these
+inputs rather than letting primitive observations become authority.
+
+| Core input/output | Landed Linux primitive mapping |
+|---|---|
+| `RestoreInput.OriginalReservation` | Supplies the original create `Owner`, `Request.ID`, account name/home/UID/GID and generation for `linuxos.ReservedIdentity`. Follow explicit bump ancestry; never select a lifetime by UID alone. |
+| `RestoreInput.Reservation`, `Identity`, `Basis` | Keep the current operation, operator act, target/previous generation, exact journal tail and policy/fence/boot separate from original account ownership. Authenticate them before constructing `linuxos.RestoreEvidence`. |
+| `RestoreInput.Key`, `AttemptResolved`, `MayCreate` | 64-hex read-preparation key and core-verified prior-worker state. Creation is permitted only for the admitted create provisioning phase. These are trusted inputs, not request booleans. |
+| Applied original account/group receipts | Select at most the two independent namespace creation receipts, translate closed objects to `AccountSet` and preserve their original lifetime in `IdentityReceipt`. Their creation keys differ from the current restoration key. Do not relabel original receipts with a retained successor generation. |
+| `Task` and write `OSIntent.Key` | Translate checked positive int64 UID/GID to uint32. Use the 64-hex intent key with `EffectNames`/`CreateStage`; the slash-separated `Task.Key` is an internal operation label. Exact homes/names remain unchanged. |
+| `FileObject` | `FSIdentity` fields map directly, with checked ID widening/narrowing and the core's `kind=fs` tag. Observation alone supplies no owned handle or receipt. |
+| `StepPlan` / `Attempt` | Separate `CreateStage`, `Populate`, `Publish`, `Quarantine` into separately durable intents/flights/receipts. Preserve `OwnedStage` and its pinned parent/source/destination handles across calls. The root-approved controls feed `StationManifest`; its digest binding stays in the admitted core intent. |
+| `AuthorityEvidence` | `CheckPolicyFile` and every `CheckPersistenceDenial` result must be freshly `ok`, alongside complete account/process/systemd inventories. Wrap their facts in the configured version/scope/fence protocol and maintained guard; primitive `ok` alone is not admission. |
+
+Adapter mismatches remain explicit:
+
+- `RestoreAllocation` requires `MayCreate` when either namespace is absent.
+  Retirement/compensation must use `ObserveAccounts` to prove permitted
+  absence, rather than set create permission merely to satisfy that API.
+  Present retained namespaces still need independent original receipts.
+- Its reservation `JournalView` is numeric. The adapter must first retain and
+  validate the core's exact owner/request/generation charge and project both
+  holds; a numeric hold never authenticates a lifetime. Primitive `Range`
+  accepts only paired identities with width at most 1000000; unsupported
+  configured ranges must fail qualification, without inventing policy bounds.
+- `OwnedStage` cannot be reconstructed after process restart. Lost handles
+  require a separately qualified continuity/recovery adapter or maintenance
+  hold. `Observe` and matching inode/name/digest cannot bypass that limit.
+- `Populate` returns a path-indexed observation map; v2 receipts contain ordered
+  tagged observations. The adapter must define and retain an unambiguous
+  approved-manifest/path correspondence before wiring it. The core does not
+  discard paths and claim equivalent provenance.
+- Existing `DeleteBatch` is not automatically an executor for the exact
+  enumerated entries in a prepared v2 intent. Exact entry binding, replacement
+  refusal, partial outcomes and done/absence postconditions still need adapter
+  qualification. Legacy `Install`/`ReplaceManaged` cannot stand in for split
+  receipt operations.
+- `Proc.Stop` mutates process state, while the current closed intent vocabulary
+  has no process-stop tag. V0 no-launcher qualification must refuse observed
+  processes; a later stop protocol needs review. Never signal from read-only
+  `Plan`.
+- Full qualified `AccountDirectory`, root-run evidence, all persistence names,
+  live fencing, authenticated operator issuance and Keymaker/broker receipts
+  remain deployment work. No core-to-Linux backend is linked here.
+
 ## Operator retirement and deployment gates
 
 Dispatcher create and configured operator retire are distinct entries. Sudo

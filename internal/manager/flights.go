@@ -372,9 +372,16 @@ func (g *timedGuard) Release() {
 	}
 }
 func (x *execution) restore() error {
-	input := RestoreInput{reserved(x.effect.Account, x.effect.Previous), x.effect.AllocationOwner, *x.effect, x.records(), x.basis()}
+	if err := x.checkTarget(); err != nil {
+		return err
+	}
+	original, err := x.originalReservation()
+	if err != nil {
+		return err
+	}
+	input := RestoreInput{Key: x.readIntent("host_qualification").Key, OriginalReservation: original, AttemptResolved: true, MayCreate: x.effect.Request.Op == "user.create" && x.effect.Phase == "provision", Identity: reserved(x.effect.Account, x.effect.Previous), AllocationOwner: x.effect.AllocationOwner, Reservation: *x.effect, Records: x.records(), Basis: x.basis()}
 	var restored RestoreResult
-	err := x.read("host_qualification", func(c context.Context) error { var e error; restored, e = x.engine.Backend.Restore(c, input); return e })
+	err = x.read("host_qualification", func(c context.Context) error { var e error; restored, e = x.engine.Backend.Restore(c, input); return e })
 	if err != nil {
 		return err
 	}
@@ -570,4 +577,36 @@ func (x *execution) hold(reason string) error {
 		return e
 	}
 	return x.save()
+}
+
+// Follow retained bump ancestry by generation, never by a reused numeric UID.
+// The Linux restoration primitive needs the original create owner/request lifetime;
+// current operation/target authorization remains separate in RestoreInput.
+func (x *execution) originalReservation() (Effect, error) {
+	target := x.effect
+	generation := target.Account.Generation
+	matches := func(f Effect) bool {
+		return f.AllocationOwner == target.AllocationOwner && f.Account.UID == target.Account.UID && f.Account.GID == target.Account.GID && f.Account.Username == target.Account.Username && f.Account.Home == target.Account.Home
+	}
+	for depth := 0; depth <= len(x.state.Effects); depth++ {
+		for _, f := range x.state.Effects {
+			if matches(f) && f.Request.Op == "user.create" && f.Account.Generation == generation {
+				return f, nil
+			}
+		}
+		previous := ""
+		for _, f := range x.state.Effects {
+			if matches(f) && f.Request.Op == "user.bump" && f.Account.Generation == generation && f.Previous != "" && f.Previous != generation {
+				if previous != "" && previous != f.Previous {
+					return Effect{}, fail("state_contradictory")
+				}
+				previous = f.Previous
+			}
+		}
+		if previous == "" {
+			break
+		}
+		generation = previous
+	}
+	return Effect{}, fail("effect_evidence_unavailable")
 }

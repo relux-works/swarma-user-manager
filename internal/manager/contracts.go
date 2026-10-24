@@ -191,11 +191,15 @@ type Completion struct {
 
 // Restore receives the original durable identity and provenance, never an allocator cursor to advance.
 type RestoreInput struct {
-	Identity        ReservedIdentity
-	AllocationOwner string
-	Reservation     Effect
-	Records         []OSRecord
-	Basis           Basis
+	Key                 string
+	OriginalReservation Effect
+	AttemptResolved     bool
+	MayCreate           bool
+	Identity            ReservedIdentity
+	AllocationOwner     string
+	Reservation         Effect
+	Records             []OSRecord
+	Basis               Basis
 }
 type RestoreResult struct {
 	Identity       ReservedIdentity

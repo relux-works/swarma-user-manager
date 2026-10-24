@@ -565,3 +565,55 @@ func TestCreationIntentRequiresAbsence(t *testing.T) {
 	}
 	setup(t).created(t)
 }
+
+// The Linux restore input uses a 64-hex preparation key and exact original create lifetime,
+// while current operator/target authority stays separate. UID reuse must select the new lifetime.
+func TestOriginalReservationRestorationBoundary(t *testing.T) {
+	h := setup(t)
+	h.e.Policy.UIDMax = h.e.Policy.UIDMin
+	h.e.Policy.GIDMax = h.e.Policy.GIDMin
+	h.e.Policy.Quota = 1
+	old := h.created(t)
+	want(t, h.run(t, "user.retire", "retire-old", old), "ok")
+	seen := 0
+	h.e.Backend = interceptBackend{Backend: h.b, restore: func(c context.Context, i RestoreInput) (RestoreResult, error) {
+		seen++
+		if !hashOK(i.Key) || !i.AttemptResolved || i.OriginalReservation.Request.ID != "second" || i.OriginalReservation.Account.Generation == old || i.OriginalReservation.AllocationOwner != "dispatcher" {
+			t.Fatal("wrong original lifetime in restoration")
+		}
+		if i.Reservation.Request.Op == "user.retire" && (i.Reservation.Owner != "operator" || i.MayCreate) {
+			t.Fatal("operator act was substituted for original reservation")
+		}
+		return h.b.Restore(c, i)
+	}}
+	r := h.run(t, "user.create", "second", "demo")
+	want(t, r, "ok")
+	want(t, h.run(t, "user.retire", "retire-new", r.Result["generation"].(string)), "ok")
+	if seen == 0 {
+		t.Fatal("restoration boundary not exercised")
+	}
+}
+
+// Retained bump successors keep original creation receipts' owner/request/generation lifetime;
+// translating to linuxos must not relabel those receipts with the successor's generation.
+func TestRetainedBumpRestorationLifetime(t *testing.T) {
+	h := setup(t)
+	old := h.created(t)
+	successorSeen := false
+	h.e.Backend = interceptBackend{Backend: h.b, restore: func(c context.Context, i RestoreInput) (RestoreResult, error) {
+		if i.OriginalReservation.Request.ID != "first" || i.OriginalReservation.Account.Generation != old || i.MayCreate {
+			t.Fatal("retained account lifetime was rewritten")
+		}
+		if i.Identity.Generation != old {
+			successorSeen = true
+			if i.Identity.Previous != old {
+				t.Fatal("successor lost current generation binding")
+			}
+		}
+		return h.b.Restore(c, i)
+	}}
+	want(t, h.run(t, "user.bump", "bump", old), "ok")
+	if !successorSeen {
+		t.Fatal("successor restoration not exercised")
+	}
+}
