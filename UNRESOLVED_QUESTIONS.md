@@ -66,7 +66,9 @@ still requires Linux/backend qualification, maintenance incident reconciliation
 and reviewed nonempty-v1 provenance migration. The gated maintenance API accepts
 only approved empty genesis and preserves its original bytes. The concrete
 protected operator consent/broker-obligation encodings are implemented at the
-issuer boundary; authenticated issuance and root installation remain pending.
+issuer boundary; authenticated issuance remains pending. The
+[r2 installation/unit pass](docs/root-qualification-evidence.md#r2-installation-and-qualification-unit)
+is build-bound and does not discharge current deployment or authority gates.
 Production still requires the Linux backend,
 qualified sudo/service-identity adapter, authoritative cleanup admission,
 authenticated exact-pair Keymaker re-admission/binding receipts with a pinned
@@ -90,7 +92,9 @@ untouched in logical quarantine; root maintenance release is outside this API.
 Root:S installation/quarantine and crash durability, deployed policy schema and
 [root-run record issuer/reader and NSS module qualification](spec/station-effect-receipts.md#63-root-issuer-and-closed-qualification-record),
 effective cron/at denial/allow precedence for every station name,
-and logind/no-running-manager checks remain pending host qualification. These
+and logind/no-running-manager coverage remain host-specific qualification gates.
+The [r1/r2 evidence](docs/root-qualification-evidence.md) records narrower
+historical passes, not the full receipt/provider lifecycle. These
 checks do not enable bump, policy installation or account activation.
 
 The Linux adapter links the issuer and retained root qualification-record reader.
@@ -101,7 +105,8 @@ requires a matching protected closure, clean completion from every recorded
 allocator, strict ranges and records, and independent NSS agreement. Unknown
 metadata, unsupported records and nonterminating providers refuse admission.
 Actual provider deployment, complete reviewed range provenance,
-maintained exclusion and root/boot qualification remain pending. The production adapter
+maintained exclusion and matching deployment qualification remain required.
+The r2 unit pass at its exact kit does not transfer to changed inputs. The production adapter
 refuses without them; `qualified: true` alone never admits. Approved skeleton
 reading, full inventory-scope configuration and maintained local guards are
 implemented; their deployed completeness still requires review. Lost live stage/publication handles require
@@ -112,8 +117,14 @@ qualified continuity or root maintenance, never pathname/inode adoption. See
 ## Qualification deployment gates
 
 The issuer, protected record reader and reviewed production environment
-are implemented. Privileged installation, real root account behavior and live
-unit renewal remain pending the owner procedure in `docs/linux-backend.md`.
+are implemented. The [owner-run evidence](docs/root-qualification-evidence.md)
+records r1 apply/verify/rollback at `4639d69` and r2 installation, initial
+qualification, two-field pin and in-unit boot-mode qualification at `a5e99c4`
+on 2026-10-24. Apply/unit and verify reported 11/11 checks; the marker was removed
+and admission left unconfigured. Each result covers one host and its exact build.
+This retires the generic assertion that no root run has passed; the
+[owner procedure](docs/linux-backend.md#owner-qualification-procedure) and matching
+evidence are still required for a current or changed deployment.
 The systemd closure and direct collector are implemented; a `files systemd` host
 requires protected provider capabilities and clean completion from each allocator.
 The production adapter supplies those capabilities through the reviewed deployment
@@ -122,6 +133,11 @@ The actual loader ABI/search closure, full inventory roots, effective
 unit/drop-in load scope and exclusion of other root writers require owner review;
 missing facts refuse. Unsupported cron-owner resolution also remains refusal.
 These gates do not resolve Keymaker bump admission or cleanup authority.
+Production account lifecycle under load, complete host inventory and A3 automatic
+requalification were not exercised. `TestPendingOpenInodeAndNamespaceQualification`
+remains an unconditional PENDING skip with no proving evidence. The root primitive
+test remains opt-in and skips without the owner's explicit setup; historical
+passes authorize neither admission nor a new root run.
 
 ## macOS station backend gates
 

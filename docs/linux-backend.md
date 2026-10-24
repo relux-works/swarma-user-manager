@@ -101,6 +101,9 @@ go build -o <scratch>/swarma-user-manager ./cmd/swarma-user-manager
 Logs and the binary belong in task-local untracked scratch. Root qualification
 uses the existing owner-reviewed `internal/linuxos/root-qualification.sh` flow;
 that disposable primitive harness is not a qualification-record issuer.
+The [r1/r2 evidence record](root-qualification-evidence.md) distinguishes the
+2026-10-24 primitive pass at `4639d69` from installation/unit qualification at
+`a5e99c4`. Neither result qualifies this checkout or a different deployment.
 
 ## Qualified account-directory implementation
 
@@ -111,8 +114,9 @@ policy UID/GID ranges and reserved-name set, a reviewed `NSSRuntime` and a
 `DirectoryFence` that excludes external account-database and module/configuration
 changes for the entire observation. An ordinary in-process mutex is insufficient.
 The issuer and qualification-record reader are implemented for reviewed `files`
-and bounded `files systemd` profiles; root installation, complete host scope and
-maintained exclusion remain deployment qualification gates.
+and bounded `files systemd` profiles. The r2 installation/unit pass is limited to
+its exact kit; complete host scope, maintained exclusion and matching evidence
+for the actual deployment remain qualification gates.
 
 Each call captures protected `nsswitch.conf` again, requires the exact recorded
 physical passwd/group/shadow lines, captures current module implementation and
@@ -799,8 +803,15 @@ qualify a production host or establish privileged behavior.
 
 ### Owner qualification procedure
 
-This is a proposed owner-run root step, pending execution. Use a trusted root
-shell with a clean environment and admission stopped throughout steps 1–6.
+The [r2 owner-run result](root-qualification-evidence.md#r2-installation-and-qualification-unit)
+records stage/apply/verify on 2026-10-24 for the kit at `a5e99c4`: initial
+qualification, two-field pin, unit boot-mode qualification and verify passed
+11/11 checks; the maintenance marker was removed. Admission remained
+unconfigured, so admission start was not exercised. This result does not prove
+reboot/failure/drift campaigns or qualification of changed inputs.
+
+For a future reviewed run, use a trusted root shell with a clean environment
+and admission stopped throughout steps 1–6.
 Both reviewed `files` and bounded `files systemd` hosts use this flow. For a
 `files systemd` host, install the protected root:root 0600 single-link canonical
 closure at `/opt/swarma/etc/user-manager-systemd-closure.json` before step 4, and

@@ -137,14 +137,16 @@ is not proof of no active user manager/session: retain the existing systemd and
 process inventory checks, fresh source version binding and activation guard.
 These read results confer neither cleanup nor activation authority.
 
-Root qualification still PENDING: real protected account/NSS/shadow agreement and
+The [r1 owner-run pass](../../docs/root-qualification-evidence.md#r1-disposable-account-primitives)
+records disposable root primitives on 2026-10-24 at `4639d69`, not the complete
+receipt/provider boundary. Remaining deployment gates include protected account/NSS/shadow agreement and
 restoration; root:S stage population, same-filesystem root quarantine and crash
 recovery durability; deployed policy schema/root-run evidence; actual cron/at
 parser and allow precedence, every station-name denial, logind/no linger and
 no-running-manager restrictions. The disposable harness gains only a read-only
 check of its existing protected policy file. Persistence installation and physical
 quarantine/restart campaigns would widen its documented scope and are listed
-separately rather than silently added. No root script was run for this change.
+separately rather than silently added. No root script was rerun for this documentation.
 
 ## Tools and evidence
 
@@ -157,7 +159,7 @@ existing `golang.org/x/sys/unix` are required; there are no new dependencies.
 | Go | Narrow primitive tests | `GOMAXPROCS=2 go test -p 1 ./internal/linuxos -count=1 -v -timeout=45s` | Named verdicts; Go temporary fixture directories |
 | Python 3, existing sudo | Disposable peer-account fixtures | Invoked only by the package tests as `sudo -n -u platform-test-a -- /usr/bin/python3 ...` (peer UID resolved at runtime) | Exact PID/path cleanup and named test verdicts |
 | C compiler | Harmless loader-constructor regression fixture | `/usr/bin/cc -shared -fPIC -o PLANT_SO PLANT_C` (invoked by `TestRootBootstrapLoaderEntry`) | Temporary test-owned source, shared object and executable sentinel; removed with the fixture |
-| Shell/Python 3 | Proposed root qualification | `/usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin /usr/bin/dash /abs/path/root-qualification.sh apply ABS_TEST_BINARY APPROVED_SHA`; then `verify`; then `rollback` | Protected disposable fixture at `/var/lib/swarma-linuxos-qualification`; no production policy or sudoers changes |
+| Shell/Python 3 | Owner-run opt-in root qualification; r1 pass recorded | `/usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin /usr/bin/dash /abs/path/root-qualification.sh apply ABS_TEST_BINARY APPROVED_SHA`; then `verify`; then `rollback` | Protected disposable fixture; no production policy or sudoers changes |
 
 Unprivileged tests map root:S owners to the test runner only through private
 in-package constructors. They check inherited ACL rejection, symlinks, exact
@@ -168,14 +170,15 @@ POSIX and System V shared memory, a listening Unix socket and one process as
 signaling runs as the owning peer, while using the same admission/absence loop.
 No test may signal a process it did not start.
 
-`TestRootQualification` is **PENDING/skipped by default**. The proposed script
-has not qualified root account tools, root:S ownership or root signaling merely
-by compiling. For an owner-approved isolated host, first build the exact reviewed
+`TestRootQualification` is **opt-in/skipped by default**. The owner-run r1
+apply/verify/rollback pass covers the exact binary and runner hashes recorded in
+[the evidence note](../../docs/root-qualification-evidence.md); compiling another
+binary does not transfer that evidence. For another owner-approved run, first build the exact reviewed
 binary with `go test -c -trimpath -o /chosen/path/linuxos.test ./internal/linuxos` and record
 its SHA-256 with `sha256sum /chosen/path/linuxos.test`. The owner must supply
 `/etc/swarma-linuxos-qualification.json`, root:root mode 0600, containing `Min`,
 `Max`, `ReservedUIDs` and `ReservedGIDs`: a reviewed unused test range and all
-actual journal holds. There are no default/fixed IDs. The proposed bootstrap
+actual journal holds. There are no default/fixed IDs. The bootstrap
 requires the host's real `/usr/bin/python3.14` interpreter. It checks root owners,
 nonwritable modes and non-symlink directory/file types before starting Python;
 another layout refuses and needs separate review. The tools-table invocation is
@@ -200,8 +203,8 @@ native constructor records each executable entered by the documented full-script
 launch with LD_PRELOAD in the outer environment: only the trusted env launcher
 may load it; our dash/Python must not. A narrowing control explicitly leaks it
 past `env -i` into dash and must record dash before the builtin refusal. The full
-script probe stops at the root-required guard, before fixture I/O. No privileged
-root script execution is claimed.
+script probe stops at the root-required guard, before fixture I/O. Those
+unprivileged regressions claim no root execution; the separate r1 pass does.
 Review the script and pass
 the approved binary hash to `apply`; it checks protected paths and exact copied
 bytes before executing. The opt-in test verifies actual account creation,
@@ -216,7 +219,10 @@ uses recursive discard, installs sudoers, or changes scheduler/systemd policy.
 Before adding any future sudoers drop-in, validate it with the host's sudo-rs
 `visudo -cf`; no drop-in is proposed here. All-process open-inode coverage,
 namespace/bind-mount refusal and actual scheduler/systemd backend qualification
-remain separate pending host checks, even if this disposable root test passes.
+remain separate pending host checks despite the build-bound r1 pass.
+`TestPendingOpenInodeAndNamespaceQualification` remains an unconditional PENDING
+skip and supplies no proving evidence. Neither r1 nor r2 establishes production
+account lifecycle under load, station admission or A3 automatic requalification.
 
 
 ## Qualified directory

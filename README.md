@@ -7,6 +7,13 @@ Two minimal privileged components for agent systems. Each runs as root for one o
 
 **Status: design in progress.** Accepted architecture-review findings (2026-10-13) are reflected in draft v0.15 and its figures; publication/qualification gates remain open. The [generation journal format `gen-journal/1`](spec/generation-journal.md), vectors and Linux offline checker are published here; the station core includes v2 effect receipts, unlocked per-effect flights and versioned authority boundaries with injected-backend tests, and standalone [Linux station primitives](internal/linuxos/README.md) are available through a Linux backend adapter; host qualification providers remain gated. Real OS account backends and production consumer adapters remain unqualified. The helper specification is [`spec/helper.md`](spec/helper.md); diagrams are in [`diagrams/`](diagrams/).
 
+[Owner-run Linux root evidence](docs/root-qualification-evidence.md) records two
+passes on 2026-10-24: r1 disposable account primitives at `4639d69`, and r2
+installation/initial/unit qualification at `a5e99c4` with 11/11 checks. Each result
+covers one host and its exact build; admission remained unconfigured. Production
+lifecycle under load, complete inventory and A3 automatic requalification remain
+outside those passes.
+
 ## Host qualification protocol
 
 The proposed [self-service protocol](spec/host-qualification-protocol.md) defines
@@ -183,7 +190,8 @@ includes a live nonroot preflight and the required openat2-compatible sandbox.
 Its root maintenance modes implement initial qualification and per-boot renewal;
 the reader requires a protected current record, unchanged inputs, the policy pin
 and the matching successful latest systemd invocation. A policy flag alone
-never admits. Root installation and qualification remain pending.
+never admits. The [r2 exact-build installation and unit pass](docs/root-qualification-evidence.md#r2-installation-and-qualification-unit)
+is recorded; current or changed deployments still require matching evidence.
 
 The core refuses production bump with `bump_key_admission_unconfirmed` before
 its journal or backend access until the Keymaker provision/confirm contract is
@@ -202,13 +210,14 @@ allocator completes all three Varlink calls, records fit its ranges, and NSS
 agrees. Unknown metadata or provider completion refuses admission. Aggregate NSS
 alone cannot prove completion. The
 [boot unit and consumer drop-in](docs/linux-backend.md#boot-qualification-unit-artifact)
-are repository artifacts; installation and root qualification remain pending.
+are repository artifacts; r2 exercised installation and unit qualification for
+its exact kit. That result does not qualify another build or deployment.
 The [owner procedure](docs/linux-backend.md#owner-qualification-procedure)
 describes protected deployment inputs and the stopped-admission pin/restart flow.
 
 | Tool | Purpose | Command | Output |
 |---|---|---|---|
-| Qualification maintenance (owner root shell) | Produce a candidate inputs digest, then renew through the unit | `/opt/swarma/libexec/swarma-user-manager qualify`; `systemctl restart swarma-user-manager-qualify.service` | Initial mode prints one digest; protected `/opt/swarma/lib/user-manager/qualification/record.json`; root step pending |
+| Qualification maintenance (owner root shell) | Produce a candidate inputs digest, then renew through the unit | `/opt/swarma/libexec/swarma-user-manager qualify`; `systemctl restart swarma-user-manager-qualify.service` | Initial digest and protected record; r2 initial/unit pass is build-bound, not admission |
 | Boot environment preflight (nonroot) | Exercise protected systemctl, own-unit and cgroup checks under the unit sandbox | Candidate binary `qualify-preflight` inside the [fixed user oneshot](docs/qualification-diagnostics.md#nonroot-live-installation-preflight) | Stable success/refusal lines; no policy, record or root mutation |
 | Loader closure checks | Absolute requester-only RUNPATH, exact ordered lookup evidence, earlier-name/link drift, member metadata and streaming byte bounds | `go test -race -p 1 ./internal/linuxos -run '^TestLoader' -count=1`; `go test -race -p 1 ./internal/linuxbackend -run '^TestQualification(LoaderEvidence\|LoaderCache\|DeploymentSchema\|LoaderSchema)$' -count=1` | Named verdicts; owned temporary ELF fixtures and test-only overlay; no provider RPC or host writes |
 | Native loader review regressions | Symlink parent-step and cross-file SONAME alias refusals, with admitted controls and local/full drift checks | `go test -race -p 1 ./internal/linuxbackend -run '^TestReviewLoader(SymlinkDotDot\|SONAMEReuse)$' -count=1` | Named verdicts; temporary ELF objects and empty-environment native loader differential; no host writes |
@@ -234,20 +243,22 @@ The standalone [Linux package](internal/linuxos/README.md) implements station
 mechanisms; its caller still owns journal authority, fences and activation.
 Receipt primitives add exact reserved-identity restoration, deterministic owned
 stages, descriptor observations, owned quarantine and local policy/persistence
-checks. Their trusted-input boundaries and pending root/provider qualification
+checks. Their trusted-input boundaries, build-bound r1 evidence and remaining provider qualification
 are documented in the package README; observations never establish provenance.
 
 | Tool | Purpose | Command / entry point | Output |
 |---|---|---|---|
 | Go | Compile Linux primitives | `go build ./internal/linuxos` | Compiler verdict |
 | Go, Python 3, existing sudo peer access | Narrow positive/negative primitive and disposable peer fixtures | `GOMAXPROCS=2 go test -p 1 ./internal/linuxos -count=1 -v -timeout=45s` | Named test results; temporary fixtures cleaned by exact path/PID |
-| Shell/Python 3 | Proposed owner-run root qualification, pending execution | `/usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin /usr/bin/dash /abs/path/root-qualification.sh apply ABS_TEST_BINARY APPROVED_SHA`; `verify`; `rollback` | Guarded disposable fixture under `/var/lib/swarma-linuxos-qualification`; prerequisites in the package README |
+| Shell/Python 3 | Owner-run opt-in root qualification; r1 pass recorded | `/usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin /usr/bin/dash /abs/path/root-qualification.sh apply ABS_TEST_BINARY APPROVED_SHA`; `verify`; `rollback` | Guarded disposable fixture; exact-build evidence and prerequisites in the package README |
 | C compiler | Native loader-entry regression fixture | `/usr/bin/cc -shared -fPIC -o PLANT_SO PLANT_C` (package test invokes it) | Temporary test-owned shared object and sentinel |
 
 The root qualification command above is its only supported entry, from the
 owner's trusted root shell. Keep the clean-launch prefix for `verify` and
-`rollback`; see the package README for the launcher trust boundary and pending
-privileged qualification.
+`rollback`; see the package README for the launcher trust boundary, historical
+r1 pass and remaining privileged qualification scope. The root test still skips
+without the owner's explicit setup; the open-inode/namespace qualification test
+remains a PENDING skip.
 
 The [A3 evidence implementation](docs/update-evidence.md) documents the protected
 transaction recorder, archive-chain verifier, fixed hook forms and separate

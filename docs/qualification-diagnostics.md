@@ -18,7 +18,11 @@ The [systemd v259 implementation](https://github.com/systemd/systemd/blob/v259/s
 explicitly blocks `openat2` because seccomp cannot inspect the indirect flags and
 mode structure. This supports the controlled observation; the original failed
 root invocation had no stage trace, so attributing that particular failure remains
-an inference until the corrected owner-run boot qualification succeeds.
+an inference about that original untraced invocation. The later
+[r2 owner-run result](root-qualification-evidence.md#r2-installation-and-qualification-unit)
+records initial and in-unit boot-mode qualification at `a5e99c4`, with 11/11
+checks and 11/11 verification on 2026-10-24. It does not retrospectively identify
+the earlier failure or qualify another binary, unit or host.
 
 The service artifact and its closed validator now require `RestrictSUIDSGID=no`.
 This removes that broad set-ID syscall restriction; it is a deliberate
@@ -177,7 +181,8 @@ Run heavy suites serialized on shared hosts with `GOMAXPROCS=2` and `-p 1`,
 and use a task-local TMPDIR. Retain numbered logs and exact commands/exit codes
 in task scratch.
 No full suite or privileged operation is required for these regressions.
-Root installation and end-to-end qualification remain owner-run validation.
+The recorded r2 installation/unit pass is owner-run evidence for its exact kit;
+current or changed deployments still need matching owner-run validation.
 A corrected delivery must regenerate the binary/unit/deployment pins and rerun
 initial qualification before boot renewal; editing an already pinned unit alone
 correctly fails the deployment digest checks.
