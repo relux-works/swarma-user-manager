@@ -281,24 +281,19 @@ No stale-instance-only fixture or setup failure discharges these subcases.
 The [protocol](spec/host-qualification-protocol.md#9-open-decisions-and-activation-gates)
 and empty [platform matrix](platforms/verified.md) are documentation proposals.
 They generalize the owner-run flow without changing the closed local record or
-admitting a host. Their explicit owner/maintainer decisions remain:
+admitting a host. The curator has decided Q1–Q8 of the protocol as recommended,
+**pending owner confirmation**. These decisions may still be overturned. They
+remain activation gates until implemented and qualified; nothing is activated.
 
-- Q1–Q2: dedicated host-attestation signer, trusted enrollment and custody; exact
-  versioned signature envelope, canonicalization, bounded schemas and key recovery.
-  Recommend owner-authorized separate-purpose keys and domain-separated Ed25519
-  over pinned CCJ-1 bytes; hardware identity requires qualified hardware evidence.
-- Q3–Q4: public validity/time, scoped revocation, index freshness and anti-rollback
-  policy. Recommend at most 30-day public validity plus immediate drift invalidation,
-  and signed sequenced revocations; these are proposals, not local-Q TTL changes.
-- Q5–Q6: class descriptor/compatibility and publishable proof retention. Recommend
-  exact versioned enforcement dimensions and consented sanitized evidence; no
-  inheritance from OS-family equality or disclosure of private logs.
-- Q7–Q8: independent class/test/trust/status review, bounded same-class publication
-  automation, and the platform-test catalog/accepted parity revision. Recommend
-  preauthorized verified routine attachments without per-host kit engineering;
-  new coverage and trust still require independent review. Future pool checks
-  cannot silently alter existing guarantee identifiers.
+- Q1: Dedicated per-host export key with owner approval and separate trusted enrollment; hardware binding only with separately qualified evidence, with software self-report limits explicit.
+- Q2: New closed versioned envelope, domain-separated Ed25519 over pinned CCJ-1 bytes, published bounds and positive/negative vectors, and explicit key rotation/recovery policy; existing codecs remain unchanged.
+- Q3: Public attestation validity at most 30 days, shorter where dependencies require it; drift invalidates the applicable claim immediately. This does not change the local-Q lifetime.
+- Q4: Signed sequenced revocation index with scoped authority, bounded freshness and anti-rollback; unknown or stale revocation means no current claim, while marked history is retained.
+- Q5: Conservative exact versioned classes across all class-defining dimensions; unequal dimensions never share a class, and compatibility can reuse test selection only, with fresh per-host results.
+- Q6: Owner preview and consent for minimized sanitized public evidence, retained through expiry plus a published audit window; no private-log disclosure or claim without publishable proof.
+- Q7: Independent review for a new class, test, trust or status change; preauthorized checked automation only for routine records of an approved class, through the normal protected publication flow.
+- Q8: The platform-test maintainers version the catalogue, including identifiers, tests, dependencies, finite evidence bounds, root/destructive-test authority and extensions; later pool checks cannot silently alter existing guarantees.
 
-Until these decisions and their proving tests are approved and implemented, no
-trusted generic signing/submission/publication service or verified matrix row
+Until owner confirmation, required reviews, implementation and proving tests,
+no trusted generic signing/submission/publication service or verified matrix row
 is claimed. Existing local boot, drift, update and admission gates remain.
