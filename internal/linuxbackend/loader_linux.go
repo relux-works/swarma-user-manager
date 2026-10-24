@@ -37,7 +37,7 @@ func (r *deploymentResolver) artifact(ctx context.Context, path string) (linuxos
 // This deliberately bounded glibc cache profile admits one unambiguous path
 // with no hwcap selection. Unreviewed cache formats/variants remain unsupported.
 func cacheResolve(b []byte, name string) (string, error) {
-	if cacheABIFlags() == 0 || len(b) < 48 || string(b[:20]) != "glibc-ld.so.cache1.1" || b[28] != 2 {
+	if !validCacheName(name) || cacheABIFlags() == 0 || len(b) < 48 || string(b[:20]) != "glibc-ld.so.cache1.1" || b[28] != 2 {
 		return "", qualification.ErrRequired
 	} // little-endian reviewed profile
 	n := uint64(binary.LittleEndian.Uint32(b[20:24]))
@@ -58,14 +58,24 @@ func cacheResolve(b []byte, name string) (string, error) {
 		}
 		return string(s[:end]), true
 	}
-	found := ""
+	found, previous := "", ""
 	for j := uint64(0); j < n; j++ {
 		row := b[48+24*j : 48+24*(j+1)]
 		k, ok := read(binary.LittleEndian.Uint32(row[4:8]))
-		if !ok {
+		if !ok || !validCacheName(k) {
 			return "", qualification.ErrRequired
 		}
-		if k != name {
+		// glibc 2.42 elf/dl-cache.c:189-251,329-332 searches a descending
+		// _dl_cache_libcmp table. Validate even unqueried rows; distinct byte
+		// spellings in one numeric equivalence class are unsupported.
+		if j > 0 {
+			cmp := cacheNameCompare(previous, k)
+			if cmp < 0 || cmp == 0 && previous != k {
+				return "", qualification.ErrRequired
+			}
+		}
+		previous = k
+		if cacheNameCompare(k, name) != 0 {
 			continue
 		}
 		v, ok := read(binary.LittleEndian.Uint32(row[8:12]))
@@ -81,6 +91,85 @@ func cacheResolve(b []byte, name string) (string, error) {
 		return "", errCacheMiss
 	}
 	return found, nil
+}
+
+// validCacheName bounds the domain where glibc's char/int comparison is
+// unambiguous: non-space printable ASCII and runs <= INT32_MAX on both supported
+// ABIs. Refuse rather than reproduce signed overflow or char-signedness effects.
+func validCacheName(name string) bool {
+	if name == "" {
+		return false
+	}
+	for i := 0; i < len(name); {
+		if name[i] < '!' || name[i] > '~' {
+			return false
+		}
+		if !cacheDigit(name[i]) {
+			i++
+			continue
+		}
+		value := uint32(0)
+		for i < len(name) && cacheDigit(name[i]) {
+			digit := uint32(name[i] - '0')
+			if value > (uint32(1<<31-1)-digit)/10 {
+				return false
+			}
+			value = value*10 + digit
+			i++
+		}
+	}
+	return true
+}
+func cacheDigit(b byte) bool { return b >= '0' && b <= '9' }
+
+// cacheNameCompare follows _dl_cache_libcmp's ordering, including numeric runs
+// and digits sorting after non-digits, on names admitted by validCacheName.
+// Source: https://github.com/bminor/glibc/blob/glibc-2.42/elf/dl-cache.c#L339-L374
+// Cache generation reverses this order: elf/cache.c:412-415.
+func cacheNameCompare(a, b string) int {
+	i, j := 0, 0
+	for i < len(a) && j < len(b) {
+		ad, bd := cacheDigit(a[i]), cacheDigit(b[j])
+		if ad && bd {
+			av, bv := uint32(0), uint32(0)
+			for i < len(a) && cacheDigit(a[i]) {
+				av = av*10 + uint32(a[i]-'0')
+				i++
+			}
+			for j < len(b) && cacheDigit(b[j]) {
+				bv = bv*10 + uint32(b[j]-'0')
+				j++
+			}
+			if av < bv {
+				return -1
+			}
+			if av > bv {
+				return 1
+			}
+		} else {
+			if ad {
+				return 1
+			}
+			if bd {
+				return -1
+			}
+			if a[i] < b[j] {
+				return -1
+			}
+			if a[i] > b[j] {
+				return 1
+			}
+			i++
+			j++
+		}
+	}
+	if i < len(a) {
+		return 1
+	}
+	if j < len(b) {
+		return -1
+	}
+	return 0
 }
 
 // Only the current reviewed libc6 ABI is supported. A cache entry for another

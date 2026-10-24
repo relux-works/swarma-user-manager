@@ -143,9 +143,10 @@ continuations, NUL/CR, invalid UTF-8 and unsupported syntax refuse.
 
 `CaptureImplementationClosure` reads every ELF `DT_NEEDED` and `PT_INTERP`
 transitively, hashes both resolved paths and bytes, and refuses unresolved,
-unsafe, non-ELF or over-budget objects. RPATH/RUNPATH and alternative dependency
-or audit tags are unsupported. `ELFResolver` must implement the actual reviewed
-loader resolution and include its cache/search/hwcaps/preload configuration in
+unsafe, non-ELF or over-budget objects. Clean absolute requester-only RUNPATH is
+supported by the [bounded loader profile](#reviewed-deployment-schema);
+RPATH and alternative dependency or audit tags refuse. `ELFResolver` must
+implement the actual reviewed loader resolution and include its cache/search/hwcaps/preload configuration in
 the configuration closure. These requirements are explicit capabilities for the
 production Environment; a caller-selected SONAME map or short artifact list is not
 production closure evidence. `CaptureConfigurationClosure` hashes a reviewed
@@ -590,6 +591,16 @@ section decoys and mismatches refuse. ELF objects must match the reviewed native
 64-bit little-endian amd64/arm64 ABI. Only the reviewed new-format little-endian
 cache with matching libc6 ABI flags and zero legacy OS-version field is supported;
 unknown formats, ambiguous choices and `/etc/ld.so.preload` refuse.
+All cache keys must be in descending `_dl_cache_libcmp` order. Distinct key
+spellings that compare equal numerically refuse, even outside the requested
+name; identical duplicate keys must still yield one unambiguous supported path.
+Lookup uses the same numeric comparison (so a unique `libx.so.1` key can answer
+`libx.so.01`). Keys and queries are limited to non-space printable ASCII, with
+each digit run at most `2147483647`, avoiding glibc signed-int overflow and char-signedness
+ambiguities. Unsupported tables or queries refuse rather than become cache misses.
+This follows glibc 2.42 [binary search/equal-key scanning](https://github.com/bminor/glibc/blob/glibc-2.42/elf/dl-cache.c#L189-L251),
+[comparison and search direction](https://github.com/bminor/glibc/blob/glibc-2.42/elf/dl-cache.c#L329-L374),
+and [descending cache generation](https://github.com/bminor/glibc/blob/glibc-2.42/elf/cache.c#L412-L438).
 
 Every lookup is reconstructed and compared with all stored locations, links and
 bytes during resolver construction and dependency traversal. The local guard
