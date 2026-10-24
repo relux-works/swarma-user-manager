@@ -101,6 +101,10 @@ or backend access until the Keymaker provision/confirm contract is accepted.
 
 The standalone [Linux package](internal/linuxos/README.md) implements station
 mechanisms; its caller still owns journal authority, fences and activation.
+Receipt primitives add exact reserved-identity restoration, deterministic owned
+stages, descriptor observations, owned quarantine and local policy/persistence
+checks. Their trusted-input boundaries and pending root/provider qualification
+are documented in the package README; observations never establish provenance.
 
 | Tool | Purpose | Command / entry point | Output |
 |---|---|---|---|

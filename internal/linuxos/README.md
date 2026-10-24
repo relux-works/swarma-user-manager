@@ -16,6 +16,10 @@ There is no package-global mutable state.
 | API | Contract and specification |
 |---|---|
 | `Allocate`, `Range`, `JournalView`, `Directory`, `NSS` | Next free round-robin UID=GID, consulting both journal reservation sets and both directory namespaces; §4. Caller persists the returned UID as its cursor. |
+| `RestoreAllocation`, `RestoreEvidence`, `Restoration.MissingCommands` | Exact reserved paired UID/GID, name/home and lifetime restoration from authenticated durable inputs; no allocation or cursor/hold change. Independent original account/group receipts required for present objects. [Receipts §5](../../spec/station-effect-receipts.md#5-exact-reserved-identity-restoration). |
+| `ObserveAccounts`, `AccountDirectory`, `AccountSet` | Bounded protected local passwd/group/shadow reads plus independent complete qualified NSS agreement. Observes account/group fields and memberships; never confers provenance. Missing provider refuses. |
+| `EffectNames`, `Dir.CreateStage`, `OwnedStage.Populate`, `Publish`, `Quarantine`, `Identity`, `Close`, `Dir.Observe`, `FSIdentity` | Deterministic `stage-<key>` / `q-<key>`, exclusive creation, live owned handles, exact descriptor identities/digests, separately admitted population/publication and root-only owned quarantine. [Receipts §3](../../spec/station-effect-receipts.md#3-object-operations-and-quarantine). |
+| `CheckPolicyFile`, `CheckPersistenceDenial`, `Qualification` | Fresh `ok` / `failed(reason)` / `unknown` checks of policy protection, cron/at deny coverage and allow precedence, and absent linger markers. [Receipts §6](../../spec/station-effect-receipts.md#6-accepted-local-v0-authority-sources). |
 | `Allocation.Commands`, `RetirementCommands`, `RunAccountTool` | Closed exact vectors for groupadd/useradd/userdel/groupdel, fixed absolute executables, empty environment, cwd `/`; §§4–5. Tool success still requires caller postcondition checks. |
 | `OpenRoot`, `Dir.OpenDirectory`, `Close` | Pinned descriptors, no symlink traversal. Explicit mount transitions are allowed only while acquiring a configured root; descendant transitions refuse. Shared sticky ancestors permit inventory, never publication. |
 | `StationManifest`, `Dir.Install`, `Dir.ReplaceManaged`, `Dir.Verify` | Private staging, root:S scaffold modes, approved control bytes, atomic publication/replacement, stored ACL/capability refusal and actual SHA-256 digests; §§7/10. |
@@ -49,6 +53,62 @@ establish coverage, and differing/unreadable links return `unknown`.
 Budgets bound cooperative work, not stuck kernel syscalls. A deletion batch that
 cannot remove any entry returns `delete_budget_insufficient`; retain the fence
 and increase the entry budget instead of retrying identical zero-work batches.
+
+## Receipt primitive boundary
+
+These APIs do not encode, authenticate or persist the v2 effect store. The trusted
+adapter verifies the original principal/request/generation, reservation and quota,
+intent/key/attempt, policy versions, receipt references, resolved execution,
+current authorization and continuously maintained generation/ingress fences.
+`RestoreEvidence` is never accepted from helper request JSON. It preserves the
+existing paired UID=GID allocation policy and refuses identities outside it.
+`IdentityReceipt` carries one original `account_create` or `group_create` proof;
+their keys can differ from the current restoration key. Complete local protected
+DB and qualified NSS observations must agree independently. The old boolean
+`NSS` collision adapter does not implement the new complete `AccountDirectory`:
+a production provider, its membership/completeness guarantees, cancellation and
+account-database exclusion still require separate qualification. A provider error
+or unavailable shadow database refuses; there is no local-only fallback.
+
+Persist immutable intent and flight before **each** `CreateStage`, `Populate`,
+`Publish` or `Quarantine` call, and persist the returned observation as its receipt
+before a dependent write. The staging parent must be protected root:root 0700;
+final home names remain the exact original station names, not hashes. Population
+verifies the approved manifest and flushes files and every containing directory.
+Publication/quarantine use same-filesystem `RENAME_NOREPLACE` and fsync both parents.
+Sync/observation errors after rename retain the known moved state for reconciliation;
+errors never establish absence or authorize repeating a write.
+
+`OwnedStage` is a live exclusively created object handle: ordinary observation
+cannot construct one. It follows the original inode through publication and an
+admitted quarantine move; keep its source/destination descriptors open. It cannot
+be reconstructed after restart from a matching name/inode/digest. Receipt-backed
+restart continuity needs an independently qualified protected recovery adapter;
+until then, lost handles and unproved objects remain in place for maintenance.
+There is no release API, automatic expiry or station override. Core retains the
+logical incident and UID/GID/name/home/quota reservations; observation grants no
+permission to move, chmod or delete an unproved object. Legacy `Install` and
+`ReplaceManaged` remain older monolithic primitives and are not v2 receipt adapters.
+
+`CheckPolicyFile` checks the file's root:root 0600 protection, no aliases/ACLs and
+protected ancestry, not a policy schema or a `qualified` flag. Scheduler checks
+require the **complete policy-derived list of station names**, rechecked for every
+reserved/new name: numeric ranges do not determine usernames. Each name must be
+in both deny files and absent from effective allow admission. Only the qualified
+one-exact-name-per-line scheduler file layout is supported. Missing, unsafe,
+malformed or unreadable sources and cancellation never return ok. Linger absence
+is not proof of no active user manager/session: retain the existing systemd and
+process inventory checks, fresh source version binding and activation guard.
+These read results confer neither cleanup nor activation authority.
+
+Root qualification still PENDING: real protected account/NSS/shadow agreement and
+restoration; root:S stage population, same-filesystem root quarantine and crash
+recovery durability; deployed policy schema/root-run evidence; actual cron/at
+parser and allow precedence, every station-name denial, logind/no linger and
+no-running-manager restrictions. The disposable harness gains only a read-only
+check of its existing protected policy file. Persistence installation and physical
+quarantine/restart campaigns would widen its documented scope and are listed
+separately rather than silently added. No root script was run for this change.
 
 ## Tools and evidence
 

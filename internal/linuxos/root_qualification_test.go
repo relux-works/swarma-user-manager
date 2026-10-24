@@ -205,6 +205,11 @@ func TestRootQualification(t *testing.T) {
 	if e = qualificationRead(root, "policy.json", &policy); e != nil {
 		t.Fatal(e)
 	}
+	// This checks root:root 0600 and protected ancestry in the real root fixture;
+	// it does not qualify a deployed policy schema or persistence configuration.
+	if q := CheckPolicyFile(context.Background(), root, "policy.json", 1<<20); q.State != QualificationOK {
+		t.Fatal("root policy protection", q.Reason, q.Err)
+	}
 	if policy.Min == 0 || policy.Max < policy.Min {
 		t.Fatal("invalid qualification range")
 	}

@@ -50,3 +50,17 @@ is accepted; policy cannot enable it. The binary has no OS
 backend and refuses new work; fake tests do not close these deployment gates.
 A writer crash retaining `writer.pending` requires the generation format's
 explicit root reconciliation before same-effect recovery can proceed.
+
+## Linux receipt qualification gates
+
+The [Linux receipt primitive boundary](internal/linuxos/README.md#receipt-primitive-boundary)
+now separates restored identity evidence, live exclusive stage handles and fresh
+qualification observations. Production still needs an authenticated core adapter,
+a qualified complete NSS/membership provider with protected local account-database
+agreement/exclusion, and receipt-backed restart continuity. No name/inode-only
+reconstruction of lost ownership handles is provided. Unproved objects remain
+untouched in logical quarantine; root maintenance release is outside this API.
+Root:S installation/quarantine and crash durability, deployed policy schema and
+root-run evidence, effective cron/at denial/allow precedence for every station name,
+and logind/no-running-manager checks remain pending host qualification. These
+checks do not enable bump, policy installation or account activation.
