@@ -675,12 +675,9 @@ func (h *ProductionEnvironment) Inventory(ctx context.Context, a manager.Account
 	if e != nil {
 		return nil, e
 	}
-	for _, v := range []struct{ path, kind string }{{i.Cron, "cron"}, {i.SystemCron, "system-cron"}, {i.At, "at"}} {
-		d, e := open(v.path)
-		if e != nil {
-			return nil, e
-		}
-		s.Spools = append(s.Spools, linuxos.Spool{Root: d, Kind: v.kind})
+	s.Spools, e = inventorySpools(ctx, i, open)
+	if e != nil {
+		return nil, e
 	}
 	optional := func(paths []string) ([]*linuxos.Dir, []string, error) {
 		out := []*linuxos.Dir{}
@@ -792,7 +789,7 @@ func (h *ProductionEnvironment) CheckAll(ctx context.Context, p manager.Policy, 
 	q.DynamicUserRanges = checkResult(i.Validate(p) == nil)
 	q.NoLauncher = checkResult(p.NoLauncher && checkNoLauncher(ctx, m, l) == nil)
 	_, accounts, e := h.reservedNames(ctx)
-	restricted := e == nil && provider != nil
+	restricted := e == nil && provider != nil && checkInventorySpools(ctx, m.Inventory) == nil
 	ctx = context.WithValue(ctx, issuanceDirectoryKey{}, issuanceDirectory{i: i, names: names})
 	if restricted {
 		snapshot, x := runtime.Enumerate(ctx, moduleNames(i.NSSModules), l)

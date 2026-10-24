@@ -3,7 +3,6 @@
 package linuxos
 
 import (
-	"bytes"
 	"context"
 	"reflect"
 	"sort"
@@ -159,17 +158,12 @@ func (d *QualifiedDirectory) Identity(ctx context.Context, uid, gid uint32, name
 	if e != nil {
 		return zero, e
 	}
-	local := NSSDatabases{}
-	for _, db := range []string{"passwd", "group", "shadow"} {
-		b, e := protectedRead(c, d.etc, db, 8<<20, db == "shadow")
-		if e != nil {
-			return zero, refusal("directory_unknown", db, e)
-		}
-		local[db] = b
-	}
-	if e = validateDirectoryDatabases(local, d.limits.Entries, false); e != nil {
+	ranges := []IDInterval{d.inputs.UIDRange, d.inputs.GIDRange}
+	observed, e := captureAccountDatabases(c, d.etc, d.limits, ranges)
+	if e != nil {
 		return zero, e
 	}
+	local := observed.data
 	remote, e := d.runtime.Enumerate(c, names, d.limits)
 	if e != nil {
 		return zero, refusal("directory_unknown", "nss_enumeration", e)
@@ -277,7 +271,7 @@ func (d *QualifiedDirectory) Identity(ctx context.Context, uid, gid uint32, name
 	}
 	// Reuse the established local protection and identity comparison boundary.
 	view := enumeratedDirectory{remote, d.limits.Entries}
-	result, e := ObserveAccounts(c, d.etc, ids[0], view, d.limits)
+	result, e := ObserveAccounts(c, d.etc, ids[0], view, d.limits, ranges...)
 	if e != nil {
 		return zero, e
 	}
@@ -286,11 +280,9 @@ func (d *QualifiedDirectory) Identity(ctx context.Context, uid, gid uint32, name
 	}
 	// The deployment lock excludes cooperating writers only. Re-read all raw
 	// local DB bytes after the external collector and final module/config check.
-	for _, db := range []string{"passwd", "group", "shadow"} {
-		current, err := protectedRead(c, d.etc, db, 8<<20, db == "shadow")
-		if err != nil || !bytes.Equal(current, local[db]) {
-			return zero, refusal("directory_unknown", "database_drift", err)
-		}
+	current, err := captureAccountDatabases(c, d.etc, d.limits, ranges)
+	if err != nil || !observed.unchanged(current) {
+		return zero, refusal("directory_unknown", "database_drift", err)
 	}
 	if e = c.Err(); e != nil {
 		return zero, e

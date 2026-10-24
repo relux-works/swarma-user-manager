@@ -92,7 +92,7 @@ func TestReviewPartialProcessEvidence(t *testing.T) {
 func TestReviewPartialSchedulerEvidence(t *testing.T) {
 	uid := uint32(os.Getuid()) + 100000
 	paths := []string{t.TempDir(), t.TempDir(), t.TempDir()}
-	sources := []Spool{{fixtureDir(t, paths[0]), "cron"}, {fixtureDir(t, paths[1]), "system-cron"}, {fixtureDir(t, paths[2]), "at"}}
+	sources := []Spool{{Root: fixtureDir(t, paths[0]), Kind: "cron"}, {Root: fixtureDir(t, paths[1]), Kind: "system-cron"}, {Root: fixtureDir(t, paths[2]), Kind: "at"}}
 	target := filepath.Join(paths[1], "system")
 	good := "* * * * * fixture true\n"
 	if err := os.WriteFile(target, []byte(good), 0600); err != nil {

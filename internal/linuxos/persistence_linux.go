@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -23,7 +24,42 @@ type Names interface {
 type Spool struct {
 	Root *Dir
 	Kind string
+	// Exactly one source: a present root, or a protected existing parent and
+	// missing leaf. Absence is checked on EVERY Scheduler observation.
+	Absent *ProtectedArtifact
 } // cron, system-cron or at
+
+func (s Spool) Check(ctx context.Context) error {
+	if e := ctx.Err(); e != nil {
+		return e
+	}
+	if s.Kind != "cron" && s.Kind != "system-cron" && s.Kind != "at" {
+		return refusal("inventory_unknown", "scheduler_kind", nil)
+	}
+	if s.Absent == nil {
+		if s.Root == nil {
+			return refusal("inventory_unknown", "spool_root", nil)
+		}
+		// Present spools retain the existing scanner semantics; distribution cron
+		// roots can be root:crontab 1730. Only absence requires a protected parent.
+		return nil
+	}
+	a := s.Absent
+	if s.Root != nil || s.Kind == "system-cron" || a.Directory == nil || !filepath.IsAbs(a.Path) || filepath.Clean(a.Path) != a.Path || filepath.Base(a.Path) != a.Name || !component(a.Name) {
+		return refusal("inventory_unknown", "spool_absence", nil)
+	}
+	if e := a.Directory.protected(); e != nil {
+		return e
+	}
+	f, e := child(a.Directory.f, a.Name, unix.O_PATH, 0)
+	if e == nil {
+		return errors.Join(refusal("inventory_unknown", "spool_appeared", nil), f.Close())
+	}
+	if !errors.Is(e, unix.ENOENT) {
+		return e
+	}
+	return ctx.Err()
+}
 func Scheduler(ctx context.Context, uid uint32, sources []Spool, names Names, l Limits) Result {
 	objects := []Object{}
 	c, cancel, e := budget(ctx, l)
@@ -37,10 +73,16 @@ func Scheduler(ctx context.Context, uid uint32, sources []Spool, names Names, l 
 	classes := map[string]bool{}
 	count := 0
 	for _, source := range sources {
-		if source.Root == nil {
-			return result("cron_at", objects, refusal("inventory_unknown", "spool_root", nil))
+		if e := source.Check(c); e != nil {
+			return result("cron_at", objects, e)
+		}
+		if classes[source.Kind] {
+			return result("cron_at", objects, refusal("inventory_unknown", "scheduler_duplicate", nil))
 		}
 		classes[source.Kind] = true
+		if source.Absent != nil {
+			continue
+		}
 		labels, e := list(source.Root.f, l.Entries-count)
 		if e != nil {
 			return result("cron_at", objects, e)

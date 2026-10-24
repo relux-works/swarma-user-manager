@@ -101,6 +101,9 @@ func newSystemdFixture(t *testing.T) *systemdFixture {
 	}
 	src := RangeSource{URL: "https://www.freedesktop.org/software/systemd/man/257/systemd.exec.html", Revision: "fixture-only", SHA256: digestBytes(source)}
 	f.manifest = SystemdClosureManifest{Format: "station-systemd-closure/1", Directories: []UserDBDirectory{{"/etc/userdb", "absent"}, {"/run/host/userdb", "absent"}, {"/run/userdb", "absent"}, {"/usr/lib/userdb", "absent"}}, Services: []UserDBService{{Name: "io.systemd.DynamicUser", ImplementationDigest: impl, ConfigurationDigest: config, UIDRanges: []IDInterval{{61184, 65519}}, GIDRanges: []IDInterval{{61184, 65519}}, Forwards: []string{}, Source: src}}, Synthesis: UserDBSynthesis{UIDRanges: []IDInterval{{0, 0}, {65534, 65534}}, GIDRanges: []IDInterval{{0, 0}, {65534, 65534}}, Source: src}}
+	if e := os.WriteFile(filepath.Join(root, "etc/gshadow"), nil, 0600); e != nil {
+		t.Fatal(e)
+	}
 	f.runtime = &SystemdNSSRuntime{Files: FilesNSSRuntime{Collector: a("library.so"), Library: a("library.so"), Resolver: resolver, Configuration: []ProtectedArtifact{}}, Library: a("library.so"), Manifest: a("closure.json"), Etc: fixtureDir(t, filepath.Join(root, "etc")), Run: fixtureDir(t, filepath.Join(root, "run")), UsrLib: fixtureDir(t, filepath.Join(root, "usr/lib")), Providers: map[string]UserDBProviderClosure{"io.systemd.DynamicUser": provider}, Sources: map[string]ProtectedArtifact{src.URL: a("source.txt")}}
 	f.socket(t, "io.systemd.DynamicUser")
 	f.writeManifest(t)

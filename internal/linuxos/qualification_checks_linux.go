@@ -38,6 +38,13 @@ func qualificationError(reason string, err error) Qualification {
 // protectedRead uses the anchor's protected ancestry and exact no-follow file
 // descriptor. Owner mapping differs from root only in private package fixtures.
 func protectedRead(ctx context.Context, d *Dir, name string, max int64, policy bool) (out []byte, err error) {
+	return protectedReadChecked(ctx, d, name, max, func(s unix.Stat_t) bool {
+		return s.Gid == d.group && s.Mode&0022 == 0 && (!policy || s.Mode&07777 == 0600)
+	}, nil)
+}
+
+// The caller-specific predicate cannot relax type, owner, link, ACL or race checks.
+func protectedReadChecked(ctx context.Context, d *Dir, name string, max int64, protection func(unix.Stat_t) bool, observed *unix.Stat_t) (out []byte, err error) {
 	if e := ctx.Err(); e != nil {
 		return nil, e
 	}
@@ -56,7 +63,7 @@ func protectedRead(ctx context.Context, d *Dir, name string, max int64, policy b
 	if e != nil {
 		return nil, e
 	}
-	if s.Mode&unix.S_IFMT != unix.S_IFREG || s.Nlink != 1 || s.Uid != d.owner || s.Gid != d.group || s.Mode&0022 != 0 || policy && s.Mode&07777 != 0600 {
+	if s.Mode&unix.S_IFMT != unix.S_IFREG || s.Nlink != 1 || s.Uid != d.owner || !protection(s) {
 		return nil, refusal("qualification_failed", "file_protection", nil)
 	}
 	f, e := child(d.f, name, unix.O_RDONLY, 0)
@@ -87,6 +94,9 @@ func protectedRead(ctx context.Context, d *Dir, name string, max int64, policy b
 	}
 	if e = ctx.Err(); e != nil {
 		return nil, e
+	}
+	if observed != nil {
+		*observed = after
 	}
 	return out, nil
 }

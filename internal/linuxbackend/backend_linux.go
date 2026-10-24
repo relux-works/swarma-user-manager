@@ -75,7 +75,7 @@ func NewWithEnvironment(p manager.Policy, h Environment, evidence EvidenceStore)
 		if b.host != nil {
 			nss = b.host.Accounts()
 		}
-		return linuxos.ObserveAccounts(ctx, d, id, nss, l)
+		return linuxos.ObserveAccounts(ctx, d, id, nss, l, linuxos.IDInterval{Min: uint32(p.UIDMin), Max: uint32(p.UIDMax)}, linuxos.IDInterval{Min: uint32(p.GIDMin), Max: uint32(p.GIDMax)})
 	}
 	b.restore = func(ctx context.Context, e linuxos.RestoreEvidence, l linuxos.Limits) (linuxos.Restoration, error) {
 		d, err := linuxos.OpenRoot("/etc")
@@ -87,7 +87,7 @@ func NewWithEnvironment(p manager.Policy, h Environment, evidence EvidenceStore)
 		if b.host != nil {
 			nss = b.host.Accounts()
 		}
-		return linuxos.RestoreAllocation(ctx, policyRange(p), filepath.Join(p.Root, "workers"), e, d, nss, l)
+		return linuxos.RestoreAllocation(ctx, policyRange(p), filepath.Join(p.Root, "workers"), e, d, nss, l, linuxos.IDInterval{Min: uint32(p.UIDMin), Max: uint32(p.UIDMax)}, linuxos.IDInterval{Min: uint32(p.GIDMin), Max: uint32(p.GIDMax)})
 	}
 	b.removals = func(ctx context.Context, e linuxos.RestoreEvidence, l linuxos.Limits) ([]linuxos.Command, error) {
 		d, err := linuxos.OpenRoot("/etc")
@@ -99,7 +99,7 @@ func NewWithEnvironment(p manager.Policy, h Environment, evidence EvidenceStore)
 		if b.host != nil {
 			nss = b.host.Accounts()
 		}
-		return linuxos.RemovalCommands(ctx, policyRange(p), filepath.Join(p.Root, "workers"), e, d, nss, l)
+		return linuxos.RemovalCommands(ctx, policyRange(p), filepath.Join(p.Root, "workers"), e, d, nss, l, linuxos.IDInterval{Min: uint32(p.UIDMin), Max: uint32(p.UIDMax)}, linuxos.IDInterval{Min: uint32(p.GIDMin), Max: uint32(p.GIDMax)})
 	}
 	return b
 }

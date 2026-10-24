@@ -121,17 +121,24 @@ type NoLauncherProfile struct {
 	Configuration []FilePin `json:"configuration"`
 }
 type InventoryProfile struct {
-	Format      string   `json:"format"`
-	Files       []string `json:"files"`
-	Shm         string   `json:"shm"`
-	Mqueue      string   `json:"mqueue"`
-	Cron        string   `json:"cron"`
-	SystemCron  string   `json:"system_cron"`
-	At          string   `json:"at"`
-	Linger      string   `json:"linger"`
-	UserUnits   []string `json:"user_units"`
-	UserRuntime []string `json:"user_runtime"`
+	Format      string       `json:"format"`
+	Files       []string     `json:"files"`
+	Shm         string       `json:"shm"`
+	Mqueue      string       `json:"mqueue"`
+	Cron        SpoolProfile `json:"cron"`
+	SystemCron  string       `json:"system_cron"`
+	At          SpoolProfile `json:"at"`
+	Linger      string       `json:"linger"`
+	UserUnits   []string     `json:"user_units"`
+	UserRuntime []string     `json:"user_runtime"`
 }
+
+// SpoolProfile never infers absence from a failed open. The reviewed state is explicit.
+type SpoolProfile struct {
+	State string `json:"state"`
+	Path  string `json:"path"`
+}
+
 type SkeletonControl struct {
 	Path       string `json:"path"`
 	Source     string `json:"source"`
@@ -217,8 +224,13 @@ func (m DeploymentManifest) validate(p manager.Policy) error {
 	if i.Format != "local-v0-reviewed-host-scope/1" || !paths(i.Files, true) || !paths(i.UserUnits, true) || !paths(i.UserRuntime, true) {
 		return qualification.ErrRequired
 	}
-	for _, v := range []string{i.Shm, i.Mqueue, i.Cron, i.SystemCron, i.At, i.Linger} {
+	for _, v := range []string{i.Shm, i.Mqueue, i.SystemCron, i.Linger} {
 		if !absolute(v) {
+			return qualification.ErrRequired
+		}
+	}
+	for _, spool := range []SpoolProfile{i.Cron, i.At} {
+		if !absolute(spool.Path) || spool.Path == "/" || (spool.State != "present" && spool.State != "absent") {
 			return qualification.ErrRequired
 		}
 	}

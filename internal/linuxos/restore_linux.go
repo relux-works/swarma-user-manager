@@ -73,7 +73,9 @@ func validReserved(r Range, homeRoot string, id ReservedIdentity) bool {
 // Present objects need the exact durable receipt. Absence permits only a
 // resolved, freshly admitted creation of this original intent. Paired UID=GID
 // remains the existing allocation policy; other identities require new policy.
-func RestoreAllocation(ctx context.Context, r Range, homeRoot string, e RestoreEvidence, etc *Dir, nss AccountDirectory, l Limits) (Restoration, error) {
+// stationRanges includes every additional full policy interval when r is only
+// the paired allocation intersection.
+func RestoreAllocation(ctx context.Context, r Range, homeRoot string, e RestoreEvidence, etc *Dir, nss AccountDirectory, l Limits, stationRanges ...IDInterval) (Restoration, error) {
 	zero := Restoration{}
 	id := e.Reservation
 	if len(e.Receipts) > 2 || !validReserved(r, homeRoot, id) || id != e.Intent || !validEffectKey(e.Key) || !e.Holds.ReservedUIDs[id.UID] || !e.Holds.ReservedGIDs[id.GID] {
@@ -82,7 +84,8 @@ func RestoreAllocation(ctx context.Context, r Range, homeRoot string, e RestoreE
 	if !e.AttemptResolved {
 		return zero, refusal("unknown_execution", "restore", nil)
 	}
-	observed, err := ObserveAccounts(ctx, etc, id, nss, l)
+	stationRanges = append([]IDInterval{{r.Min, r.Max}}, stationRanges...)
+	observed, err := ObserveAccounts(ctx, etc, id, nss, l, stationRanges...)
 	if err != nil {
 		return zero, err
 	}
@@ -166,9 +169,11 @@ func (r Restoration) MissingCommands() ([]Command, error) {
 func numeric(s string) (uint32, error) { n, e := strconv.ParseUint(s, 10, 32); return uint32(n), e }
 
 // ObserveAccounts compares protected local passwd/group/shadow against the
-// independently qualified NSS provider. It returns no receipt/provenance claim.
+// independently qualified NSS provider. Trusted stationRanges must cover every
+// configured UID/GID interval to enable distribution-shadow group access.
+// It returns no receipt/provenance claim.
 // Duplicates, provider errors, unsafe/missing DBs or disagreements all refuse.
-func ObserveAccounts(ctx context.Context, etc *Dir, id ReservedIdentity, nss AccountDirectory, l Limits) (AccountSet, error) {
+func ObserveAccounts(ctx context.Context, etc *Dir, id ReservedIdentity, nss AccountDirectory, l Limits, stationRanges ...IDInterval) (AccountSet, error) {
 	var zero AccountSet
 	c, cancel, e := budget(ctx, l)
 	if e != nil {
@@ -178,14 +183,11 @@ func ObserveAccounts(ctx context.Context, etc *Dir, id ReservedIdentity, nss Acc
 	if nss == nil || etc == nil || id.UID == 0 || id.GID == 0 || !stationName(id.Name) {
 		return zero, refusal("directory_unknown", "sources", nil)
 	}
-	files := map[string][]byte{}
-	for _, name := range []string{"passwd", "group", "shadow"} {
-		b, e := protectedRead(c, etc, name, 8<<20, name == "shadow")
-		if e != nil {
-			return zero, refusal("directory_unknown", name, e)
-		}
-		files[name] = b
+	observed, e := captureAccountDatabases(c, etc, l, stationRanges)
+	if e != nil {
+		return zero, e
 	}
+	files := observed.data
 	local, e := parseLocalAccounts(files, id, l.Entries)
 	if e != nil {
 		return zero, e
@@ -202,6 +204,10 @@ func ObserveAccounts(ctx context.Context, etc *Dir, id ReservedIdentity, nss Acc
 	}
 	if !reflect.DeepEqual(local, remote) {
 		return zero, refusal("directory_unknown", "local_nss_disagreement", nil)
+	}
+	current, err := captureAccountDatabases(c, etc, l, stationRanges)
+	if err != nil || !observed.unchanged(current) {
+		return zero, refusal("directory_unknown", "database_drift", err)
 	}
 	return local, nil
 }

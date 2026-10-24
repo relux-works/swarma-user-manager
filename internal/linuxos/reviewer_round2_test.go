@@ -26,7 +26,7 @@ func TestRound2SchedulerDoesNotFabricateErrorUID(t *testing.T) {
 	for _, kind := range []string{"cron", "system-cron"} {
 		t.Run(kind, func(t *testing.T) {
 			paths := []string{t.TempDir(), t.TempDir(), t.TempDir()}
-			sources := []Spool{{fixtureDir(t, paths[0]), "cron"}, {fixtureDir(t, paths[1]), "system-cron"}, {fixtureDir(t, paths[2]), "at"}}
+			sources := []Spool{{Root: fixtureDir(t, paths[0]), Kind: "cron"}, {Root: fixtureDir(t, paths[1]), Kind: "system-cron"}, {Root: fixtureDir(t, paths[2]), Kind: "at"}}
 			index := 0
 			contents := "* * * * * true\n"
 			if kind == "system-cron" {

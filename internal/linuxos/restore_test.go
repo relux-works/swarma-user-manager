@@ -30,7 +30,7 @@ func restorationFixture(t *testing.T) (*Dir, RestoreEvidence, AccountSet) {
 	e.Holds = JournalView{Cursor: n + 2, ReservedUIDs: map[uint32]bool{n: true}, ReservedGIDs: map[uint32]bool{n: true}}
 	path := t.TempDir()
 	etc := fixtureDir(t, path)
-	for _, file := range []string{"passwd", "group", "shadow"} {
+	for _, file := range []string{"passwd", "group", "shadow", "gshadow"} {
 		if err := os.WriteFile(filepath.Join(path, file), nil, 0600); err != nil {
 			t.Fatal(err)
 		}

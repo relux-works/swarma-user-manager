@@ -123,8 +123,20 @@ per-target comparison. Missing databases/providers, duplicate identities,
 incomplete enumeration and drift return `directory_unknown` with no partial
 account observation. This profile requires shadow-backed (`x`) passwd entries;
 an inline passwd credential cannot be hidden by a locked shadow entry. Complete agreed absence returns an empty observation; it
-does not confer a creation receipt. Shadow is required to be root:root 0600 by
-this initial qualified profile, with protected ancestors and no ACLs/capabilities.
+does not confer a creation receipt. Shadow and gshadow alone accept root
+ownership, exact mode 0600 or 0640,
+and group root or the distribution's `shadow` group. The latter is resolved from
+the captured local group database, must have a unique nonzero system GID below
+1000 outside every configured station UID/GID range, and must have empty member
+lists in both group and gshadow (and no gshadow administrators). Missing or
+ambiguous membership evidence refuses. Standalone `ObserveAccounts` callers must
+supply all trusted station intervals to enable this group exception. Both
+files remain single-link regular files under protected ancestors, without ACLs
+or capabilities. The private observation retains accepted GIDs, modes, identities
+and raw database bytes; post-enumeration recapture refuses protection or membership
+drift and returns no partial account observation. Raw shadow/gshadow contents
+never enter the NSS or public account result. Policy files still require
+root:root 0600; no other file inherits the database exception.
 
 | Module | Reviewed implementation boundary | Qualification state |
 |---|---|---|
@@ -692,7 +704,17 @@ are not pinned by `service_roots`.
 
 `inventory` contains `format:"local-v0-reviewed-host-scope/1"`, `files` (nonempty
 sorted outside-home roots), `shm`, `mqueue`, `cron`, `system_cron`, `at`, `linger`,
-`user_units` and `user_runtime` (nonempty sorted arrays). All are absolute paths;
+`user_units` and `user_runtime` (nonempty sorted arrays). `cron` and `at` are
+closed `{state,path}` objects: `state` must be `present` or `absent`, and `path`
+must be a clean absolute non-root path. `present` opens and scans the spool as
+before. `absent` requires an existing protected parent and a leaf returning
+ENOENT; a missing parent, unreadable parent, symlink or other existing leaf
+refuses. Qualification checks this even with no reserved accounts, and every
+inventory rechecks the absence. A spool appearing later produces unknown until
+the deployment is regenerated and requalified with `present`; jobs are never
+silently omitted. Both cron and at may be explicitly absent. `system_cron`
+remains a required present directory path. Legacy string cron/at entries refuse;
+`station-deployment/1` changes in place. Other entries are absolute paths;
 per-user unit/runtime paths may contain `{name}` or `{uid}` substitutions using
 only validated reserved identities. Absent per-user roots require protected
 absence proofs and are rechecked. Complete process, System V IPC and POSIX IPC,
@@ -715,8 +737,8 @@ Maintenance holds the deployment lock exclusively and requires stopped admission
 Runtime writers retain shared leases, so maintenance waits for them to release.
 This protocol binds cooperating station writers only. The operator must exclude
 other root configuration/account tools during qualification. Directory collection
-compares complete local/NSS views and re-reads protected passwd/group/shadow bytes
-before returning; persistent before/after drift becomes unknown. This is bounded
+compares complete local/NSS views and re-reads protected passwd/group/shadow/gshadow
+bytes and file metadata before returning; persistent before/after drift becomes unknown. This is bounded
 change detection, not proof against a root writer changing and restoring bytes
 between observations. Local guard checks never call NSS, systemd or a collector.
 They revalidate record bytes, deployed policy, manifest, binary and immutable
@@ -799,6 +821,8 @@ Provider failures, unknown records, closure mismatch and missing files refuse.
    Do not capture service-tree digests or presence states. Retain the launcher
    binary's `absent_entries` declaration and the qualification unit file pins.
    Install all pinned artifacts, complete inventory profile and skeleton controls;
+   set each cron/at spool to explicit `present` or verified `absent`
+   (existing protected parent and ENOENT leaf), then
    install the closed root:root 0600 deployment manifest at
    `/opt/swarma/etc/user-manager-deployment.json`. Prepare the existing journal
    through its reviewed initialization procedure; qualification does not repair it.

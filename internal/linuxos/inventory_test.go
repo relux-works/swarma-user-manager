@@ -189,7 +189,7 @@ func TestReportCannotLoseUnknownClass(t *testing.T) {
 func TestSchedulerSourceTypesFailClosed(t *testing.T) {
 	uid := uint32(os.Getuid()) + 100000
 	paths := []string{t.TempDir(), t.TempDir(), t.TempDir()}
-	sources := []Spool{{fixtureDir(t, paths[0]), "cron"}, {fixtureDir(t, paths[1]), "system-cron"}, {fixtureDir(t, paths[2]), "at"}}
+	sources := []Spool{{Root: fixtureDir(t, paths[0]), Kind: "cron"}, {Root: fixtureDir(t, paths[1]), Kind: "system-cron"}, {Root: fixtureDir(t, paths[2]), Kind: "at"}}
 	n := namesFixture{"fixture": uid}
 	if r := Scheduler(context.Background(), uid, sources, n, testLimits()); r.Verdict != Clean {
 		t.Fatal(r.Err)
