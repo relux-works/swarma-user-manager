@@ -2,8 +2,8 @@
 
 `linuxos` supplies Linux mechanisms for [stations v0](../../spec/stations-v0.md).
 It is a standalone internal package. It has no lifecycle state, service entry
-point or core-backend adapter. `user.bump` remains refused by the proposed A1
-service until the key-service provision/confirm contract exists. A successful
+point or core-backend adapter. `user.bump` remains refused by the A1
+core until the key-service provision/confirm contract exists. A successful
 inventory never activates an account or authorizes reuse of a UID.
 
 Callers supply trusted configuration, journal reservations, account ownership
@@ -21,7 +21,7 @@ There is no package-global mutable state.
 | `StationManifest`, `Dir.Install`, `Dir.ReplaceManaged`, `Dir.Verify` | Private staging, root:S scaffold modes, approved control bytes, atomic publication/replacement, stored ACL/capability refusal and actual SHA-256 digests; §§7/10. |
 | `OpenProc`, `Proc.Processes`, `Proc.Stop`, `StopTiming`, `StopResult` | All four UID fields, pidfd incarnation checks, TERM/grace/KILL, complete quiet absence; §§5–6. Caller explicitly admits the observed process set. A new/reused PID refuses without signaling it. |
 | `Files`, `Proc.OpenFiles`, `Proc.SystemVIPC`, `POSIXIPC`, `Proc.UnixSockets`, `Scheduler`, `Systemd`, `Proc.NamespaceCoverage`, `Proc.ProcessInventory` | Per-class `clean`, `dirty(objects)` or `unknown`, retaining found objects when completeness fails; §6. |
-| `Report.Verdict`, `Limits`, `Dir.DeleteBatch` | Missing/duplicate/unknown classes cannot become clean. Deletion has explicit partial progress and no-follow bounded batches; §§5–6. |
+| `Report.Verdict`, `Limits`, `Dir.DeleteBatch` | Missing/duplicate/unknown classes cannot become clean. Deletion has explicit partial progress and no-follow bounded batches, or a typed insufficient-budget refusal; §§5–6. |
 
 `Verify` implements the closed **initial/reset scaffold**, including empty data
 directories. It does not enumerate a live harness's mutable state. Each managed
@@ -42,7 +42,13 @@ qualified `# atrun uid=... gid=...` at spools. Systemd requires all configured
 per-user unit/runtime roots, the linger directory and a successful fixed
 `systemctl show` query. Missing sources/backends remain unknown. Host-specific
 scheduler/logind policy, alternate spool formats and all-root coverage still
-need qualification. Budgets bound cooperative work, not stuck kernel syscalls.
+need qualification. A partial scan retains validated object observations with
+its error and `unknown` verdict; the returned prefix is never complete absence.
+Namespace coverage carries no UID-owned object records: partial links cannot
+establish coverage, and differing/unreadable links return `unknown`.
+Budgets bound cooperative work, not stuck kernel syscalls. A deletion batch that
+cannot remove any entry returns `delete_budget_insufficient`; retain the fence
+and increase the entry budget instead of retrying identical zero-work batches.
 
 ## Tools and evidence
 
@@ -54,7 +60,7 @@ existing `golang.org/x/sys/unix` are required; there are no new dependencies.
 | Go | Build this package | `go build ./internal/linuxos` | Compiler verdict |
 | Go | Narrow primitive tests | `GOMAXPROCS=2 go test -p 1 ./internal/linuxos -count=1 -v -timeout=45s` | Named verdicts; Go temporary fixture directories |
 | Python 3, existing sudo | Disposable peer-account fixtures | Invoked only by the package tests as `sudo -n -u platform-test-a -- /usr/bin/python3 ...` (peer UID resolved at runtime) | Exact PID/path cleanup and named test verdicts |
-| Shell/Python 3 | Proposed root qualification | `sh internal/linuxos/root-qualification.sh apply ABS_TEST_BINARY APPROVED_SHA`; then `verify`; then `rollback` | Protected disposable fixture at `/var/lib/swarma-linuxos-qualification`; no production policy or sudoers changes |
+| Shell/Python 3 | Proposed root qualification | `/usr/bin/dash internal/linuxos/root-qualification.sh apply ABS_TEST_BINARY APPROVED_SHA`; then `verify`; then `rollback` | Protected disposable fixture at `/var/lib/swarma-linuxos-qualification`; no production policy or sudoers changes |
 
 Unprivileged tests map root:S owners to the test runner only through private
 in-package constructors. They check inherited ACL rejection, symlinks, exact
@@ -72,7 +78,21 @@ binary with `go test -c -o /chosen/path/linuxos.test ./internal/linuxos` and rec
 its SHA-256 with `sha256sum /chosen/path/linuxos.test`. The owner must supply
 `/etc/swarma-linuxos-qualification.json`, root:root mode 0600, containing `Min`,
 `Max`, `ReservedUIDs` and `ReservedGIDs`: a reviewed unused test range and all
-actual journal holds. There are no default/fixed IDs. Review the script and pass
+actual journal holds. There are no default/fixed IDs. The proposed bootstrap
+requires the host's real `/usr/bin/python3.14` interpreter. It checks root owners,
+nonwritable modes and non-symlink directory/file types before starting Python;
+another layout refuses and needs separate review. Launch the reviewed script
+with the trusted absolute `/usr/bin/dash`, never by sourcing it or invoking bash.
+The system shell/loader and fixed OS bootstrap utilities are trusted entry
+requirements; a script cannot repair an already compromised invoking process.
+Builtins clear loader/startup controls, reset PATH/IFS/locale and change cwd to
+`/` before any external bootstrap command. The fixed stat/interpreter commands
+run through `env -i`, and Python uses `-I -S`, excluding cwd, PYTHONPATH, user
+site and site startup imports. Regression tests run only this preamble and its
+first import unprivileged, never the guarded root body: writable-cwd and inherited
+PYTHONPATH plants must not execute, an isolated control passes, and an intentionally
+nonisolated control must detect the plant. No root script execution is claimed.
+Review the script and pass
 the approved binary hash to `apply`; it checks protected paths and exact copied
 bytes before executing. The opt-in test verifies actual account creation,
 root:S home metadata, ACL/capability refusal, a fresh process's unlinked handle

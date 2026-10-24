@@ -21,6 +21,8 @@ type Deletion struct {
 // DeleteBatch unlinks only beneath the protected parent and named directory.
 // Symlinks are unlinked, never followed. Foreign mounts and depth excess refuse.
 // Caller supplies cleanup admission, quiescence and durable continuation intent.
+// A batch that cannot remove any entry refuses delete_budget_insufficient;
+// retry with a larger entry budget, never blindly repeat the same zero-work batch.
 func (d *Dir) DeleteBatch(ctx context.Context, name string, l Limits) (out Deletion, err error) {
 	if !component(name) {
 		return out, refusal("path_invalid", "delete", nil)
@@ -149,5 +151,11 @@ func (d *Dir) DeleteBatch(ctx context.Context, name string, l Limits) (out Delet
 	if e != nil {
 		return out, e
 	}
-	return out, check.Close()
+	if e = check.Close(); e != nil {
+		return out, e
+	}
+	if out.Removed == 0 {
+		return out, refusal("delete_budget_insufficient", "delete", nil)
+	}
+	return out, nil
 }

@@ -62,8 +62,8 @@ func Files(ctx context.Context, uid uint32, roots []*Dir, l Limits) Result {
 		return result("files", objects, refusal("inventory_unknown", "roots", nil))
 	}
 	count := 0
-	var walk func(*os.File, string, int) error
-	walk = func(f *os.File, path string, depth int) error {
+	var walk func(*os.File, string, int, bool) error
+	walk = func(f *os.File, path string, depth int, record bool) error {
 		if e := c.Err(); e != nil {
 			return e
 		}
@@ -75,7 +75,7 @@ func Files(ctx context.Context, uid uint32, roots []*Dir, l Limits) Result {
 		if e != nil {
 			return e
 		}
-		if s.Uid == uid {
+		if record && s.Uid == uid {
 			objects = append(objects, describe("files", path, s))
 		}
 		if s.Mode&unix.S_IFMT != unix.S_IFDIR {
@@ -91,6 +91,10 @@ func Files(ctx context.Context, uid uint32, roots []*Dir, l Limits) Result {
 				return e
 			}
 			s, e := descriptorStat(probe)
+			// Ownership is already observed even if close or directory-open fails.
+			if e == nil && s.Uid == uid {
+				objects = append(objects, describe("files", path+"/"+name, s))
+			}
 			e = errors.Join(e, probe.Close())
 			if e != nil {
 				return e
@@ -105,7 +109,7 @@ func Files(ctx context.Context, uid uint32, roots []*Dir, l Limits) Result {
 					e = refusal("path_changed", "inventory", nil)
 				}
 				if e == nil {
-					e = walk(dir, path+"/"+name, depth+1)
+					e = walk(dir, path+"/"+name, depth+1, false)
 				}
 				e = errors.Join(e, dir.Close())
 				if e != nil {
@@ -116,9 +120,6 @@ func Files(ctx context.Context, uid uint32, roots []*Dir, l Limits) Result {
 				if count > l.Entries {
 					return refusal("inventory_limit", "files", nil)
 				}
-				if s.Uid == uid {
-					objects = append(objects, describe("files", path+"/"+name, s))
-				}
 			}
 		}
 		return nil
@@ -127,7 +128,7 @@ func Files(ctx context.Context, uid uint32, roots []*Dir, l Limits) Result {
 		if d == nil {
 			return result("files", objects, refusal("inventory_unknown", "nil_root", nil))
 		}
-		if e = walk(d.f, fmt.Sprint(i), 0); e != nil {
+		if e = walk(d.f, fmt.Sprint(i), 0, true); e != nil {
 			return result("files", objects, e)
 		}
 	}
@@ -263,18 +264,22 @@ func (p *Proc) processFiles(pid int, name string, uid uint32, max int) (objects 
 		if e != nil {
 			return objects, e
 		}
-		fd, e := unix.PidfdGetfd(pidfd, target, 0)
+		duplicate := p.duplicateFD
+		if duplicate == nil {
+			duplicate = unix.PidfdGetfd
+		}
+		fd, e := duplicate(pidfd, target, 0)
 		if e != nil {
 			return objects, e
 		}
 		f := os.NewFile(uintptr(fd), "kernel-duplicate")
 		s, e := descriptorStat(f)
+		if e == nil && s.Uid == uid {
+			objects = append(objects, Object{Class: "open_files", Name: label, UID: uid, Inode: s.Ino, PID: pid})
+		}
 		e = errors.Join(e, f.Close())
 		if e != nil {
 			return objects, e
-		}
-		if s.Uid == uid {
-			objects = append(objects, Object{Class: "open_files", Name: label, UID: uid, Inode: s.Ino, PID: pid})
 		}
 	}
 	// An unlinked mapping can outlive its last descriptor. The map_files entries

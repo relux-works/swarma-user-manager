@@ -357,7 +357,7 @@ func TestRootQualification(t *testing.T) {
 assert open(sys.argv[1]+'/AGENTS.md','rb').read()==b'qualification-control\n'
 fd,path=tempfile.mkstemp(prefix='station-unlinked-'); os.unlink(path)
 print(os.getpid(),flush=True); signal.pause()`
-	cmd := exec.CommandContext(ctx, "/usr/sbin/runuser", "--user", a.name, "--", "/usr/bin/python3", "-c", program, a.home)
+	cmd := exec.CommandContext(ctx, "/usr/sbin/runuser", "--user", a.name, "--", "/usr/bin/python3", "-I", "-S", "-c", program, a.home)
 	cmd.Env = []string{"PATH=/usr/bin:/bin"}
 	cmd.Dir = "/"
 	stdout, e := cmd.StdoutPipe()

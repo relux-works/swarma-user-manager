@@ -1,8 +1,37 @@
-#!/bin/sh
+#!/usr/bin/dash
 # PROPOSED ONLY: owner-reviewed disposable Linux qualification, never installation.
+# Enter with the trusted absolute system dash; do not source or invoke with bash.
+# The operating-system shell/loader and fixed bootstrap utilities are trusted.
 # No sudoers changes. Before any future drop-in, use the host sudo-rs visudo -cf.
-set -eu
-exec /usr/bin/python3 - "$@" <<'PY'
+set -efu
+# Builtins remove loader/startup controls before any external bootstrap program.
+unset LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT LD_DEBUG LD_DEBUG_OUTPUT LD_BIND_NOW \
+ LD_BIND_NOT LD_DYNAMIC_WEAK LD_HWCAP_MASK LD_ORIGIN_PATH LD_PROFILE \
+ LD_PROFILE_OUTPUT LD_SHOW_AUXV LD_TRACE_LOADED_OBJECTS LD_USE_LOAD_BIAS \
+ GLIBC_TUNABLES GCONV_PATH LOCPATH NLSPATH ENV BASH_ENV CDPATH LANGUAGE
+PATH=/usr/bin:/bin
+LC_ALL=C
+export LC_ALL
+IFS='
+	 '
+export PATH IFS
+cd -P /
+# Use only absolute trusted OS utilities, with no inherited environment. Refuse
+# symlink components, non-root owners/groups and group/other writable metadata.
+# This qualification pins the host interpreter's real versioned executable.
+for path in / /usr /usr/bin /usr/bin/python3.14; do
+ metadata=$(/usr/bin/env -i PATH=/usr/bin:/bin LC_ALL=C /usr/bin/stat -c '%u:%g:%a:%F' -- "$path")
+ case "$metadata" in 0:0:*) ;; *) printf '%s\n' 'REFUSED: unsafe interpreter ancestry' >&2; exit 1 ;; esac
+ rest=${metadata#0:0:}
+ mode=${rest%%:*}
+ kind=${rest#*:}
+ case "$mode" in [0-7][0-7][0-7]|[0-7][0-7][0-7][0-7]) ;; *) exit 1 ;; esac
+ if [ "$((0$mode & 0022))" -ne 0 ]; then
+  printf '%s\n' 'REFUSED: writable interpreter ancestry' >&2; exit 1
+ fi
+ case "$path:$kind" in /:directory|/usr:directory|/usr/bin:directory|/usr/bin/python3.14:regular\ file) ;; *) exit 1 ;; esac
+done
+exec /usr/bin/env -i PATH=/usr/bin:/bin LC_ALL=C /usr/bin/python3.14 -I -S - "$@" <<'PY'
 import hashlib, json, os, re, stat, subprocess, sys
 
 BASE = '/var/lib/swarma-linuxos-qualification'

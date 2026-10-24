@@ -30,11 +30,12 @@ func (p Process) Matches(uid uint32) bool {
 	return false
 }
 
-// Proc pins the real procfs root. The private reader seam is only for bounded
-// failure plants; it cannot be configured through production constructors.
+// Proc pins the real procfs root. Private read/handle-duplication seams support
+// bounded fault plants; production constructors never configure them.
 type Proc struct {
-	root       *os.File
-	beforeRead func(string) error
+	root        *os.File
+	beforeRead  func(string) error
+	duplicateFD func(int, int, int) (int, error)
 }
 
 func OpenProc() (*Proc, error) {
@@ -122,6 +123,7 @@ func (p *Proc) process(name string) (out Process, err error) {
 // Processes scans all numeric proc entries. Any unreadable or vanished entry
 // makes this observation unknown, never an empty/partial success. Retry under
 // the caller's creation fence to obtain a complete stable absence observation.
+// On error the returned matched prefix is diagnostic evidence, not completeness.
 func (p *Proc) Processes(ctx context.Context, uid uint32, max int) ([]Process, error) {
 	if uid == 0 || max <= 0 {
 		return nil, refusal("proc_unknown", "policy", nil)
@@ -136,11 +138,11 @@ func (p *Proc) Processes(ctx context.Context, uid uint32, max int) ([]Process, e
 			continue
 		}
 		if e = ctx.Err(); e != nil {
-			return nil, e
+			return out, e
 		}
 		v, e := p.process(name)
 		if e != nil {
-			return nil, refusal("proc_unknown", "enumeration", e)
+			return out, refusal("proc_unknown", "enumeration", e)
 		}
 		if v.Matches(uid) {
 			out = append(out, v)

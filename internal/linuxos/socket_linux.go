@@ -70,7 +70,13 @@ func (p *Proc) UnixSockets(ctx context.Context, uid uint32, max int) Result {
 	}
 	return result("unix_sockets", objects, e)
 }
-func unixDiagnostic(ctx context.Context, uid uint32, max int) (objects []Object, seen map[uint32]bool, err error) {
+func unixDiagnostic(ctx context.Context, uid uint32, max int) ([]Object, map[uint32]bool, error) {
+	return collectUnixDiagnostic(ctx, uid, max, unix.Recvmsg)
+}
+
+// A private receive argument permits a bounded malformed/failed dump plant;
+// production always receives directly from the real kernel netlink socket.
+func collectUnixDiagnostic(ctx context.Context, uid uint32, max int, receive func(int, []byte, []byte, int) (int, int, int, unix.Sockaddr, error)) (objects []Object, seen map[uint32]bool, err error) {
 	if _, ok := ctx.Deadline(); !ok {
 		return nil, nil, refusal("budget_invalid", "socket_deadline", nil)
 	}
@@ -114,7 +120,7 @@ func unixDiagnostic(ctx context.Context, uid uint32, max int) (objects []Object,
 		if e = unix.SetsockoptTimeval(fd, unix.SOL_SOCKET, unix.SO_RCVTIMEO, &tv); e != nil {
 			return objects, seen, e
 		}
-		n, _, flags, from, e := unix.Recvmsg(fd, buffer, nil, 0)
+		n, _, flags, from, e := receive(fd, buffer, nil, 0)
 		if errors.Is(e, unix.EAGAIN) || errors.Is(e, unix.EINTR) {
 			continue
 		}

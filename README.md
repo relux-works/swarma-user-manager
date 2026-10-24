@@ -106,4 +106,4 @@ mechanisms; its caller still owns journal authority, fences and activation.
 |---|---|---|---|
 | Go | Compile Linux primitives | `go build ./internal/linuxos` | Compiler verdict |
 | Go, Python 3, existing sudo peer access | Narrow positive/negative primitive and disposable peer fixtures | `GOMAXPROCS=2 go test -p 1 ./internal/linuxos -count=1 -v -timeout=45s` | Named test results; temporary fixtures cleaned by exact path/PID |
-| Shell/Python 3 | Proposed owner-run root qualification, pending execution | `sh internal/linuxos/root-qualification.sh apply ABS_TEST_BINARY APPROVED_SHA`; `verify`; `rollback` | Guarded disposable fixture under `/var/lib/swarma-linuxos-qualification`; prerequisites in the package README |
+| Shell/Python 3 | Proposed owner-run root qualification, pending execution | `/usr/bin/dash internal/linuxos/root-qualification.sh apply ABS_TEST_BINARY APPROVED_SHA`; `verify`; `rollback` | Guarded disposable fixture under `/var/lib/swarma-linuxos-qualification`; prerequisites in the package README |

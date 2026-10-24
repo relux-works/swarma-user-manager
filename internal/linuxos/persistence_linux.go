@@ -78,14 +78,14 @@ func Scheduler(ctx context.Context, uid uint32, sources []Spool, names Names, l 
 				return result("cron_at", objects, e)
 			}
 			owners, e := schedulerOwners(c, source.Kind, name, b, names)
-			if e != nil {
-				return result("cron_at", objects, e)
-			}
 			for _, owner := range owners {
 				if owner == uid {
 					objects = append(objects, Object{Class: "cron_at", Name: source.Kind + ":" + name, UID: uid, Inode: s.Ino})
 					break
 				}
+			}
+			if e != nil {
+				return result("cron_at", objects, e)
 			}
 		}
 	}
@@ -132,11 +132,11 @@ func schedulerOwners(ctx context.Context, kind, name string, b []byte, names Nam
 				index = 1
 			}
 			if len(f) <= index+1 {
-				return nil, refusal("inventory_unknown", "cron_format", nil)
+				return out, refusal("inventory_unknown", "cron_format", nil)
 			}
 			u, e := names.UID(ctx, f[index])
 			if e != nil {
-				return nil, e
+				return out, e
 			}
 			out = append(out, u)
 		}
