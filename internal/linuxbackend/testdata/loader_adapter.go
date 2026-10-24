@@ -49,3 +49,7 @@ func (q *QualificationLoader) Capture(ctx context.Context, roots []linuxos.Prote
 	})
 	return profile, files, digest, e
 }
+
+func QualificationLoaderProfileValid(p LoaderProfile, limit int) bool {
+	return validLoaderProfile(p, limit)
+}
