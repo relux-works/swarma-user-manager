@@ -1,0 +1,151 @@
+//go:build linux
+
+package linuxbackend
+
+import (
+	"context"
+	"encoding/binary"
+	"path/filepath"
+	"strings"
+
+	"github.com/relux-works/swarma-user-manager/internal/linuxos"
+	"github.com/relux-works/swarma-user-manager/internal/qualification"
+)
+
+type deploymentResolver struct {
+	profile LoaderProfile
+	cache   []byte
+	dirs    []*linuxos.Dir
+}
+
+func (r *deploymentResolver) Close() { _ = closeDirs(r.dirs) }
+func (r *deploymentResolver) artifact(ctx context.Context, path string) (linuxos.ProtectedArtifact, error) {
+	resolved, e := linuxos.ResolveProtectedPath(ctx, path)
+	if e != nil || resolved != path {
+		return linuxos.ProtectedArtifact{}, qualification.ErrRequired
+	}
+	d, e := linuxos.OpenRoot(filepath.Dir(path))
+	if e != nil {
+		return linuxos.ProtectedArtifact{}, e
+	}
+	r.dirs = append(r.dirs, d)
+	return linuxos.ProtectedArtifact{Directory: d, Name: filepath.Base(path), Path: path}, nil
+}
+func (r *deploymentResolver) ResolveELF(ctx context.Context, name string) (linuxos.ProtectedArtifact, error) {
+	expected := ""
+	for _, v := range r.profile.Resolutions {
+		if v.Name == name {
+			expected = v.Path
+			break
+		}
+	}
+	if expected == "" {
+		return linuxos.ProtectedArtifact{}, qualification.ErrRequired
+	}
+	var actual string
+	var e error
+	if filepath.IsAbs(name) {
+		actual, e = linuxos.ResolveProtectedPath(ctx, name)
+	} else {
+		actual, e = cacheResolve(r.cache, name)
+		if e == nil {
+			actual, e = linuxos.ResolveProtectedPath(ctx, actual)
+		}
+	}
+	if e != nil || actual != expected {
+		return linuxos.ProtectedArtifact{}, qualification.ErrRequired
+	}
+	return r.artifact(ctx, expected)
+}
+
+// This deliberately bounded glibc cache profile admits one unambiguous path
+// with no hwcap selection. Unreviewed cache formats/variants remain unsupported.
+func cacheResolve(b []byte, name string) (string, error) {
+	if len(b) < 48 || string(b[:20]) != "glibc-ld.so.cache1.1" || b[28]&3 != 2 {
+		return "", qualification.ErrRequired
+	} // little-endian reviewed profile
+	n := uint64(binary.LittleEndian.Uint32(b[20:24]))
+	size := uint64(binary.LittleEndian.Uint32(b[24:28]))
+	start := uint64(48) + 24*n
+	if n > 100000 || start > uint64(len(b)) || size > uint64(len(b))-start {
+		return "", qualification.ErrRequired
+	}
+	read := func(off uint32) (string, bool) {
+		k := uint64(off)
+		if k < start || k >= start+size {
+			return "", false
+		}
+		s := b[k : start+size]
+		end := strings.IndexByte(string(s), 0)
+		if end < 0 {
+			return "", false
+		}
+		return string(s[:end]), true
+	}
+	found := ""
+	for j := uint64(0); j < n; j++ {
+		row := b[48+24*j : 48+24*(j+1)]
+		k, ok := read(binary.LittleEndian.Uint32(row[4:8]))
+		if !ok {
+			return "", qualification.ErrRequired
+		}
+		if k != name {
+			continue
+		}
+		v, ok := read(binary.LittleEndian.Uint32(row[8:12]))
+		if !ok || !absolute(v) || binary.LittleEndian.Uint64(row[16:24]) != 0 {
+			return "", qualification.ErrRequired
+		}
+		if found != "" && found != v {
+			return "", qualification.ErrRequired
+		}
+		found = v
+	}
+	if found == "" {
+		return "", qualification.ErrRequired
+	}
+	return found, nil
+}
+func newResolver(ctx context.Context, m DeploymentManifest, l linuxos.Limits) (*deploymentResolver, error) {
+	if linuxos.ProtectedAbsent("/etc/ld.so.preload") != nil {
+		return nil, qualification.ErrRequired
+	}
+	b, e := readPublic(ctx, m.Loader.Cache.Path)
+	if e != nil || qualification.Hash(b) != m.Loader.Cache.Digest {
+		return nil, qualification.ErrRequired
+	}
+	if e = verifyFiles(ctx, m.Loader.Configuration); e != nil {
+		return nil, e
+	}
+	for _, p := range m.Loader.SearchRoots {
+		entries, e := captureTree(ctx, p, l)
+		if e != nil {
+			return nil, e
+		}
+		for _, v := range entries {
+			for _, part := range strings.Split(v.Path, "/") {
+				if part == "glibc-hwcaps" {
+					return nil, qualification.ErrRequired
+				}
+			}
+		}
+	}
+	return &deploymentResolver{profile: m.Loader, cache: b}, nil
+}
+
+type reviewedFilesRuntime struct {
+	files    linuxos.FilesNSSRuntime
+	manifest []byte
+}
+
+func (r reviewedFilesRuntime) CaptureModules(ctx context.Context, names []string, l linuxos.Limits) ([]linuxos.NSSModule, error) {
+	out, e := r.files.CaptureModules(ctx, names, l)
+	if e != nil {
+		return nil, e
+	}
+	out[0].ConfigurationDigest = qualification.Hash(r.manifest)
+	return out, nil
+}
+func (r reviewedFilesRuntime) Enumerate(ctx context.Context, names []string, l linuxos.Limits) (linuxos.NSSDatabases, error) {
+	return r.files.Enumerate(ctx, names, l)
+}

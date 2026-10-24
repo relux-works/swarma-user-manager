@@ -65,6 +65,14 @@ func (g *guard) Check() error {
 	}
 	return nil
 }
+
+// RecordDigest forwards the full per-boot record binding when the host supplies one.
+func (g *guard) RecordDigest() string {
+	if v, ok := g.inner.(interface{ RecordDigest() string }); ok {
+		return v.RecordDigest()
+	}
+	return ""
+}
 func (g *guard) Release() {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -239,12 +247,16 @@ func (b *Backend) Evidence(ctx context.Context, i manager.AuthorityInput) (manag
 		Format        string                 `json:"format"`
 		Input         manager.AuthorityInput `json:"input"`
 		Qualification string                 `json:"qualification_digest"`
+		RecordDigest  string                 `json:"qualification_record_digest"`
 		Checks        []string               `json:"checks"`
 		ManifestPaths []string               `json:"manifest_paths"`
 	}{Format: "station-linux-evidence/1", Input: i, Qualification: b.policy.QualificationDigest, Checks: []string{}, ManifestPaths: []string{}}
 	g, e := b.pin(ctx, i.Identity)
 	if e != nil {
 		return out, e
+	}
+	if bound, ok := g.(interface{ RecordDigest() string }); ok {
+		facts.RecordDigest = bound.RecordDigest()
 	}
 	keep := false
 	defer func() {

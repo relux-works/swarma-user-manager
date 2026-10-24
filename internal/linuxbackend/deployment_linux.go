@@ -1,0 +1,262 @@
+//go:build linux
+
+package linuxbackend
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"path/filepath"
+	"sort"
+	"strings"
+
+	"github.com/relux-works/swarma-user-manager/internal/linuxos"
+	"github.com/relux-works/swarma-user-manager/internal/manager"
+	"github.com/relux-works/swarma-user-manager/internal/qualification"
+)
+
+// DeploymentManifest contains protected reviewed capabilities, never authority
+// verdicts or caller inputs. Its complete bytes are part of the backend pin.
+type DeploymentManifest struct {
+	Format          string            `json:"format"`
+	BackendVersion  string            `json:"backend_version"`
+	LockPath        string            `json:"lock_path"`
+	MaintenancePath string            `json:"maintenance_path"`
+	NSSHelper       string            `json:"nss_helper"`
+	NSSLibrary      string            `json:"nss_library"`
+	Loader          LoaderProfile     `json:"loader"`
+	Skeleton        string            `json:"skeleton"`
+	NoLauncher      NoLauncherProfile `json:"no_launcher"`
+	Inventory       InventoryProfile  `json:"inventory"`
+}
+
+const deploymentVersion = "local-v0-linux-qualification/1"
+
+type TreePin struct {
+	Path   string `json:"path"`
+	Digest string `json:"digest"`
+}
+type FilePin struct {
+	Path   string `json:"path"`
+	Digest string `json:"digest"`
+}
+type ELFResolution struct {
+	Name string `json:"name"`
+	Path string `json:"path"`
+}
+type LoaderProfile struct {
+	Format        string          `json:"format"`
+	Cache         FilePin         `json:"cache"`
+	SearchRoots   []TreePin       `json:"search_roots"`
+	Resolutions   []ELFResolution `json:"resolutions"`
+	Configuration []FilePin       `json:"configuration"`
+}
+type NoLauncherProfile struct {
+	AbsentEntries []string  `json:"absent_entries"`
+	ServiceRoots  []TreePin `json:"service_roots"`
+	Configuration []FilePin `json:"configuration"`
+}
+type InventoryProfile struct {
+	Format      string   `json:"format"`
+	Files       []string `json:"files"`
+	Shm         string   `json:"shm"`
+	Mqueue      string   `json:"mqueue"`
+	Cron        string   `json:"cron"`
+	SystemCron  string   `json:"system_cron"`
+	At          string   `json:"at"`
+	Linger      string   `json:"linger"`
+	UserUnits   []string `json:"user_units"`
+	UserRuntime []string `json:"user_runtime"`
+}
+type SkeletonControl struct {
+	Path       string `json:"path"`
+	Source     string `json:"source"`
+	Digest     string `json:"digest"`
+	Executable bool   `json:"executable"`
+}
+type SkeletonDocument struct {
+	Format   string            `json:"format"`
+	Name     string            `json:"name"`
+	Controls []SkeletonControl `json:"controls"`
+}
+
+func absolute(p string) bool {
+	return filepath.IsAbs(p) && filepath.Clean(p) == p && p != "/" && !strings.ContainsRune(p, 0)
+}
+func paths(p []string, nonempty bool) bool {
+	if p == nil || nonempty && len(p) == 0 || len(p) > 100000 {
+		return false
+	}
+	for j, s := range p {
+		if !absolute(s) || j > 0 && p[j-1] >= s {
+			return false
+		}
+	}
+	return true
+}
+func filePins(p []FilePin, nonempty bool) bool {
+	if p == nil || nonempty && len(p) == 0 {
+		return false
+	}
+	for j, v := range p {
+		if !absolute(v.Path) || !hash(v.Digest) || j > 0 && p[j-1].Path >= v.Path {
+			return false
+		}
+	}
+	return true
+}
+func treePins(p []TreePin) bool {
+	if len(p) == 0 {
+		return false
+	}
+	for j, v := range p {
+		if !absolute(v.Path) || !hash(v.Digest) || j > 0 && p[j-1].Path >= v.Path {
+			return false
+		}
+	}
+	return true
+}
+func (m DeploymentManifest) validate(p manager.Policy) error {
+	if m.Format != "station-deployment/1" || m.BackendVersion != deploymentVersion || m.LockPath != filepath.Join(p.Root, "lib/user-manager/deployment.lock") || m.MaintenancePath != filepath.Join(p.Root, "lib/user-manager/maintenance.json") || m.NSSHelper != filepath.Join(p.Root, "libexec/swarma-nss-probe") || !absolute(m.NSSLibrary) || !absolute(m.Skeleton) {
+		return qualification.ErrRequired
+	}
+	l := m.Loader
+	if l.Format != "glibc-cache-closure/1" || l.Cache.Path != "/etc/ld.so.cache" || !hash(l.Cache.Digest) || !treePins(l.SearchRoots) || !filePins(l.Configuration, false) || len(l.Resolutions) == 0 || len(l.Resolutions) > int(p.Limits.DeleteEntries) {
+		return qualification.ErrRequired
+	}
+	for j, r := range l.Resolutions {
+		if r.Name == "" || strings.ContainsAny(r.Name, "\x00\n") || !absolute(r.Path) || j > 0 && l.Resolutions[j-1].Name >= r.Name {
+			return qualification.ErrRequired
+		}
+	}
+	n := m.NoLauncher
+	if !paths(n.AbsentEntries, true) || !treePins(n.ServiceRoots) || !filePins(n.Configuration, true) {
+		return qualification.ErrRequired
+	}
+	required := filepath.Join(p.Root, "libexec/swarma-user-launcher")
+	found := false
+	for _, v := range n.AbsentEntries {
+		found = found || v == required
+	}
+	if !found {
+		return qualification.ErrRequired
+	}
+	i := m.Inventory
+	if i.Format != "local-v0-reviewed-host-scope/1" || !paths(i.Files, true) || !paths(i.UserUnits, true) || !paths(i.UserRuntime, true) {
+		return qualification.ErrRequired
+	}
+	for _, v := range []string{i.Shm, i.Mqueue, i.Cron, i.SystemCron, i.At, i.Linger} {
+		if !absolute(v) {
+			return qualification.ErrRequired
+		}
+	}
+	raw, e := qualification.Canonical(m)
+	if e != nil || qualification.Hash(raw) != p.BackendDigest {
+		return qualification.ErrRequired
+	}
+	return nil
+}
+func readPrivate(ctx context.Context, path string, max int64) ([]byte, error) {
+	if !absolute(path) {
+		return nil, qualification.ErrRequired
+	}
+	d, e := linuxos.OpenRoot(filepath.Dir(path))
+	if e != nil {
+		return nil, e
+	}
+	defer d.Close()
+	return linuxos.ReadProtected(ctx, d, filepath.Base(path), max, true)
+}
+func readPublic(ctx context.Context, path string) ([]byte, error) {
+	if !absolute(path) {
+		return nil, qualification.ErrRequired
+	}
+	d, e := linuxos.OpenRoot(filepath.Dir(path))
+	if e != nil {
+		return nil, e
+	}
+	defer d.Close()
+	return linuxos.ReadProtected(ctx, d, filepath.Base(path), 8<<20, false)
+}
+func loadDeployment(ctx context.Context, p manager.Policy) (DeploymentManifest, []byte, error) {
+	raw, e := readPrivate(ctx, filepath.Join(p.Root, "etc/user-manager-deployment.json"), p.Limits.RecordBytes)
+	if e != nil {
+		return DeploymentManifest{}, nil, e
+	}
+	var m DeploymentManifest
+	if qualification.DecodeClosed(raw, &m, p.Limits.RecordBytes) != nil || m.validate(p) != nil {
+		return m, nil, qualification.ErrRequired
+	}
+	return m, raw, nil
+}
+func captureTree(ctx context.Context, pin TreePin, l linuxos.Limits) ([]linuxos.TreeEntry, error) {
+	d, e := linuxos.OpenRoot(pin.Path)
+	if e != nil {
+		return nil, e
+	}
+	defer d.Close()
+	entries, e := linuxos.CaptureProtectedTree(ctx, d, l)
+	if e != nil {
+		return nil, e
+	}
+	b, e := qualification.Canonical(entries)
+	if e != nil || qualification.Hash(b) != pin.Digest {
+		return nil, qualification.ErrRequired
+	}
+	return entries, nil
+}
+func verifyFiles(ctx context.Context, pins []FilePin) error {
+	for _, v := range pins {
+		b, e := readPublic(ctx, v.Path)
+		if e != nil || qualification.Hash(b) != v.Digest {
+			return qualification.ErrRequired
+		}
+	}
+	return nil
+}
+func loadSkeleton(ctx context.Context, p manager.Policy, m DeploymentManifest) ([]linuxos.Control, []string, error) {
+	b, e := readPrivate(ctx, m.Skeleton, p.Limits.RecordBytes)
+	if e != nil || qualification.Hash(b) != p.SkeletonDigest {
+		return nil, nil, qualification.ErrRequired
+	}
+	var doc SkeletonDocument
+	if qualification.DecodeClosed(b, &doc, p.Limits.RecordBytes) != nil || doc.Format != "station-skeleton/1" || doc.Name != p.Skeleton || doc.Controls == nil || len(doc.Controls) > int(p.Limits.DeleteEntries) {
+		return nil, nil, qualification.ErrRequired
+	}
+	controls := []linuxos.Control{}
+	paths := map[string]bool{"": true, ".platform": true, ".platform/skills": true, ".harness": true, ".harness/state": true, "work": true, "tmp": true}
+	for j, c := range doc.Controls {
+		if j > 0 && doc.Controls[j-1].Path >= c.Path || !hash(c.Digest) {
+			return nil, nil, qualification.ErrRequired
+		}
+		data, e := readPublic(ctx, c.Source)
+		if e != nil || qualification.Hash(data) != c.Digest {
+			return nil, nil, qualification.ErrRequired
+		}
+		controls = append(controls, linuxos.Control{Path: c.Path, Data: data, Executable: c.Executable})
+		for name := c.Path; name != "." && name != ""; name = filepath.Dir(name) {
+			paths[name] = true
+		}
+	}
+	if _, e = linuxos.StationManifest(uint32(p.UIDMin), uint32(p.GIDMin), controls); e != nil {
+		return nil, nil, e
+	}
+	ordered := make([]string, 0, len(paths))
+	for v := range paths {
+		ordered = append(ordered, v)
+	}
+	sort.Strings(ordered)
+	return controls, ordered, nil
+}
+func sameJSON(a, b any) bool {
+	x, e := json.Marshal(a)
+	y, f := json.Marshal(b)
+	return e == nil && f == nil && string(x) == string(y)
+}
+func closeDirs(dirs []*linuxos.Dir) error {
+	var e error
+	for _, d := range dirs {
+		e = errors.Join(e, d.Close())
+	}
+	return e
+}

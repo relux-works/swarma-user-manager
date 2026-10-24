@@ -272,6 +272,14 @@ func BootIdentity() (string, error) {
 }
 
 func loadPolicyAt(path string, owner uint32, anchor string) (Policy, error) {
+	p, e := loadCandidatePolicyAt(path, owner, anchor)
+	if e != nil || !p.Qualified {
+		return Policy{}, fail("qualification_required")
+	}
+	return p, nil
+}
+
+func loadCandidatePolicyAt(path string, owner uint32, anchor string) (Policy, error) {
 	var p Policy
 	d, e := protectedDir(filepath.Dir(path), owner, anchor)
 	if e != nil {
@@ -288,7 +296,7 @@ func loadPolicyAt(path string, owner uint32, anchor string) (Policy, error) {
 		return p, fail("qualification_required")
 	}
 	b, e := osReadBounded(f, MaxRequest)
-	if e != nil || strict(b, &p) != nil || p.validate() != nil || !p.Qualified {
+	if e != nil || strict(b, &p) != nil || p.validate() != nil {
 		return Policy{}, fail("qualification_required")
 	}
 	return p, nil

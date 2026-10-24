@@ -403,3 +403,13 @@ func relevantGroups(data NSSDatabases, names map[string]bool, interval IDInterva
 	}
 	return out
 }
+
+// RecordedNSSConfiguration validates exact physical lines against the supported
+// effective files[/systemd] profile without normalizing their retained bytes.
+func RecordedNSSConfiguration(c NSSConfiguration, limit int) ([]string, error) {
+	_, names, e := recordedNSSNames(c, limit)
+	if e != nil || !supportedNSSLines(c) {
+		return nil, refusal("directory_unknown", "recorded_configuration", e)
+	}
+	return names, nil
+}

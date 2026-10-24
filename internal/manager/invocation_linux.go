@@ -10,6 +10,9 @@ import (
 
 const PolicyPath = "/opt/swarma/etc/user-manager.json"
 
+// LoadCandidatePolicy reads the same protected closed policy without trusting its attestation.
+func LoadCandidatePolicy() (Policy, error) { return loadCandidatePolicyAt(PolicyPath, 0, "/") }
+
 func LoadPolicy() (Policy, error) { return loadPolicyAt(PolicyPath, 0, "/") }
 
 // FileAuthority consumes the protected service-identity authority's current

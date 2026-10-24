@@ -14,6 +14,8 @@ import (
 func main() { os.Exit(run()) }
 func run() int {
 	in := manager.VerifiedInvocation(os.Args[1:])
+	realUID := os.Getuid()
+	sudoEnvironment := os.Getenv("SUDO_UID") != "" || os.Getenv("SUDO_USER") != "" || os.Getenv("SUDO_COMMAND") != ""
 	os.Clearenv()
 	syscall.Umask(0077)
 	if os.Chdir("/") != nil {
@@ -24,6 +26,9 @@ func run() int {
 	if os.Setenv("PATH", "/usr/sbin:/usr/bin:/sbin:/bin") != nil {
 		_ = json.NewEncoder(os.Stdout).Encode(manager.PublicRefusal(nil, "state_unavailable"))
 		return 1
+	}
+	if selected, boot := maintenanceMode(in.Args); selected {
+		return runQualification(in, realUID, sudoEnvironment, boot)
 	}
 	input := make(chan struct {
 		b []byte
@@ -73,7 +78,7 @@ func run() int {
 		_ = json.NewEncoder(os.Stdout).Encode(manager.PublicRefusal(raw, "qualification_required"))
 		return 1
 	}
-	backend := linuxbackend.NewWithEnvironment(p, nil, store)
+	backend := linuxbackend.NewWithEnvironment(p, linuxbackend.NewProductionEnvironment(p), store)
 	defer backend.Close()
 	qualificationCtx, stopQualification := context.WithTimeout(context.Background(), time.Duration(p.Limits.StepMS)*time.Millisecond)
 	qualificationErr := backend.Qualified(qualificationCtx, p)
@@ -85,8 +90,8 @@ func run() int {
 	operator := manager.FileOperatorVerifier{Root: p.Root}
 	source := manager.LocalV0Source{Policies: manager.FilePolicyReader{}, Backend: backend, Operators: operator}
 	engine = manager.Engine{Backend: backend, Sources: map[string]manager.AuthoritySource{"local-v0": source}, BootID: boot, Operator: operator, Policy: p, Authority: manager.FileAuthority{Root: p.Root}, Store: store, Journal: manager.NativeJournal{Path: p.Root + "/lib/user-manager/generations"}}
-	// The Linux adapter is linked. Its host evidence/NSS provider remains unknown
-	// until the qualified provider contract is published; no policy flag admits it.
+	// The production environment requires a current protected qualification record,
+	// fresh deployed inputs and the latest successful boot-unit invocation.
 	r := engine.Handle(context.Background(), raw, in)
 	if json.NewEncoder(os.Stdout).Encode(r) != nil {
 		return 1

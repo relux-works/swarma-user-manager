@@ -100,7 +100,7 @@ func CheckPolicyFile(ctx context.Context, d *Dir, name string, max int64) Qualif
 	return Qualification{State: QualificationOK}
 }
 func stationNames(names []string, limit int) error {
-	if len(names) == 0 || len(names) > limit {
+	if names == nil || len(names) > limit {
 		return refusal("qualification_invalid", "station_names", nil)
 	}
 	seen := map[string]bool{}

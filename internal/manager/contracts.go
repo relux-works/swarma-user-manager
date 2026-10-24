@@ -65,6 +65,7 @@ type Policy struct {
 	Bump                bool              `json:"bump_enabled"`
 	Limits              Limits            `json:"limits"`
 	Callers             []Caller          `json:"callers"`
+	NoLauncher          bool              `json:"no_launcher"`
 	Qualified           bool              `json:"qualified"`
 	QualificationDigest string            `json:"qualification_digest"`
 	FenceEpoch          int64             `json:"fence_epoch"`
@@ -72,6 +73,9 @@ type Policy struct {
 	Sources             []SourceSelection `json:"sources"`
 	Operators           []OperatorScope   `json:"operators"`
 }
+
+// ValidatePolicy validates the closed policy independently of its attestation flag.
+func ValidatePolicy(p Policy) error { return p.validate() }
 
 func (p Policy) validate() error {
 	if p.Format != "station-policy/2" || !filepath.IsAbs(p.Root) || filepath.Clean(p.Root) != p.Root || p.Root == "/" || p.UIDMin < 1 || p.UIDMax > 4294967294 || p.UIDMin > p.UIDMax || p.GIDMin < 1 || p.GIDMax > 4294967294 || p.GIDMin > p.GIDMax || p.Quota < 1 || p.Skeleton == "" {
