@@ -1,10 +1,49 @@
 # Read-only questions for macOS station qualification
 
-This request collects facts for [the macOS backend draft](stations-macos-v0.md).
-It authorizes no installation, account mutation, process stop, scheduler change,
-root probe or qualification issuance. All commands below are PENDING-VERIFY
-candidates on the requested version. The orchestrator relays this block to the
-host lane; the spec producer does not contact that lane directly.
+This request and its dated observations support [the macOS backend draft](stations-macos-v0.md).
+They authorize no installation, account mutation, process stop, scheduler change,
+root probe or qualification issuance. The retained relay block is a read-only
+query template, with the membership syntax corrected after collection; it is not
+a request for another collection. Its PENDING-VERIFY labels identify candidate
+forms, not a denial of the limited observations recorded below. The orchestrator
+owns any further relay; the spec producer does not contact the host lane.
+
+## Observations received 2026-10-24
+
+Read-only collection as an ordinary user reported macOS **27.0.1 (26A434)**,
+Darwin **27.0.0**, **arm64**, **SIP enabled**. This is reported host evidence,
+not a collection performed by this repository or a qualified production host.
+The public summary omits personal identifiers, exact per-user paths and raw
+outputs. Do not infer individual exit codes from the summary: only the two
+explicit failure codes below were supplied here. Raw command evidence stays
+private; no root or mutating command was exercised.
+
+| Fact | Settled read-only observation | Remaining boundary |
+|---|---|---|
+| F1 | Version/build/architecture and enabled SIP as above | No isolation or root-visibility proof |
+| F2 | All requested tool names resolved; requested manual excerpts available, with no manual for `sysadminctl` (help only) or `proc_pidinfo` | Finding a tool/manual is not executing its flags; all create/delete/stop forms PENDING-VERIFY (root fixture) |
+| F3 | Local, Contact(s), Search and Platform SSO nodes reported; search paths selected `/Local/Default` only, Contacts CSP empty. Existing system record lacked `IsHidden`; user/group local IDs included 400–999, none >=1000 | Missing attribute is not missing record; no provider completeness, implicit-group proof or approved allocation range. PROPOSED station range 30000–59999 remains a policy-review input only |
+| F4 | Nonroot `launchctl print` read system, own user/gui domains and `system/com.apple.opendirectoryd` state/run/PID/exit fields | Manual exposed `blame`, `print-cache`, `print-disabled`; these were not run. No authenticated issuer invocation or trigger/respawn exclusion proof |
+| F5 | Sealed APFS system snapshot, unsealed APFS Data, ownership enabled. `/tmp` and `/var` aliases had `restricted,hidden` and `com.apple.rootless`; `/Library` and `/private/var/folders` had `sunlnk`. Listed paths had no ACLs. `getconf` resolved own temp/cache directories (0700, `sunlnk`) | `diskutil` did not establish case sensitivity. Flags/ACL samples do not qualify managed-home protection, metadata policy or another UID's temp mapping. `readlink /var/run` exited **1**: not a symlink, not a missing directory |
+| F6 | Nonroot process real/effective UID listing included **55** setuid/privileged-helper processes. SysV inventories readable and empty at collection. `/usr/lib/cron -> ../../var/at`; `at.deny` empty, `cron.deny` present, allow files and `/etc/crontab` absent | Complete saved-UID/holder coverage needs root/native qualification; snapshots do not prove quiescence or all IPC absence. Scheduler contents/effective policy were not inspected |
+| F7 | Tool architecture/dependency inspection available. `dscl` signature display reported Apple signing chain; readable cache directory under `/System/Volumes/Preboot/Cryptexes/OS/System/Library/dyld`, old `/System/Library/dyld` absent | Signature display does not verify trust/closure. No `dyld_info` flags exercised; cache directory is not active image/cache identity |
+| F8 | `softwareupdate --history` readable without root; update/package/signature/assessment manuals present | History is not authenticity. Active sealed-volume/Cryptex verification needs root and a reviewed procedure; no update or automatic requalification tested |
+
+The attempted `dsmemberutil checkmembership -u _www -g admin` failed with
+exit **6**, rejecting nonnumeric IDs. The manual defines `-u`/`-g` as numeric
+IDs and `-U`/`-G` as names. The template below now uses
+`checkmembership -U _www -G admin`; **the corrected query was not rerun** in
+this collection. Its execution remains PENDING-VERIFY; the failed command is
+not evidence of nonmembership. `sysadminctl` help advertises user/token actions
+and possible administrator authentication; no such action was exercised or
+selected as a provisioning fallback.
+
+All mutation, stop, absence, issuer authentication, durability and isolation
+claims remain PENDING-VERIFY; root qualification remains PENDING-HOST. The
+[tool matrix](stations-macos-v0.md#9-verified-platform-tools) distinguishes
+executed read-only queries from help-only evidence and untested native adapters.
+
+## Retained read-only query template
 
 <!-- relay-block:start -->
 Please collect F1–F8 on the proposed macOS 27.0.1 Apple-silicon host with SIP on,
@@ -84,7 +123,7 @@ set -o pipefail
 /usr/bin/dscl . -list /Groups PrimaryGroupID
 /usr/bin/dscl /Local/Default -read /Groups/_www PrimaryGroupID GeneratedUID GroupMembership GroupMembers NestedGroups
 /usr/sbin/dseditgroup -o read -n /Local/Default _www | /usr/bin/awk '/^[[:space:]]*dsAttrTypeStandard:(RecordName|PrimaryGroupID|GeneratedUID|GroupMembership|GroupMembers|NestedGroups)([[:space:]:=-]|$)/ {print}'
-/usr/bin/dsmemberutil checkmembership -u _www -g admin
+/usr/bin/dsmemberutil checkmembership -U _www -G admin
 /usr/bin/id -G _www
 /usr/bin/dscacheutil -q user -a name _www | /usr/bin/awk '/^(name|uid|gid|dir|shell):/ {print}'
 /usr/bin/dscacheutil -q group -a name _www | /usr/bin/awk '/^(name|gid|users):/ {print}'

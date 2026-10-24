@@ -126,16 +126,20 @@ These gates do not resolve Keymaker bump admission or cleanup authority.
 ## macOS station backend gates
 
 The [macOS draft](spec/stations-macos-v0.md) preserves shared lifecycle and
-journal guarantees; it does not qualify an OS adapter. All macOS platform-tool
-rows remain PENDING-VERIFY. [Read-only questions](spec/stations-macos-facts.md)
-collect facts without authorizing account mutation or root fixtures.
+journal guarantees; it does not qualify an OS adapter. [Read-only observations](spec/stations-macos-facts.md)
+on macOS 27.0.1/26A434 dated 2026-10-24 settle diagnostic details only. Native
+qualification and mutation remain PENDING-VERIFY; root fixtures remain
+PENDING-HOST. P5 settles scope to explicitly named trusted tasks with soft
+limits (hard-limit tasks refused there or run on Linux). P7 settles immediate
+new-start closure on revocation and verified narrowing or stop within a
+published deadline; mechanisms and deadline still require qualification.
 
-| Gate | Open decision/evidence | Safe state |
+| Gate | Open decision/evidence after F1–F8 | Safe state |
 |---|---|---|
-| M1 — Directory sources | Local/synthetic provider allowlist, remote/mobile/SSO policy and implicit group semantics | Unknown provider or membership refuses qualification |
-| M2 — Home/storage | Platform root, APFS ownership/case/alias profile, ACL-free feasibility and explicit `com.apple.*`/other metadata policy; root/TCC visibility bounds | No protected-home or complete-inventory claim |
-| M3 — Shared qualification binding | Typed OpenDirectory/dyld/boot/launchd fields and authenticated successful-latest-invocation proof in the shared protocol | Linux fields unchanged; no fabricated systemd values or macOS issuer |
-| M4 — Stop and inventory | Complete process/respawn exclusion, per-user temp mapping, schedulers, sockets and IPC/Mach/other provider scope | No deletion/reuse on unknown evidence; production bump stays closed |
-| M5 — Journal/durability | Native locking, descriptor protection, APFS sync/power-loss bounds and independent restore custody | Shared bytes retained; no production macOS writer/consumer claim |
-| M6 — Key/root/network gates | Shared Keymaker pre-active provision/confirm contract, separately authorized disposable root tests and qualified static UID-range deny provider | Read-only facts only; no mutation, activation or token-policy changes |
-| M7 — Authentic updates | Approved OS/package publisher and target policy, active seal/Cryptex verification, automatic maintenance/pin authority, failure/rollback semantics | No automatic requalification after unverifiable updates; admission closed |
+| M1 — Supported directory profile | Local-only search observed despite a Platform SSO node; approve exact local/system/synthetic provider and implicit-group bounds. Review PROPOSED station range 30000–59999; local absence >=1000 is not approval | Unknown provider/membership closes qualification; no host range approved |
+| M2 — Filesystem root and metadata | APFS ownership, system/Data split and OS flags observed; approve R, actual case/alias profile, ACL-free feasibility and per-attribute policy; retain root/TCC visibility bounds | No installation or complete-inventory claim; do not strip observed OS metadata |
+| M3 — Shared platform binding and revocation | Readable launchctl print fields do not prove issuer invocation. Jointly publish typed OpenDirectory/dyld/boot/launchd fields and latest-invocation proof; P7 selects immediate new-start closure plus verified narrowing or stop within a published deadline, whose value/adapter/evidence remain open | Linux codec unchanged; no macOS issuer/reader or running-work admission before qualification |
+| M4 — Cleanup/stop coverage | ps/SysV/cron metadata are diagnostics; qualify saved-UID/holder visibility, process/respawn fence, per-user temp mapping and every outside-home provider | No removal/reuse from incomplete evidence; bump stays closed |
+| M5 — Native journal/durability | APFS observations do not qualify native locks/sync: prove shared reader/writer locking, durable publication, budgets and external restore custody | No production journal writer/consumer claim |
+| M6 — Key, root qualification and task scope | Select root-test host/procedure, jointly publish Keymaker pre-active provision/confirm and qualify static UID-range deny. P5 settles macOS scope to explicitly named trusted tasks with soft limits; publish task names/soft bounds and qualify admission, refusing hard-limit tasks or placing them on Linux | `user.bump` closed; no mutations, execution or hard-limit claim from read-only facts |
+| M7 — Authentic update/requalification | History readable and sealed snapshot reported, but trust/seal/Cryptex verification not performed. Approve publisher/target policy, reviewed root verification, automatic maintenance/pin authority and failure/rollback behavior | No automatic acceptance of unverified updates; admission closed and P7 response applies on revocation |

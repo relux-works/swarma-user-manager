@@ -60,16 +60,22 @@ Apache License 2.0 — see [LICENSE](LICENSE) and [NOTICE](NOTICE).
 The [macOS station draft](spec/stations-macos-v0.md) maps the shared account,
 managed-home, create/retire, journal and qualification guarantees to a proposed
 macOS backend. It includes the [Verified platform tools matrix](spec/stations-macos-v0.md#9-verified-platform-tools),
-with every macOS row PENDING-VERIFY, and root-qualification obligations marked PENDING-HOST. It delivers no
-backend code or permission to run that plan. Linux behavior remains unchanged;
+with limited read-only observations dated 2026-10-24 on macOS 27.0.1/26A434;
+mutation and native qualification remain PENDING-VERIFY, with root obligations
+PENDING-HOST. Execution scope is explicitly named trusted tasks with soft
+resource limits; hard-limit tasks refuse there or use Linux. Qualification
+revocation immediately closes new starts and requires verified narrowing or
+stop within a published deadline. This draft delivers no backend code or
+execution authority. Linux behavior remains unchanged;
 production bump stays closed pending the shared Keymaker contract.
 
-The [read-only host questions](spec/stations-macos-facts.md) give exact candidate
-commands, tool purposes, synopsis prerequisites, output bounds and evidence
-limits for the requested OS/build. Run each query only on the designated macOS
-host as an ordinary user after local syntax verification; retain stdout/stderr,
-exit codes and raw metadata in private task artifacts. The existing hosted root
-probe does not qualify that host. Open decisions are recorded in
+The [read-only facts and retained query template](spec/stations-macos-facts.md)
+record sanitized F1–F8 observations, corrected membership syntax and exact
+candidate commands, purposes, synopsis prerequisites, bounds and evidence limits.
+The corrected membership query has not been rerun. Any further collection must
+be separately relayed to the designated macOS host as an ordinary user after
+local syntax verification; keep stdout/stderr, exit codes and raw metadata in
+private task artifacts. The existing hosted root probe does not qualify that host. Open decisions are recorded in
 [the unresolved register](UNRESOLVED_QUESTIONS.md#macos-station-backend-gates).
 
 ## Generation journal tools

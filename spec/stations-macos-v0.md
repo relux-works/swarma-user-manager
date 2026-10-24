@@ -2,8 +2,9 @@
 
 Status: normative draft for review; no macOS backend, installation or host
 qualification is delivered by this document. Target qualification is macOS
-27.0.1 on Apple silicon with SIP enabled; the real product/build/architecture
-MUST first be measured. A different build requires its own evidence.
+27.0.1 on Apple silicon with SIP enabled. Read-only facts collected on
+2026-10-24 report build 26A434, Darwin 27.0.0, arm64 and SIP enabled. These
+observations do not qualify the host; a different build requires its own evidence.
 
 ## 1. Shared model and release boundary
 
@@ -15,6 +16,14 @@ forbidden. The shared closed `helper-op/1` requests, result/error envelopes,
 caller roles, quotas, exact-ID deduplication and cleanup admission remain those
 of stations-v0 §§1–3. An account marked `active` is locally provisioned only;
 this slice installs no launcher, caller sudo rule or station execution authority.
+
+**Owner scope P5:** a macOS station MUST run only explicitly named trusted tasks
+whose accepted resource limits are **soft**. A task requiring **hard** resource
+limits MUST be refused on macOS or run on a qualified Linux backend. Trust alone
+does not admit an unnamed task, and soft watcher/stop behavior MUST NOT be
+represented as a hard ceiling. The allowed task names and their soft-limit
+bounds require publication before execution admission. This decision selects
+scope only; it supplies no new launcher, resource mechanism or qualification.
 
 PENDING-VERIFY: the macOS sudo/caller-identity adapter MUST establish the same
 trusted transition, protected principal/generation, clean environment, empty
@@ -39,9 +48,11 @@ permitted; a new conversation alone never requests a destructive bump.
 
 **PENDING-VERIFY** identifies a proposed OS mechanism, path, attribute, flag or
 behavior without evidence on this exact build. It is not a passing capability.
-All such mechanisms in this draft carry that label, including candidates in
-[the tool matrix](#9-verified-platform-tools). A MUST states the required
-outcome; it does not assert that macOS currently supplies it. Documentation,
+Unqualified mechanisms retain that label in
+[the tool matrix](#9-verified-platform-tools). A dated **read-only observed**
+status applies only to the stated observation; manual/help availability is
+explicitly distinguished from executed queries and root-fixture qualification.
+A MUST states the required outcome; it does not assert that macOS currently supplies it. Documentation,
 help output and older hosted probes do not establish production behavior.
 
 ## 2. Durable lifecycle and authority
@@ -81,14 +92,31 @@ requires external custody/fencing; a local hash chain is not anti-rollback proof
 ## 3. Local account and group provider
 
 The proposed write provider is the explicit OpenDirectory local node, with
-one dedicated group and one account per reservation. PENDING-VERIFY: the
-candidate node name is `/Local/Default`; `dscl .` is a diagnostic convenience,
+one dedicated group and one account per reservation. F3 observed
+`/Local/Default` reads on the measured build; write semantics remain
+PENDING-VERIFY (root fixture). `dscl .` is a diagnostic convenience,
 not production node authority. Discovery/search nodes MUST NOT receive writes.
 The backend MUST allocate a free policy-approved UID/GID pair after complete
 local/search-provider collision checks, reserved-range checks and fresh UID
 cleanliness inventory. It MUST retain the shared round-robin reuse/reservation
 rules. Neither UID thresholds nor a leading underscore establishes ownership,
 privacy, login denial or an allocatable range.
+
+F3 observed local user/group records below 1000 and partial use of 400–999.
+This is a local snapshot, not proof of global availability, reserved-provider
+absence or future freedom. **PROPOSED station range: 30000–59999**, retaining
+[the existing identifier-range proposal](helper.md#41-names-and-identifiers)
+as an input for host policy review, not an approved allocation on this host.
+The facts approve no station or service range; the partially used low interval
+must not be selected merely because some values are free.
+
+F3 also observed `IsHidden` missing on an existing system user record. A missing
+attribute MUST be distinguished from a missing record and cannot prove either
+login visibility or login denial. The local `dsmemberutil` manual documents
+numeric IDs for `-u`/`-g` and names for `-U`/`-G`. The old diagnostic
+`checkmembership -u _www -g admin` failed with exit **6**; the corrected named
+form is `checkmembership -U _www -G admin`, documented but not rerun in F1–F8.
+Neither that failure nor a cache hit proves group nonmembership.
 
 | Candidate | Selected role and reason | Qualification requirement |
 |---|---|---|
@@ -191,6 +219,19 @@ Apple's [SIP description](https://support.apple.com/guide/security/system-integr
 is background, not proof of station isolation or complete root visibility.
 Permission/TCC denial remains unknown, even for root.
 
+F5 read-only observations: `/` is a sealed APFS system snapshot; the Data
+volume is APFS, not sealed; ownership is enabled on both. `diskutil info` did
+not establish case sensitivity, so case semantics remain PENDING-VERIFY.
+`/tmp -> private/tmp` and `/var -> private/var` carry `restricted,hidden` and
+`com.apple.rootless`; `/Library` and `/private/var/folders` carry `sunlnk`.
+These OS-owned metadata are observation inputs, not approved flags/attributes
+for platform-owned objects and not authority to strip them. Listed paths had
+no ACLs; that does not establish future managed-home inheritance or feasibility.
+`getconf DARWIN_USER_TEMP_DIR` and `DARWIN_USER_CACHE_DIR` returned the collecting
+user's `/var/folders/<redacted>/T/` and `C/` directories, mode 0700 with `sunlnk`.
+Their identity does not establish another UID's mapping. `/var/run` was not a
+symlink (`readlink` exit **1**); its resolved directory requires object checks.
+
 ## 5. Stop, cleanup and outside-home inventory
 
 Retirement MUST first durably admit the operator act and append `retiring`.
@@ -209,6 +250,17 @@ quiet interval, with creation/ingress exclusion maintained. A `ps` snapshot,
 known process tree or `launchctl` success is diagnostic only. Denied visibility,
 SIP/TCC limits, incomplete enumeration or any survivor keeps `retiring` and
 refuses `processes_remain`; no home deletion follows.
+
+F6 observed nonroot `ps -axo pid,ppid,ruid,uid,gid,stat` output, including 55
+setuid/privileged-helper processes with differing real/effective UIDs. This
+sample neither classifies every helper nor exposes saved UIDs: complete
+saved-UID and holder coverage needs a reviewed root/native procedure.
+`ipcs -a` was readable and reported empty System V queues, shared memory and
+semaphores at collection; no all-IPC or maintained-absence claim follows.
+The observed cron/at layout was `/usr/lib/cron -> ../../var/at`, an empty
+`at.deny`, present `cron.deny`, absent allow files and absent `/etc/crontab`.
+Directory modes included root-only `tabs` and daemon-owned `jobs`/`spool`;
+metadata visibility did not inspect their contents, effective policy or jobs.
 
 After renewed quiescence, quarantine the exact receipt-owned home inode on its
 qualified filesystem and delete in bounded no-follow batches. Clean only
@@ -255,8 +307,12 @@ PENDING-VERIFY: the first directory profile admits authoritative local records
 plus only separately reviewed finite system/synthetic providers. Capture the
 actual authentication search policy, ordered nodes, node configuration, provider
 identities and complete user/group/membership behavior; remote/mobile/SSO or
-unknown nodes refuse until separately qualified. Do not edit host search policy
-to force a passing result. Apple's [search-policy guidance](https://support.apple.com/guide/directory-utility/advanced-search-policy-settings-diru14246c4c/mac)
+unknown nodes refuse until separately qualified. F3 found Local, Contact(s),
+Search and a Platform SSO node; the reported authentication/contacts search
+paths selected only `/Local/Default` (Contacts CSP was empty). A present SSO
+node is not thereby an admitted provider, and its absence from the active
+search path does not prove that every authentication/provider path is local.
+Do not edit host search policy to force a passing result. Apple's [search-policy guidance](https://support.apple.com/guide/directory-utility/advanced-search-policy-settings-diru14246c4c/mac)
 describes ordered lookup; first-match lookup cannot expose every collision.
 
 PENDING-VERIFY: compare complete independent native provider observations with
@@ -291,6 +347,18 @@ SIP or a cache UUID alone cannot replace a complete reproducible closure.
 Unsupported introspection stays unknown; OS/cache/tool updates close admission
 until reviewed regeneration and qualification, with no implicit repinning.
 
+F7 observed the readable cache directory at
+`/System/Volumes/Preboot/Cryptexes/OS/System/Library/dyld`, while
+`/System/Library/dyld` was absent. Directory existence does not identify the
+active cache/subcache set or loaded-image mapping. Tool inspection reported
+arm64e and arm64e.x1 slices for `dscl`, `dseditgroup` and `launchctl`, with an
+additional x86_64 slice for `sysadminctl`; the host architecture alone cannot
+select the executed slice. `otool -L /usr/bin/dscl` listed framework/library
+names, and `codesign -d --verbose=2` reported `com.apple.dscl` with the macOS
+Software Signing / Apple Code Signing CA / Apple Root CA chain. Signature
+display is not signature/trust verification or closure qualification.
+`dyld_info` was found and its manual read; no `dyld_info` flags were exercised.
+
 ## 7. Qualification protocol and launchd issuer
 
 The shared qualification protocol MUST retain closed canonical records,
@@ -316,7 +384,12 @@ root identity, clean environment, finite timeout and no network dependency.
 No launchd `RunAtLoad`, `KeepAlive`, domain, disabled-state or result-field
 behavior is presumed verified. Publish the exact accepted keys only after
 version-matched documentation and controlled root tests. An unprivileged
-`launchctl print` excerpt does not authenticate a root issuer.
+`launchctl print` excerpt does not authenticate a root issuer. F4 observed
+nonroot reads of system, the collecting user's user/gui domains and the
+`system/com.apple.opendirectoryd` job, with structural state/run/PID/exit fields.
+The local manual also exposed read-only `blame`, `print-cache` and
+`print-disabled` forms; those three were not executed in F1–F8. Their documented
+availability grants no mutation authority or successful-latest-invocation proof.
 
 PENDING-VERIFY: bind each record to the actual current-boot system-domain job
 instance and its successful latest invocation, rejecting manual execution,
@@ -334,6 +407,17 @@ not changed. Requalification MUST rerun local checks and expose any required
 root-only observation as unrun until actually executed. A boot job cannot create
 missing authority history, silently clear an incident or repair its own pins.
 
+**Owner response P7:** when host qualification is revoked, every consumer MUST
+close new starts immediately. Running work MUST either be narrowed only through
+an independently verified narrowing path or be stopped within a published finite
+deadline. Verified narrowing MUST also complete within that deadline.
+An unverified or failed narrowing path MUST take the bounded stop path;
+it cannot justify continued execution. The deadline, affected-work scope, stop
+completion evidence and failure response MUST be published and qualified before
+execution admission; this draft chooses no numeric deadline or new mechanism.
+Until those obligations qualify, running-work admission stays closed. The same
+response applies when drift, an update or failed renewal revokes qualification.
+
 ### 7.1 Requalification after OS and software updates
 
 Any change to admitted inputs MUST close account/consumer admission before
@@ -349,6 +433,12 @@ signing trust and the active sealed-system/Cryptex authentication evidence on
 this build. Apple [describes the signed system volume](https://support.apple.com/guide/security/signed-system-volume-security-secd698747c9/web)
 and [secure software updates](https://support.apple.com/guide/security/secure-software-updates-secf683e0b36/web);
 those descriptions do not qualify command flags or an installed release here.
+F8 observed ordinary-user `softwareupdate --history` output and local manuals
+for update/package/signature/assessment tools. History is diagnostic, not update
+authenticity. F5's reported sealed snapshot is not verification of the active
+seal or Cryptex state; that verification requires root and a separately reviewed
+procedure on a selected root-test host. No install, trust evaluation or automatic
+requalification was exercised.
 Do not modify the seal, boot security policy or SIP to enable requalification.
 
 Before automatic requalification, the maintained updater/issuer contract MUST
@@ -388,8 +478,8 @@ draft contains no concrete root step or executable root procedure. The requested
 ordinary-user facts host is not thereby a root-test host. The owner must select
 the host and authorize a separately reviewed bounded procedure before any root
 qualification can run. Do not run Linux installers/journal shell writers or the
-hosted macOS mutation probe there. The [read-only request](stations-macos-facts.md)
-remains the only proposed host action in this slice.
+hosted macOS mutation probe there. The [read-only facts collection](stations-macos-facts.md)
+confers no additional host action or root authority in this slice.
 
 That later procedure MUST prove these properties without weakening SIP or
 changing unrelated accounts, jobs, privacy permissions or policy:
@@ -400,6 +490,7 @@ changing unrelated accounts, jobs, privacy permissions or policy:
 | Home and state protection | Real root/station identities on the approved APFS profile; descriptor-bound ACL/xattr/flags/alias tests, safe publication/quarantine and no station replacement of managed ancestors |
 | Authority durability | Shared journal/effect genesis and floor custody, actual native reader/writer exclusion, bounded flush/publication, crash recovery and external restore fences |
 | Maintained qualification | Root-controlled immutable inputs, writer/upgrade exclusion, authenticated current-boot launchd renewal, failed-latest-invocation refusal, no-launcher and independently qualified static range deny |
+| Task admission and revocation | Explicit named trusted-task/soft-limit controls, hard-limit refusal or Linux placement, immediate new-start closure on revocation and verified narrowing or completed stop by the published deadline |
 | Cleanup coverage | Complete process and persistence exclusion through the quiet interval, all outside-home providers, repeated inventory after yields and no deletion based on numeric UID alone |
 | Safe failure/recovery | Admission remains closed; rollback uses exact receipt ownership, dependency order and renewed quiescence. Nonpassing/malformed protected issuer records may preserve rollback identity but never authorize pin/verify |
 
@@ -425,37 +516,46 @@ setup errors and skipped plants prove nothing.
 | `MacStopRespawnRefused` — double fork, UID-changing credentials, launchd respawn or partial visibility permits deletion | Owned controlled descendants are stopped and complete fresh absence holds through the quiet interval |
 | `MacExternalResidueRefused` — temp/cache, root-owned scheduled job, live unlinked IPC/socket/Mach residue or unknown scope admits reuse/bump | Remove only planted fixture-owned residue and repeat complete coverage; Keymaker bump gate still stays closed |
 | `MacIssuerBindingRefused` — manual issuer, stale boot/PID, replaced plist or failed latest job appears qualified | Actual bound successful renewal admits the next local gate, without launching a station |
+| `MacTaskScopeRefused` — unnamed/untrusted or hard-limit-required task admitted on macOS, or soft observation presented as a hard guarantee | Explicit named trusted soft-limit task passes the admission fixture; hard-limit tasks refuse or use independently qualified Linux placement |
+| `MacRevocationDeadlineRefused` — new start after revocation, unverified narrowing or unnarrowed work surviving the published response deadline | Valid qualification admits the controlled task; revoke and prove immediate start closure plus verified narrowing or bounded completed stop, including failed-narrowing and absent-deadline refusal |
 | `MacJournalCrashRestoreRefused` — partial sync, stale tail/floor or coherent restore bypasses fences | Shared vectors/canonical bytes and qualified native ordering pass; independent restore custody remains required |
 
 ## 9. Verified platform tools
 
-Every macOS row is **PENDING-VERIFY**. No exact mutating argv is approved. Pin
-resolved absolute paths, build/architecture, file/signature or cache identity,
-local synopsis, each used flag, real exit/status/error behavior, postconditions
-and failure side effects. Help/man evidence verifies syntax only; disposable
-positive/negative root tests are still required for mutation and isolation.
+Dated observations below are limited to F1–F8 on build 26A434, Darwin 27.0.0,
+arm64, SIP enabled, collected without root on 2026-10-24. **Read-only observed**
+means only the evidence expressly named in that row; tool/manual discovery does
+not mean a flag was executed. Every native adapter, mutating flag and production
+guarantee remains unqualified unless separately established. No exact mutating
+argv is approved. Create/delete/stop behavior remains **PENDING-VERIFY (root
+fixture)**; root execution remains PENDING-HOST.
 
-| Tool/interface | Intended use | Read-only evidence request | Status |
+Pin resolved absolute paths, build/architecture, file/signature or cache identity,
+local synopsis, each used flag, real exit/status/error behavior, postconditions
+and failure side effects. Help/man evidence establishes documented syntax only;
+disposable positive/negative root tests remain required for mutation/isolation.
+
+| Tool/interface | Intended use | Read-only evidence and limit | Status |
 |---|---|---|---|
-| `sudo` invocation adapter | Shared authenticated caller/role boundary; no delegation installed | F2 synopsis plus later controlled invocation tests | PENDING-VERIFY |
-| `sw_vers`, `uname`, `csrutil` | OS/build, native architecture and SIP | F1 | PENDING-VERIFY |
-| `dscl` local node | Account records and explicit local authority | F2–F3 | PENDING-VERIFY |
-| `dseditgroup`, `dsmemberutil`, `id` | Dedicated group and effective membership | F2–F3 | PENDING-VERIFY |
-| `sysadminctl` | Inspect help/status surface; no provisioning selected | F2 | PENDING-VERIFY |
-| Native OpenDirectory / `dscacheutil` | Complete source collector / diagnostic cache comparison | F3 | PENDING-VERIFY |
-| `launchctl`, launchd plist/native interfaces | Boot issuer and service/respawn inventory | F4 | PENDING-VERIFY |
-| `ls`, `stat`, `readlink`, `getconf`, `diskutil` | APFS, ownership, aliases and per-user temp facts | F5 | PENDING-VERIFY |
-| `xattr`, native ACL/xattr/file-flag APIs | Metadata names and descriptor-bound protection | F2, F5 | PENDING-VERIFY |
-| `ps`, native process/holder APIs | Diagnostic UID inventory; complete stop/absence adapter later | F6 | PENDING-VERIFY |
-| `ipcs`, native IPC/socket/Mach APIs | Diagnostic facilities; complete object coverage later | F6 | PENDING-VERIFY |
-| `crontab`, `at`, scheduler interfaces | Policy and execution-UID inventory; no job submission in facts phase | F2, F6 | PENDING-VERIFY |
-| `otool`, `dyld_info`, dyld cache/native APIs | Dependency/cache and actual loaded closure | F7 | PENDING-VERIFY |
-| `codesign` | Signature/identity evidence, not completeness authority | F7 | PENDING-VERIFY |
-| Darwin file/lock/sync/boot APIs | Shared journal and qualification guarantees | F1–F2 plus later native/root tests | PENDING-VERIFY |
-| `softwareupdate`, `pkgutil`, security assessment APIs | Authentic update and installed-target evidence before automatic requalification | F8 plus later authenticated update/root tests | PENDING-VERIFY |
+| `sudo` invocation adapter | Shared authenticated caller/role boundary; no delegation installed | F2: tool/manual found only | read-only observed on macOS 27.0.1 (2026-10-24): Tool/manual only; adapter PENDING-VERIFY (root fixture) |
+| `sw_vers`, `uname`, `csrutil` | OS/build, native architecture and SIP | F1: 27.0.1/26A434, Darwin 27.0.0, arm64, SIP enabled | read-only observed on macOS 27.0.1 (2026-10-24): Query outputs only; no isolation claim |
+| `dscl` local node | Account records and explicit local authority | F2–F3: node/search/selected-record reads and local ID lists | read-only observed on macOS 27.0.1 (2026-10-24): Reads only; create/update/delete PENDING-VERIFY (root fixture) |
+| `dseditgroup`, `dsmemberutil`, `id` | Dedicated group and effective membership | F2–F3: filtered group read and id query; membership form failed exit6; corrected -U/-G documented only | read-only observed on macOS 27.0.1 (2026-10-24): Read/help limits above; membership rerun pending; create/delete PENDING-VERIFY (root fixture) |
+| `sysadminctl` | Inspect help/status surface; no provisioning selected | F2: -h only; no local manual | read-only observed on macOS 27.0.1 (2026-10-24): Help only; status/create/delete/token actions PENDING-VERIFY (root fixture) |
+| Native OpenDirectory / `dscacheutil` | Complete source collector / diagnostic cache comparison | F3: CLI/cache diagnostic views only | read-only observed on macOS 27.0.1 (2026-10-24): Native complete collector PENDING-VERIFY; diagnostic cache is not authority |
+| `launchctl`, launchd plist/native interfaces | Boot issuer and service/respawn inventory | F4: print queries; blame/print-cache/print-disabled documented only | read-only observed on macOS 27.0.1 (2026-10-24): Print only; issuer/native binding and start/stop/disable flags PENDING-VERIFY (root fixture) |
+| `ls`, `stat`, `readlink`, `getconf`, `diskutil` | APFS, ownership, aliases and per-user temp facts | F5: directory/volume/own-temp metadata; readlink /var/run exit1 | read-only observed on macOS 27.0.1 (2026-10-24): Sampled metadata only; case/alias/protection/durability qualification PENDING-VERIFY |
+| `xattr`, native ACL/xattr/file-flag APIs | Metadata names and descriptor-bound protection | F2, F5: tool/manual and selected directory attribute names/metadata | read-only observed on macOS 27.0.1 (2026-10-24): Names/metadata only; native descriptor-bound protection PENDING-VERIFY (root fixture) |
+| `ps`, native process/holder APIs | Diagnostic UID inventory; complete stop/absence adapter later | F6: ps real/effective UID snapshot | read-only observed on macOS 27.0.1 (2026-10-24): Saved-UID/holder/native coverage and stop PENDING-VERIFY (root fixture) |
+| `ipcs`, native IPC/socket/Mach APIs | Diagnostic facilities; complete object coverage later | F6: readable empty SysV snapshot | read-only observed on macOS 27.0.1 (2026-10-24): No POSIX/Mach/holder coverage; native cleanup PENDING-VERIFY (root fixture) |
+| `crontab`, `at`, scheduler interfaces | Policy and execution-UID inventory; no job submission in facts phase | F2, F6: tools/manuals and spool-path metadata only | read-only observed on macOS 27.0.1 (2026-10-24): No scheduler-content or effective-policy query; job submission/removal PENDING-VERIFY (root fixture) |
+| `otool`, `dyld_info`, dyld cache/native APIs | Dependency/cache and actual loaded closure | F7: otool -L, tool slices/cache-directory metadata; dyld_info manual only | read-only observed on macOS 27.0.1 (2026-10-24): No dyld_info flags run; active image/cache closure PENDING-VERIFY |
+| `codesign` | Signature/identity evidence, not completeness authority | F7: -d --verbose=2 on dscl | read-only observed on macOS 27.0.1 (2026-10-24): Display only; trust/closure/revocation verification PENDING-VERIFY |
+| Darwin file/lock/sync/boot APIs | Shared journal and qualification guarantees | F1–F2: version and flock/fsync manuals only; no native calls tested | PENDING-VERIFY |
+| `softwareupdate`, `pkgutil`, security assessment APIs | Authentic update and installed-target evidence before automatic requalification | F8: softwareupdate --history and local manuals only | read-only observed on macOS 27.0.1 (2026-10-24): History/manuals only; update/trust/seal/Cryptex verification PENDING-VERIFY (root fixture) |
 | Native UID-range network deny provider | Required unchanged v0 deny guarantee | Later separately reviewed root qualification; no rule changes requested | PENDING-VERIFY |
 
-F1–F8 are the numbered questions in [the ready-to-send host request](stations-macos-facts.md).
+F1–F8 are the numbered questions in [the retained request and dated observations](stations-macos-facts.md).
 The existing [hosted capability probe](../qualification/macos/README.md) targets
 different macOS versions and disposable root runners. It is prior test design,
 not evidence for this build, a production backend or permission to execute it.
@@ -464,13 +564,13 @@ not evidence for this build, a production backend or permission to execute it.
 
 | Gate | Required decision/evidence | State until resolved |
 |---|---|---|
-| M1 — Supported directory profile | Confirm local records plus identified system providers first; decide treatment of remote/mobile/Platform SSO nodes and unavoidable implicit groups after F3 | Unknown provider/membership closes qualification |
-| M2 — Filesystem root and metadata | Approve R, APFS ownership/case/alias profile, exact ACL-free feasibility, per-attribute policy, and treatment of root/TCC visibility limits without weakening SIP | No installation or complete-inventory claim |
-| M3 — Shared platform binding | Jointly publish typed OpenDirectory/dyld/boot/launchd fields and authenticated successful-latest-invocation proof in the existing shared qualification protocol | Existing Linux codec unchanged; no macOS issuer/reader wired |
-| M4 — Cleanup/stop coverage | Prove process/respawn fence, per-user temp mapping and every outside-home resource provider; identify genuinely unobservable classes | No removal/reuse from incomplete evidence; bump stays closed |
-| M5 — Native journal/durability | Qualify shared reader/writer locking, durable publication, budgets and external restore custody on the admitted APFS profile | No production journal writer/consumer claim |
-| M6 — Key and root qualification | Shared pre-active Keymaker provision/confirmation contract; separately authorize disposable root fixtures and selected macOS static deny provider | `user.bump` closed; read-only facts cannot authorize mutations |
-| M7 — Authentic update/requalification | Approve publisher/release policy, provenance and installed seal/Cryptex verification, automatic maintenance/pin authority and failure/rollback behavior | No automatic acceptance of unverified updates; admission stays closed |
+| M1 — Supported directory profile | Local-only search observed despite a Platform SSO node; approve exact local/system/synthetic provider and implicit-group bounds. Review PROPOSED station range 30000–59999; local absence >=1000 is not approval | Unknown provider/membership closes qualification; no host range approved |
+| M2 — Filesystem root and metadata | APFS ownership, system/Data split and OS flags observed; approve R, actual case/alias profile, ACL-free feasibility and per-attribute policy; retain root/TCC visibility bounds | No installation or complete-inventory claim; do not strip observed OS metadata |
+| M3 — Shared platform binding and revocation | Readable launchctl print fields do not prove issuer invocation. Jointly publish typed OpenDirectory/dyld/boot/launchd fields and latest-invocation proof; P7 selects immediate new-start closure plus verified narrowing or stop within a published deadline, whose value/adapter/evidence remain open | Linux codec unchanged; no macOS issuer/reader or running-work admission before qualification |
+| M4 — Cleanup/stop coverage | ps/SysV/cron metadata are diagnostics; qualify saved-UID/holder visibility, process/respawn fence, per-user temp mapping and every outside-home provider | No removal/reuse from incomplete evidence; bump stays closed |
+| M5 — Native journal/durability | APFS observations do not qualify native locks/sync: prove shared reader/writer locking, durable publication, budgets and external restore custody | No production journal writer/consumer claim |
+| M6 — Key, root qualification and task scope | Select root-test host/procedure, jointly publish Keymaker pre-active provision/confirm and qualify static UID-range deny. P5 settles macOS scope to explicitly named trusted tasks with soft limits; publish task names/soft bounds and qualify admission, refusing hard-limit tasks or placing them on Linux | `user.bump` closed; no mutations, execution or hard-limit claim from read-only facts |
+| M7 — Authentic update/requalification | History readable and sealed snapshot reported, but trust/seal/Cryptex verification not performed. Approve publisher/target policy, reviewed root verification, automatic maintenance/pin authority and failure/rollback behavior | No automatic acceptance of unverified updates; admission closed and P7 response applies on revocation |
 
 These gates do not reopen one-account-per-station, platform-owned managed
 ancestors, destructive same-account bump ordering or Keymaker ownership. If a
