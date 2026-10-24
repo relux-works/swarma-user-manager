@@ -5,9 +5,13 @@ package linuxbackend
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"os"
+	"slices"
 	"strings"
 	"testing"
+
+	"github.com/relux-works/swarma-user-manager/internal/linuxos"
 
 	"github.com/relux-works/swarma-user-manager/internal/manager"
 	"github.com/relux-works/swarma-user-manager/internal/qualification"
@@ -245,6 +249,30 @@ func TestQualificationReservationCoverage(t *testing.T) {
 			}
 			if len(names) != 1 || names[0] != want || len(accounts) != 1 || accounts[0].Username != want {
 				t.Fatal("historical/current reservation mixed", names, accounts)
+			}
+		})
+	}
+}
+
+// Approved nested targets yield their complete ancestor inventory. Absolute,
+// root, parent-traversal and other forbidden targets are rejected before walking.
+func TestQualificationSkeletonTargetValidation(t *testing.T) {
+	for _, target := range []string{"valid", "/", "/outside/file", ".platform/skills/../escape", "", "work/file"} {
+		t.Run(target, func(t *testing.T) {
+			controls := []linuxos.Control{{Path: "AGENTS.md"}, {Path: ".platform/trust-pin.json"}, {Path: ".harness/settings.json"}, {Path: ".platform/skills/nested/SKILL.md"}}
+			if target != "valid" {
+				controls = append(controls, linuxos.Control{Path: target})
+			}
+			paths, e := skeletonControlPaths(24000, 24000, controls)
+			if target == "valid" {
+				if e != nil || !slices.Contains(paths, ".platform/skills/nested") || !slices.Contains(paths, ".platform/skills/nested/SKILL.md") {
+					t.Fatal("approved targets refused/incomplete", paths, e)
+				}
+			} else {
+				var typed *linuxos.Error
+				if !errors.As(e, &typed) || typed.Code != "manifest_invalid" || paths != nil {
+					t.Fatal("invalid target traversed/returned paths", paths, e)
+				}
 			}
 		})
 	}

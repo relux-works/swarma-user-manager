@@ -303,7 +303,6 @@ func loadSkeleton(ctx context.Context, p manager.Policy, m DeploymentManifest) (
 		return nil, nil, qualification.ErrRequired
 	}
 	controls := []linuxos.Control{}
-	paths := map[string]bool{"": true, ".platform": true, ".platform/skills": true, ".harness": true, ".harness/state": true, "work": true, "tmp": true}
 	for j, c := range doc.Controls {
 		if j > 0 && doc.Controls[j-1].Path >= c.Path || !hash(c.Digest) {
 			return nil, nil, qualification.ErrRequired
@@ -313,20 +312,34 @@ func loadSkeleton(ctx context.Context, p manager.Policy, m DeploymentManifest) (
 			return nil, nil, qualification.ErrRequired
 		}
 		controls = append(controls, linuxos.Control{Path: c.Path, Data: data, Executable: c.Executable})
+	}
+	ordered, e := skeletonControlPaths(uint32(p.UIDMin), uint32(p.GIDMin), controls)
+	if e != nil {
+		return nil, nil, e
+	}
+	return controls, ordered, nil
+}
+
+// Validate the complete target manifest before walking target ancestors. A
+// malformed absolute path must never reach the fixed point filepath.Dir("/").
+func skeletonControlPaths(uid, gid uint32, controls []linuxos.Control) ([]string, error) {
+	if _, e := linuxos.StationManifest(uid, gid, controls); e != nil {
+		return nil, e
+	}
+	paths := map[string]bool{"": true, ".platform": true, ".platform/skills": true, ".harness": true, ".harness/state": true, "work": true, "tmp": true}
+	for _, c := range controls {
 		for name := c.Path; name != "." && name != ""; name = filepath.Dir(name) {
 			paths[name] = true
 		}
-	}
-	if _, e = linuxos.StationManifest(uint32(p.UIDMin), uint32(p.GIDMin), controls); e != nil {
-		return nil, nil, e
 	}
 	ordered := make([]string, 0, len(paths))
 	for v := range paths {
 		ordered = append(ordered, v)
 	}
 	sort.Strings(ordered)
-	return controls, ordered, nil
+	return ordered, nil
 }
+
 func sameJSON(a, b any) bool {
 	x, e := json.Marshal(a)
 	y, f := json.Marshal(b)
