@@ -55,9 +55,10 @@ type Row struct {
 
 // View includes tombstones and the verified checkpoint; it is never an authority cache.
 type View struct {
-	Tail  Floor `json:"tail"`
-	Rows  []Row `json:"rows"`
-	bytes int   // Verified full-history size; diagnostic views never bypass admission checks.
+	Tail    Floor `json:"tail"`
+	Rows    []Row `json:"rows"`
+	History []Row `json:"-"` // Latest state of every retained generation, including recycled UIDs.
+	bytes   int   // Verified full-history size; diagnostic views never bypass admission checks.
 }
 
 // Record has exactly the eight members defined by the format.
@@ -196,6 +197,7 @@ func verifyUntil(src io.Reader, floor Floor, deadline time.Time) (View, error) {
 	view.bytes = len(b)
 	rows := map[int64]Row{}
 	seen := map[string]bool{}
+	generations := map[string]Row{}
 	floorSeen := floor.Seq == 0
 	rest := b
 	for i := 1; len(rest) > 0; i++ {
@@ -252,6 +254,7 @@ func verifyUntil(src io.Reader, floor Floor, deadline time.Time) (View, error) {
 			}
 		}
 		rows[r.UID] = Row{r.UID, r.Generation, r.State, r.Seq}
+		generations[r.Generation] = rows[r.UID]
 		view.Tail = Floor{r.Seq, Digest(line)}
 		if r.Seq == floor.Seq {
 			if view.Tail.Hash != floor.Hash {
@@ -266,6 +269,10 @@ func verifyUntil(src io.Reader, floor Floor, deadline time.Time) (View, error) {
 	for _, row := range rows {
 		view.Rows = append(view.Rows, row)
 	}
+	for _, row := range generations {
+		view.History = append(view.History, row)
+	}
+	sort.Slice(view.History, func(i, j int) bool { return view.History[i].Seq < view.History[j].Seq })
 	sort.Slice(view.Rows, func(i, j int) bool { return view.Rows[i].UID < view.Rows[j].UID })
 	return view, nil
 }
@@ -305,4 +312,42 @@ func (v View) Active(uid int64, generation string) error {
 		}
 	}
 	return refuse("generation_missing")
+}
+
+// Generation returns retained lifecycle evidence even when its UID has been recycled.
+func (v View) Generation(generation string) (Row, bool) {
+	for _, r := range v.History {
+		if r.Generation == generation {
+			return r, true
+		}
+	}
+	return Row{}, false
+}
+
+// Propose validates a complete bounded history and one prospective transition.
+// It returns only the new line; it does not authorize unprotected filesystem writes.
+// Writers must repeat validation under exclusive exclusion before committing.
+func Propose(history []byte, floor Floor, uid int64, generation, state, writer, stamp string) ([]byte, View, error) {
+	v, e := Verify(bytes.NewReader(history), floor)
+	if e != nil {
+		return nil, v, e
+	}
+	line, e := Encode(Record{v.Tail.Seq + 1, v.Tail.Hash, uid, generation, state, writer, stamp})
+	if e != nil {
+		return nil, v, e
+	}
+	if len(history)+len(line) > MaxFile {
+		return nil, v, refuse("journal_file_size")
+	}
+	proposed, e := Verify(io.MultiReader(bytes.NewReader(history), bytes.NewReader(line)), floor)
+	if e != nil {
+		return nil, v, e
+	}
+	if e = v.Capacity(); e != nil {
+		return nil, v, e
+	}
+	if e = proposed.Capacity(); e != nil {
+		return nil, v, e
+	}
+	return line, proposed, nil
 }

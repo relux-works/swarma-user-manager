@@ -30,3 +30,16 @@ or station ownership of managed-home ancestors: public CIP-0024 decisions
 already forbid those. Keymaker/broker own their separate key/credential state;
 account retirement alone does not recall issued signatures/tokens or revoke a
 persistent identity.
+
+## Core implementation deployment gates
+
+The [Go core contract](docs/station-core.md) publishes the private effect-store
+encoding and backend interface. Production still requires the Linux backend,
+qualified sudo/service-identity adapter, authoritative cleanup admission,
+authenticated exact-pair Keymaker re-admission/binding receipts with a pinned
+activation guard, and external restore/migration custody. Production bump is
+closed as `bump_key_admission_unconfirmed` until the joint Keymaker contract
+is accepted; policy cannot enable it. The binary has no OS
+backend and refuses new work; fake tests do not close these deployment gates.
+A writer crash retaining `writer.pending` requires the generation format's
+explicit root reconciliation before same-effect recovery can proceed.

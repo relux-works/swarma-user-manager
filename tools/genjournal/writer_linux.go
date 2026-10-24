@@ -75,6 +75,14 @@ func appendRecord(path string, floor Floor, min, max, uid int64, generation, sta
 	if e = requireWriterLocks(d); e != nil {
 		return e
 	}
+	return appendLocked(d, m, floor, uid, generation, state, "operator-manual", stamp)
+}
+
+// appendLocked is shared by the manual and in-process writers, after verified exclusion.
+func appendLocked(d *directory, m pendingRecord, floor Floor, uid int64, generation, state, writer, stamp string) error {
+	return appendGuardedLocked(d, m, floor, uid, generation, state, writer, stamp, nil)
+}
+func appendGuardedLocked(d *directory, m pendingRecord, floor Floor, uid int64, generation, state, writer, stamp string, guard func() error) error {
 	j, e := d.open("journal", syscall.O_RDWR|syscall.O_APPEND)
 	if e != nil {
 		return e
@@ -84,7 +92,7 @@ func appendRecord(path string, floor Floor, min, max, uid int64, generation, sta
 	if e != nil {
 		return e
 	}
-	line, e := Encode(Record{v.Tail.Seq + 1, v.Tail.Hash, uid, generation, state, "operator-manual", stamp})
+	line, e := Encode(Record{v.Tail.Seq + 1, v.Tail.Hash, uid, generation, state, writer, stamp})
 	if e != nil {
 		return e
 	}
@@ -111,6 +119,14 @@ func appendRecord(path string, floor Floor, min, max, uid int64, generation, sta
 	}
 	if e = m.check(); e != nil {
 		return e
+	}
+	if guard != nil {
+		if e = guard(); e != nil {
+			return e
+		}
+		if e = m.check(); e != nil {
+			return e
+		}
 	}
 	n, e := syscall.Write(int(j.Fd()), line)
 	if e != nil || n != len(line) {
