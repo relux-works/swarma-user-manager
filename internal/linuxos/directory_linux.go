@@ -176,10 +176,58 @@ func (d *QualifiedDirectory) Identity(ctx context.Context, uid, gid uint32, name
 		return zero, e
 	}
 	ids := []ReservedIdentity{{UID: uid, GID: gid, Name: name}}
-	relevant := map[string]bool{}
+	relevant := map[string]bool{name: true}
+	users, groups := map[uint32]bool{uid: true}, map[uint32]bool{gid: true}
 	for _, n := range d.inputs.ReservedNames {
 		relevant[n] = true
 	}
+	// Compute one shared namespace before comparing either side. Group names
+	// can introduce passwd rows outside the ranges, in either database view.
+	for changed := true; changed; {
+		if e = c.Err(); e != nil {
+			return zero, e
+		}
+		changed = false
+		addName := func(n string) {
+			if !relevant[n] {
+				relevant[n] = true
+				changed = true
+			}
+		}
+		addNumber := func(set map[uint32]bool, n uint32) {
+			if !set[n] {
+				set[n] = true
+				changed = true
+			}
+		}
+		for _, data := range []NSSDatabases{local, remote} {
+			for _, line := range strings.Split(string(data["group"]), "\n") {
+				if line == "" {
+					continue
+				}
+				f := strings.Split(line, ":")
+				g, _ := numeric(f[2])
+				if relevant[f[0]] || groups[g] || g >= d.inputs.GIDRange.Min && g <= d.inputs.GIDRange.Max {
+					addName(f[0])
+					addNumber(groups, g)
+				}
+			}
+			for _, line := range strings.Split(string(data["passwd"]), "\n") {
+				if line == "" {
+					continue
+				}
+				f := strings.Split(line, ":")
+				u, _ := numeric(f[2])
+				g, _ := numeric(f[3])
+				if relevant[f[0]] || users[u] || groups[g] || u >= d.inputs.UIDRange.Min && u <= d.inputs.UIDRange.Max || g >= d.inputs.GIDRange.Min && g <= d.inputs.GIDRange.Max {
+					addName(f[0])
+					addNumber(users, u)
+					addNumber(groups, g)
+				}
+			}
+		}
+	}
+	seen := map[ReservedIdentity]bool{ids[0]: true}
 	for _, data := range []NSSDatabases{local, remote} {
 		for _, line := range strings.Split(string(data["passwd"]), "\n") {
 			if line == "" {
@@ -188,25 +236,12 @@ func (d *QualifiedDirectory) Identity(ctx context.Context, uid, gid uint32, name
 			f := strings.Split(line, ":")
 			u, _ := numeric(f[2])
 			g, _ := numeric(f[3])
-			if relevant[f[0]] || u >= d.inputs.UIDRange.Min && u <= d.inputs.UIDRange.Max || g >= d.inputs.GIDRange.Min && g <= d.inputs.GIDRange.Max {
-				ids = append(ids, ReservedIdentity{UID: u, GID: g, Name: f[0]})
+			id := ReservedIdentity{UID: u, GID: g, Name: f[0]}
+			if relevant[f[0]] && !seen[id] {
+				ids = append(ids, id)
+				seen[id] = true
 			}
 		}
-		for _, line := range strings.Split(string(data["group"]), "\n") {
-			if line == "" {
-				continue
-			}
-			f := strings.Split(line, ":")
-			g, _ := numeric(f[2])
-			if relevant[f[0]] || g >= d.inputs.GIDRange.Min && g <= d.inputs.GIDRange.Max {
-				relevant[f[0]] = true
-			}
-		}
-	}
-	// Reserved names without passwd rows still require shadow/group agreement;
-	// they must not be combined with the requested identity's unrelated numbers.
-	for _, id := range ids {
-		relevant[id.Name] = true
 	}
 	if !reflect.DeepEqual(relevantGroups(local, relevant, d.inputs.GIDRange), relevantGroups(remote, relevant, d.inputs.GIDRange)) {
 		return zero, refusal("directory_unknown", "group_agreement", nil)

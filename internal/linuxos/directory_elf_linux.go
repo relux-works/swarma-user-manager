@@ -41,11 +41,15 @@ func loaderDependencies(object *elf.File, b []byte) ([]string, error) {
 	if dynamic.Filesz == 0 || dynamic.Filesz%width != 0 || dynamic.Off > uint64(len(b)) || dynamic.Filesz > uint64(len(b))-dynamic.Off || dynamic.Filesz > dynamic.Memsz {
 		return fail()
 	}
+	mappedDynamic, mapped := loaderFileRange(object, b, dynamic.Vaddr, dynamic.Filesz)
+	if !mapped || mappedDynamic != dynamic.Off {
+		return fail()
+	}
 	if len(object.Sections) > 0 && len(sections) != 1 {
 		return fail()
 	}
 	for _, s := range sections {
-		if s.Offset != dynamic.Off || s.Size != dynamic.Filesz || s.Entsize != width {
+		if s.Addr != dynamic.Vaddr || s.Offset != dynamic.Off || s.Size != dynamic.Filesz || s.Entsize != width {
 			return fail()
 		}
 	}
@@ -88,29 +92,17 @@ func loaderDependencies(object *elf.File, b []byte) ([]string, error) {
 	if size == 0 || size > uint64(len(b)) {
 		return fail()
 	}
-	var table []byte
-	for _, p := range object.Progs {
-		if p.Type != elf.PT_LOAD || address < p.Vaddr {
-			continue
-		}
-		delta := address - p.Vaddr
-		if delta > p.Filesz || size > p.Filesz-delta {
-			continue
-		}
-		if table != nil || p.Off > uint64(len(b)) || delta > uint64(len(b))-p.Off || size > uint64(len(b))-p.Off-delta {
-			return fail()
-		}
-		table = b[p.Off+delta : p.Off+delta+size]
-	}
-	if table == nil {
+	tableOffset, mapped := loaderFileRange(object, b, address, size)
+	if !mapped {
 		return fail()
 	}
+	table := b[tableOffset : tableOffset+size]
 	for _, s := range sections {
 		if int(s.Link) >= len(object.Sections) {
 			return fail()
 		}
 		str := object.Sections[s.Link]
-		if str.Type != elf.SHT_STRTAB || str.Addr != address || str.Size != size {
+		if str.Type != elf.SHT_STRTAB || str.Addr != address || str.Offset != tableOffset || str.Size != size {
 			return fail()
 		}
 		if str.Offset > uint64(len(b)) || str.Size > uint64(len(b))-str.Offset || !bytes.Equal(b[str.Offset:str.Offset+str.Size], table) {
@@ -129,4 +121,36 @@ func loaderDependencies(object *elf.File, b []byte) ([]string, error) {
 		deps = append(deps, string(table[offset:offset+uint64(end)]))
 	}
 	return deps, nil
+}
+
+// loaderFileRange admits exactly one file-backed mapping of the entire consumed
+// virtual range. A second mapping touching even part of it is ambiguous.
+func loaderFileRange(object *elf.File, b []byte, address, size uint64) (uint64, bool) {
+	if size == 0 || address > ^uint64(0)-size {
+		return 0, false
+	}
+	end := address + size
+	count := 0
+	var offset uint64
+	for _, p := range object.Progs {
+		if p.Type != elf.PT_LOAD {
+			continue
+		}
+		if p.Filesz > p.Memsz || p.Vaddr > ^uint64(0)-p.Memsz || p.Off > uint64(len(b)) || p.Filesz > uint64(len(b))-p.Off {
+			return 0, false
+		}
+		if address >= p.Vaddr+p.Memsz || end <= p.Vaddr {
+			continue
+		}
+		count++
+		if count != 1 || address < p.Vaddr {
+			return 0, false
+		}
+		delta := address - p.Vaddr
+		if delta > p.Filesz || size > p.Filesz-delta {
+			return 0, false
+		}
+		offset = p.Off + delta
+	}
+	return offset, count == 1
 }

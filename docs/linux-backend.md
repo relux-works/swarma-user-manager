@@ -193,3 +193,10 @@ Range-wide account comparisons use each observed account's coherent name/UID/GID
 tuple. Relevant groups and shadow-only reserved names are compared independently;
 they are never combined with an unrelated requested account's numbers. True
 name/number collisions, second-account disagreement and memberships still refuse.
+
+The dynamic table itself and its string table must each occupy one complete,
+unambiguous file-backed `PT_LOAD` mapping. `PT_DYNAMIC.p_offset` must equal the
+file offset mapped at its virtual address; an unloaded decoy or a partially
+overlapping load refuses. Optional section addresses and offsets must agree.
+Relevant names and numeric identities are collected from both database views
+before comparison, including passwd entries introduced by in-range group names.
