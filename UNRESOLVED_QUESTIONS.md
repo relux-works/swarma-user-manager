@@ -190,14 +190,48 @@ automatic pin protocol nor host qualification. Before deployment:
 
 ## PC2: admission currency through activation
 
-The [joint activation-order draft](spec/activation-order.md) recommends the
-user-manager order effects -> gate -> data -> terminal authority fence, with
-both Keymaker facts current through durable active append and a recovery barrier
-for uncertain writes. This is a recommendation, not an accepted or implemented
-contract. Keymaker must publish fence ownership/access, real transaction state,
-complete writer/event participation, durability/recovery, incarnation/restore
-and budget/issuance commitments (K1–K6). PC1 observer/bootstrap and all existing
+The [joint activation-order specification](spec/activation-order.md) is accepted
+as a **conditional design specification; content review is done**. It is neither
+implemented nor qualified. Acceptance does not activate an adapter, select a new
+Keymaker capability or discharge the conditions in §§6.5–6.7. Production bump
+still refuses `bump_key_admission_unconfirmed` before journal/backend work.
+
+The selected design keeps both Keymaker facts current through durable active
+append, with user-manager order effects -> gate -> data -> terminal authority
+fence and the exact-attempt recovery barrier. K1–K6 still need implementation
+and real cross-process qualification. PC1 observer/bootstrap and existing
 qualification gates remain separate. No RPC is permitted under locks; the
 250 ms reader, 1000 ms writer and send-start+2000 ms observation budgets remain.
-Until joint acceptance and real cross-process qualification, production bump
-still refuses `bump_key_admission_unconfirmed` before journal/backend work.
+
+Three open gates must stay explicit:
+
+1. **Observation absorption versus RPC correlation.** Qualify and jointly publish
+   the point where a current correlated observation is consumed into the exact
+   durable attempt under F. Before that point, observed disconnect or uncertain
+   correlation requires a fresh unlocked query. After it, committed durable facts
+   may support only that already-consumed attempt within its original budgets.
+   This handoff versus the provision contract's RPC correlation is still an open
+   interface obligation, not a capability supplied by this accepted document.
+2. **Independent restore custody.** Honest mode A does not provide independent
+   per-transaction latestness, restore floors or old-instance exclusion against
+   coherent whole-state rollback. Qualify custody outside the restored failure
+   domain or leave this PC2 path disabled. Local hashes, a boot epoch or TTL do
+   not supply it; the separate witness option is not implicitly selected/active.
+3. **Possibly indefinite revocation-completion block after failure.** A crash,
+   uncertain durability or failed recovery can retain the exact joint hold and
+   block withdrawal/revocation completion indefinitely. Keep affected issuance
+   suppressed until qualified resolution; do not claim a finite end-to-end
+   revocation deadline or turn a timeout into proof of abort/release. The failure
+   and blocking policy remains a deployment/implementation gate.
+
+**N4 — implementation fixture obligation, NOT RUN:** build explicit Keymaker
+process-death subcases in `PC2IncarnationRestore` and `PC2FenceDeathUnknown`, paired
+with KR2/KI3/KP3. Use real processes and barriers immediately **before** and
+**after** the durable observation-absorption point while the manager owns F.
+The before case must refuse on observed disconnect/uncertain correlation without
+using the old observation to create an attempt. The after case must preserve the
+exact consumed attempt and recovery hold on ambiguity, without inventing an
+abort or duplicate append. Include the valid consumed-attempt completion control:
+unchanged committed facts may finish once within the original budgets despite
+Keymaker death; restart publication waits for F and obligation reconciliation.
+No stale-instance-only fixture or setup failure discharges these subcases.
