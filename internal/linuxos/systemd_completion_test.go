@@ -29,7 +29,8 @@ func requireSystemdCompletionUnavailable(t *testing.T, e error) {
 }
 
 // Valid closure metadata cannot supply the terminal results lost by aggregate
-// NSS. Both public entry points refuse it, including when a caller skips capture.
+// NSS. Without a working direct protocol, both public entry points refuse it,
+// including when a caller skips capture.
 // The files-only positive control is exercised by TestSystemdDirectoryAndCollector.
 func TestSystemdProviderCompletionUnavailable(t *testing.T) {
 	f := newSystemdFixture(t)
@@ -52,7 +53,8 @@ func TestSystemdProviderCompletionUnavailable(t *testing.T) {
 // in an owned copy, emits the SAME ABI snapshot after clean completion and after
 // record-then-ServiceNotAvailable. Immediate error still fails with no stdout.
 // These are real module controls, not a fake ABI returning UNAVAIL. Every mode
-// remains inadmissible through the public runtime; no installed service is used.
+// uses a metadata-only admission fixture that lacks a direct protocol. The clean
+// direct admission control is TestUserDBQualifiedDirectory; no host service is used.
 func TestSystemdRecordThenServiceNotAvailable(t *testing.T) {
 	f := newSystemdFixture(t)
 	if _, e := f.capture(); e != nil {

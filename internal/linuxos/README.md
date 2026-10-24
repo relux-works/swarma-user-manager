@@ -198,7 +198,9 @@ remain separate pending host checks, even if this disposable root test passes.
 [qualified account-directory boundary](../../docs/linux-backend.md#qualified-account-directory-implementation).
 They require authenticated recorded inputs and a complete reviewed runtime and
 external change exclusion. `FilesNSSRuntime` uses the cgo-built isolated collector;
-`systemd` is recognized but unknown pending its userdb/Varlink closure contract.
+`SystemdNSSRuntime` additionally requires protected userdb closure metadata, direct
+per-allocator Varlink completion and closed-record agreement with NSS. Unsupported
+records, ranges, streams or forwarding contributors remain unknown.
 No production host qualification is enabled. Shadow now requires protected 0600
 metadata in `ObserveAccounts` too; missing/unreadable/unsafe shadow is unknown.
 

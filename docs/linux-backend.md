@@ -132,7 +132,7 @@ this initial qualified profile, with protected ancestors and no ACLs/capabilitie
 | Module | Reviewed implementation boundary | Qualification state |
 |---|---|---|
 | `files` | Direct `_nss_files_*` enumeration in the isolated `swarma-nss-probe` helper; complete passwd/group/shadow status and membership checks. On modern glibc the exporting implementation is libc, not the legacy stub library. | Usable with a reviewed protected collector/library/loader configuration closure and authenticated inputs/exclusion. No implicit host resolver is supplied. |
-| `systemd` | Private metadata checks cover the manifest, userdb roots, endpoint set, artifacts/sources and ranges; aggregate NSS is only an additional agreement view. | Unknown. Both public `SystemdNSSRuntime` methods refuse until a direct per-provider completion collector exists, including forwarding contributors. |
+| `systemd` | Protected manifest, roots, endpoints, artifacts and source-backed ranges; clean direct per-allocator Varlink enumeration; independent NSS agreement. | Conditional on every metadata and direct-stream check. Forwarders are resolved to recorded contributors; unsupported records or incomplete streams remain unknown. |
 | Any other module | No bounded complete implementation is published. | Refuse. |
 
 Capture understands module names and closed NSS status/action syntax and records
@@ -207,16 +207,15 @@ before comparison, including passwd entries introduced by in-range group names.
 
 ## Systemd userdb closure and runtime
 
-`*linuxos.SystemdNSSRuntime` delegates `files` to `FilesNSSRuntime`. Both public
-methods refuse every non-files selection as
-`directory_unknown: systemd_provider_completion_unavailable`, with no modules or
-account data. Valid manifests, root peer credentials, matching ABI snapshots or
-authenticated old inputs cannot bypass this gate. No direct provider-completion
-collector is implemented in this revision.
+`*linuxos.SystemdNSSRuntime` delegates `files` to `FilesNSSRuntime`. Its
+`files systemd` path checks the closure below, directly collects every recorded
+allocator's users, groups and memberships, compares the closed projection with
+NSS and revalidates metadata before either public method returns authority.
+Any failure returns `directory_unknown` without modules or account data.
+Authenticated inputs and a maintained `DirectoryFence` remain required;
+these implementation capabilities do not qualify a host deployment.
 
-The retained private closure validator exercises the metadata contract below,
-without admitting a host. These reviewed capabilities are never record-decoded
-paths:
+The following reviewed capabilities are never record-decoded paths:
 
 | Field | Required input |
 |---|---|
@@ -280,11 +279,11 @@ the aggregate ranges. Inclusive sorted unions preserve singleton intervals.
 The directory's existing validator refuses either station range overlapping
 those module ranges, including one shared endpoint.
 
-The private metadata validator computes `systemd.configuration_digest` as SHA256
+The metadata validator computes `systemd.configuration_digest` as SHA256
 of the exact canonical manifest bytes. Current provider artifacts and sources
 must still match its declared digests; a stale manifest is insufficient. A valid
-manifest change alters that metadata pin, but no pin enables public systemd
-admission. Repeated metadata checks retain current-process endpoint/directory
+manifest change alters that metadata pin; direct completion and agreement must
+also succeed. Repeated metadata checks retain current-process endpoint/directory
 identities and refuse replacement; these ephemeral facts are outside the stable boot input
 pin. Ordinary unrelated ancestor-directory contents/timestamps are not pinned.
 A new boot requires new observations, not reused inode/PID authority. The
@@ -293,7 +292,8 @@ through capture, collection and final revalidation.
 
 Socket checks prove type, filesystem owner/protection, exact entry set,
 observed continuity and a bounded Unix-stream connection with root peer
-credentials. A dead endpoint refuses. No request is sent. These checks do
+credentials. A dead endpoint refuses. Metadata probes send no request; direct
+collection separately checks each live connection before sending a request. These checks do
 **not** independently authenticate the serving
 process, inspect its live memory or prove the semantic completeness of a
 provider's declared ranges/configuration. The reviewed deployment manifest and
@@ -301,24 +301,65 @@ its exclusion must establish which service owns each endpoint and that the
 listed artifacts are its complete configuration. Missing that evidence is
 unknown; this API supplies no implicit deployment approval or host defaults.
 
-### Provider completion remains unavailable
+### Direct provider completion and NSS agreement
 
-The helper's `--files-systemd` mode is a diagnostic agreement view only. Direct
-NSS ABI terminal checks are insufficient for this module: the upstream
-[userdb iterator](https://raw.githubusercontent.com/systemd/systemd/v257/src/shared/userdb.c)
+The helper's `--files-systemd` mode supplies an additional agreement view only.
+The upstream [userdb iterator](https://raw.githubusercontent.com/systemd/systemd/v257/src/shared/userdb.c)
 can suppress a provider error after returning records, and the
 [NSS implementation](https://raw.githubusercontent.com/systemd/systemd/v257/src/nss-systemd/nss-systemd.c)
-then presents normal exhaustion. A complete stream and record followed by
-`ServiceNotAvailable` can produce identical sanitized snapshots. Socket
-connections, declared ranges and artifact hashes do not restore the lost result.
-Systemd therefore remains unknown until direct completion evidence exists.
+then presents normal exhaustion. Identical sanitized snapshots therefore do not
+prove provider completion.
 
-Supporting it later requires bounded direct NUL-framed Varlink enumeration of
-each selected provider's GetUserRecord, GetGroupRecord and GetMemberships calls,
-with per-call terminal evidence, strict framing/fields, and refusal of errors,
-truncation and timeouts. Forwarding services cannot replace their contributors'
-independent completion. NSS can then supply an additional agreement view. This
-revision does not implement or claim that direct collector.
+`userdb_varlink_linux.go` implements the bounded direct collector without a new
+dependency. Following the [User/Group API](https://systemd.io/USER_GROUP_API/), it
+sends NUL-framed JSON over held, protected `/run/systemd/userdb/` anchors. Each
+request uses a fresh connection, exact `service` equal to the socket name,
+`more: true`, and one of `GetUserRecord`, `GetGroupRecord`, `GetMemberships`, with
+no lookup/filter parameters. Each live connection verifies root peer credentials
+and pinned socket continuity before sending and after completion. Full closure
+checks surround collection, including the exact endpoint set.
+
+For each allocator and each call, records require a final non-`continues` reply;
+`NoRecordFound` is accepted only for an empty call. All other errors, including
+errors after rows, refuse. After that terminal reply the client half-closes its
+write side and requires EOF with no further bytes. This detects buffered, delayed
+and truncated replies after terminal; no quiet-time heuristic supplies success.
+The [sd-varlink implementation](https://raw.githubusercontent.com/systemd/systemd/v257/src/libsystemd/sd-varlink/sd-varlink.c)
+flushes output and disconnects an idle server after read EOF. A provider that does
+not disconnect within the deadline remains unknown. Frames are at most 64 KiB
+including NUL, replies across all calls at most 8 MiB, and record replies across
+all allocators/calls at most `Limits.Entries`. The entire public operation uses
+one `Limits.Duration`/caller deadline; cancellation closes the active connection.
+Limit exhaustion, EOF before terminal, malformed JSON, duplicate keys at any
+nesting depth (including escaped aliases), unknown fields and invalid types refuse.
+
+Multiplexer and NameServiceSwitch endpoints retain all manifest, provenance and
+protection checks, but are never queried as completion authority. Their recorded
+forwarding graph resolves to each underlying DynamicUser/Home/Machine allocator
+queried directly, plus the separately enumerated files implementation. A clean
+forwarder cannot mask an underlying contributor failure.
+
+The supported closed user record fields are required `userName`, `uid`, `gid`,
+`homeDirectory`, `shell`, `locked`, `service`; optional typed `realName` and
+`disposition` metadata do not enter the directory projection. Groups require
+`groupName`, `gid`, `service`, with optional typed `description` and `disposition`.
+`incomplete` may be absent or false, never true. Other fields, including
+privileged/per-machine sections, refuse rather than guessing effective values.
+This supports the [DynamicUser record shape](https://raw.githubusercontent.com/systemd/systemd/v257/src/core/core-varlink.c);
+Home/Machine records outside this subset remain unsupported/unknown even with
+reviewed ranges. No password hashes are collected. Names and paths reject field
+separators/control characters; paths must be absolute and clean. UID and both
+user/group GIDs must fall within that exact allocator's recorded ranges.
+Repeated names or numeric IDs within a provider refuse. Conflicting or repeated
+identities across allocators/files also refuse rather than selecting a winner.
+
+`GetMemberships` pairs are authoritative for direct supplementary memberships;
+unknown user/group references and duplicate pairs within a provider refuse.
+Pairs are merged across contributors and with files memberships, including when
+a provider contributes membership to another provider's group. NSS must agree on
+all observed names, UID/GID, home, shell, memberships and shadow lock state.
+GECOS, group password placeholders and shadow aging fields are outside this closed
+projection. Presence matters in both directions; ordering is immaterial.
 
 Before combining the diagnostic views, each individual module rejects repeated
 names and repeated UID/GID values (shadow has names only), even for identical
@@ -332,8 +373,10 @@ this projection rule never supplies systemd completion authority.
 in a test-owned copy. Its services target a passed temporary directory descriptor;
 all drop-in roots target missing `/proc/0` paths. No installed service or module
 is modified. Complete and post-record-error controls return identical ABI views;
-immediate error returns no view. All three remain inadmissible through the public
-runtime. The test requires that real module and records its original/copy hashes;
+immediate error returns no view. The metadata-only admission fixture lacks a
+direct protocol and remains unknown; `TestUserDBQualifiedDirectory` separately
+pairs a clean direct-stream/files+systemd positive control with late-error, range,
+NSS-disagreement and metadata-drift refusals. The real-module test records hashes;
 its files module is empty, so the witness records must come from real systemd.
 `TestReviewSystemdDuplicateEnumeration` retains the three database repetitions and
 the identical cross-module control against the actual helper, while the files-only
