@@ -37,6 +37,7 @@ func runPinnedEmpty(ctx context.Context, tool Tool, args []string, limit int64, 
 	}
 	defer f.Close()
 	cmd := exec.CommandContext(ctx, "/proc/self/fd/3", args...)
+	cmd.Args[0] = tool.Path
 	cmd.ExtraFiles = []*os.File{f}
 	cmd.Env = []string{}
 	cmd.Dir = "/"

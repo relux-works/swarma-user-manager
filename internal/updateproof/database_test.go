@@ -98,6 +98,9 @@ func TestReconcilePinnedAuditContract(t *testing.T) {
 	if e := runPinnedEmpty(ctx, toolFixture(t, "/usr/bin/false"), []string{}, 128, true); e != ErrGap {
 		t.Fatal("failed audit accepted", e)
 	}
+	if e := runPinnedEmpty(ctx, toolFixture(t, "/usr/bin/printf"), []string{"dirty audit"}, 128, false); e != nil {
+		t.Fatal("known dirty-output producer failed before audit check", e)
+	}
 	if e := runPinnedEmpty(ctx, toolFixture(t, "/usr/bin/printf"), []string{"dirty audit"}, 128, true); e != ErrGap {
 		t.Fatal("dirty audit accepted", e)
 	}

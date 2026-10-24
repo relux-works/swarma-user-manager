@@ -16,15 +16,19 @@ import (
 )
 
 type boundedBuffer struct {
-	bytes.Buffer
-	limit int64
+	buffer bytes.Buffer
+	limit  int64
 }
+
+func (b *boundedBuffer) Len() int       { return b.buffer.Len() }
+func (b *boundedBuffer) Bytes() []byte  { return b.buffer.Bytes() }
+func (b *boundedBuffer) String() string { return b.buffer.String() }
 
 func (b *boundedBuffer) Write(p []byte) (int, error) {
 	if int64(b.Len()+len(p)) > b.limit {
 		return 0, ErrScope
 	}
-	return b.Buffer.Write(p)
+	return b.buffer.Write(p)
 }
 func pinnedFile(pin FilePin, owner uint32, anchor string, limit int64) (*os.File, error) {
 	if !leafPath(pin.Path) || !digestOK(pin.SHA256) {
