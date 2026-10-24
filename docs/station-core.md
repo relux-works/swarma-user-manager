@@ -197,7 +197,9 @@ Adapter mismatches remain explicit:
   `Plan`.
 - Full qualified `AccountDirectory`, root-run evidence, all persistence names,
   live fencing, authenticated operator issuance and Keymaker/broker receipts
-  remain deployment work. No core-to-Linux backend is linked here.
+  remain deployment work. The [Linux adapter](linux-backend.md) translates these
+  boundaries and is linked in the executable, with unpublished authority providers
+  defaulting to unknown.
 
 ## Operator retirement and deployment gates
 
@@ -228,7 +230,7 @@ environment and the binary. The jointly accepted Keymaker provision/confirm
 contract is still required. Additional gates remain root/backend qualification,
 installer policy and deny-file provisioning, maintained process/object fences,
 external restore custody, incident-maintenance admission, and nonempty legacy
-provenance reconciliation. No fake backend is linked into the executable.
+provenance reconciliation. The executable links the Linux adapter with its host authority still closed.
 
 ## Validation
 

@@ -1,8 +1,8 @@
 # Linux station primitives
 
 `linuxos` supplies Linux mechanisms for [stations v0](../../spec/stations-v0.md).
-It is a standalone internal package. It has no lifecycle state, service entry
-point or core-backend adapter. `user.bump` remains refused by the A1
+It is a standalone internal package. It has no lifecycle state or service entry point; the
+[core-backend adapter](../../docs/linux-backend.md) is a separate package. `user.bump` remains refused by the A1
 core until the key-service provision/confirm contract exists. A successful
 inventory never activates an account or authorizes reuse of a UID.
 
@@ -20,6 +20,8 @@ There is no package-global mutable state.
 | `ObserveAccounts`, `AccountDirectory`, `AccountSet` | Bounded protected local passwd/group/shadow reads plus independent complete qualified NSS agreement. Observes account/group fields and memberships; never confers provenance. Missing provider refuses. |
 | `EffectNames`, `Dir.CreateStage`, `OwnedStage.Populate`, `Publish`, `Quarantine`, `Identity`, `Close`, `Dir.Observe`, `FSIdentity` | Deterministic `stage-<key>` / `q-<key>`, exclusive creation, live owned handles, exact descriptor identities/digests, separately admitted population/publication and root-only owned quarantine. [Receipts §3](../../spec/station-effect-receipts.md#3-object-operations-and-quarantine). |
 | `CheckPolicyFile`, `CheckPersistenceDenial`, `Qualification` | Fresh `ok` / `failed(reason)` / `unknown` checks of policy protection, cron/at deny coverage and allow precedence, and absent linger markers. [Receipts §6](../../spec/station-effect-receipts.md#6-accepted-local-v0-authority-sources). |
+| `RemovalCommands` | Exact original-lifetime removal vectors with permitted cleanup absence; never enables creation or changes holds. |
+| `PrepareDeletion`, `DeleteEntries`, `DeletionEntry` | Bounded read-only exact entry preparation and separately admitted deletion, with whole-batch prevalidation and per-entry replacement refusal; caller supplies owned root receipt and fences. |
 | `Allocation.Commands`, `RetirementCommands`, `RunAccountTool` | Closed exact vectors for groupadd/useradd/userdel/groupdel, fixed absolute executables, empty environment, cwd `/`; §§4–5. Tool success still requires caller postcondition checks. |
 | `OpenRoot`, `Dir.OpenDirectory`, `Close` | Pinned descriptors, no symlink traversal. Explicit mount transitions are allowed only while acquiring a configured root; descendant transitions refuse. Shared sticky ancestors permit inventory, never publication. |
 | `StationManifest`, `Dir.Install`, `Dir.ReplaceManaged`, `Dir.Verify` | Private staging, root:S scaffold modes, approved control bytes, atomic publication/replacement, stored ACL/capability refusal and actual SHA-256 digests; §§7/10. |

@@ -7,6 +7,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/relux-works/swarma-user-manager/internal/linuxbackend"
 	"github.com/relux-works/swarma-user-manager/internal/manager"
 )
 
@@ -72,9 +73,13 @@ func run() int {
 		_ = json.NewEncoder(os.Stdout).Encode(manager.PublicRefusal(raw, "qualification_required"))
 		return 1
 	}
-	engine = manager.Engine{BootID: boot, Operator: manager.FileOperatorVerifier{Root: p.Root}, Policy: p, Authority: manager.FileAuthority{Root: p.Root}, Store: store, Journal: manager.NativeJournal{Path: p.Root + "/lib/user-manager/generations"}}
-	// No Linux backend is linked in this core slice. Missing qualification refuses
-	// before any new effect or account mutation; an existing terminal effect can replay.
+	backend := linuxbackend.NewWithEnvironment(p, nil, store)
+	defer backend.Close()
+	operator := manager.FileOperatorVerifier{Root: p.Root}
+	source := manager.LocalV0Source{Policies: manager.FilePolicyReader{}, Backend: backend, Operators: operator}
+	engine = manager.Engine{Backend: backend, Sources: map[string]manager.AuthoritySource{"local-v0": source}, BootID: boot, Operator: manager.FileOperatorVerifier{Root: p.Root}, Policy: p, Authority: manager.FileAuthority{Root: p.Root}, Store: store, Journal: manager.NativeJournal{Path: p.Root + "/lib/user-manager/generations"}}
+	// The Linux adapter is linked. Its host evidence/NSS provider remains unknown
+	// until the qualified provider contract is published; no policy flag admits it.
 	r := engine.Handle(context.Background(), raw, in)
 	if json.NewEncoder(os.Stdout).Encode(r) != nil {
 		return 1

@@ -71,3 +71,11 @@ Root:S installation/quarantine and crash durability, deployed policy schema and
 effective cron/at denial/allow precedence for every station name,
 and logind/no-running-manager checks remain pending host qualification. These
 checks do not enable bump, policy installation or account activation.
+
+The Linux adapter is linked but its retained root qualification-record provider
+and complete qualified NSS provider remain unavailable. The production adapter
+refuses without them; `qualified: true` alone never admits. Approved skeleton
+reading, full inventory-scope configuration and maintained local guards must be
+published with those providers. Lost live stage/publication handles require
+qualified continuity or root maintenance, never pathname/inode adoption. See
+[the adapter boundary](docs/linux-backend.md).
