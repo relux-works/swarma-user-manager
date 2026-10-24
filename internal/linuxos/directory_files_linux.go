@@ -5,18 +5,13 @@ package linuxos
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"io"
 	"os"
 	"os/exec"
 	"reflect"
 	"strconv"
 	"time"
-
-	"golang.org/x/sys/unix"
 )
 
 // FilesNSSRuntime is the status-aware files implementation. The later reviewed
@@ -47,44 +42,18 @@ func (r FilesNSSRuntime) CaptureModules(ctx context.Context, names []string, l L
 	}
 	return []NSSModule{{Name: "files", ImplementationDigest: impl, ConfigurationDigest: config, UIDRanges: []IDInterval{}, GIDRanges: []IDInterval{}}}, nil
 }
-func openCaptured(ctx context.Context, a ProtectedArtifact) (f *os.File, err error) {
-	captured, _, e := captureArtifact(ctx, a)
+func openCaptured(ctx context.Context, a ProtectedArtifact) (*os.File, error) {
+	f, _, _, e := openImplementation(ctx, a, ImplementationFileBytes)
 	if e != nil {
 		return nil, e
-	}
-	f, e = child(a.Directory.f, a.Name, unix.O_RDONLY, 0)
-	if e != nil {
-		return nil, e
-	}
-	defer func(handle *os.File) {
-		if err != nil {
-			err = errors.Join(err, handle.Close())
-		}
-	}(f)
-	before, e := descriptorStat(f)
-	if e != nil {
-		return nil, e
-	}
-	if before.Mode&unix.S_IFMT != unix.S_IFREG || before.Uid != a.Directory.owner || before.Gid != a.Directory.group || before.Nlink != 1 || before.Mode&0022 != 0 {
-		return nil, refusal("directory_unknown", "collector_protection", nil)
-	}
-	if e = access(f); e != nil {
-		return nil, e
-	}
-	b, e := readBounded(f, 8<<20)
-	if e != nil {
-		return nil, e
-	}
-	sum := sha256.Sum256(b)
-	after, e := descriptorStat(f)
-	if e != nil || !stableStat(before, after) || hex.EncodeToString(sum[:]) != captured.SHA256 {
-		return nil, refusal("directory_unknown", "collector_changed", e)
 	}
 	if _, e = f.Seek(0, 0); e != nil {
+		f.Close()
 		return nil, e
 	}
 	return f, nil
 }
+
 func (r FilesNSSRuntime) Enumerate(ctx context.Context, names []string, l Limits) (out NSSDatabases, err error) {
 	if !onlyFiles(names) {
 		return nil, refusal("directory_unknown", "module_unsupported_or_unqualified", nil)

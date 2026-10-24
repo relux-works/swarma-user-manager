@@ -236,63 +236,14 @@ func shaBytes(b []byte) string { h := sha256.Sum256(b); return hex.EncodeToStrin
 // root-owned links, retaining no caller-selected loader search behavior. Every
 // target still undergoes the ordinary no-follow protected artifact open.
 func ResolveProtectedPath(ctx context.Context, path string) (string, error) {
-	if !filepath.IsAbs(path) || filepath.Clean(path) != path {
-		return "", refusal("qualification_failed", "resolve_path", nil)
+	probe, e := (PathReader{}).Probe(ctx, path)
+	if e != nil {
+		return "", e
 	}
-	for links := 0; links < 40; links++ {
-		if e := ctx.Err(); e != nil {
-			return "", e
-		}
-		parts := strings.Split(strings.TrimPrefix(path, "/"), "/")
-		prefix := "/"
-		changed := false
-		for i, part := range parts {
-			d, e := OpenRoot(prefix)
-			if e != nil {
-				return "", e
-			}
-			if e = d.protected(); e != nil {
-				d.Close()
-				return "", e
-			}
-			f, e := child(d.f, part, unix.O_PATH, 0)
-			if e != nil {
-				d.Close()
-				return "", e
-			}
-			s, e := descriptorStat(f)
-			e = errors.Join(e, f.Close())
-			if e != nil {
-				d.Close()
-				return "", e
-			}
-			if s.Uid != 0 || s.Gid != 0 || s.Mode&unix.S_IFMT != unix.S_IFLNK && s.Mode&0022 != 0 {
-				d.Close()
-				return "", refusal("qualification_failed", "resolve_metadata", nil)
-			}
-			if s.Mode&unix.S_IFMT == unix.S_IFLNK {
-				b := make([]byte, 4096)
-				n, x := unix.Readlinkat(int(d.f.Fd()), part, b)
-				d.Close()
-				if x != nil || n == 0 || n == len(b) {
-					return "", refusal("qualification_failed", "resolve_link", x)
-				}
-				target := string(b[:n])
-				if !filepath.IsAbs(target) {
-					target = filepath.Join(prefix, target)
-				}
-				path = filepath.Join(append([]string{target}, parts[i+1:]...)...)
-				changed = true
-				break
-			}
-			d.Close()
-			prefix = filepath.Join(prefix, part)
-		}
-		if !changed {
-			return path, nil
-		}
+	if probe.AbsentAt != "" {
+		return "", unix.ENOENT
 	}
-	return "", refusal("qualification_failed", "resolve_limit", nil)
+	return probe.Resolved, nil
 }
 
 // ExecutingDigest binds the reviewed installed path to the currently executing

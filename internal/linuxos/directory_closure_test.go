@@ -16,7 +16,7 @@ import (
 
 type closureResolverFixture map[string]ProtectedArtifact
 
-func (r closureResolverFixture) ResolveELF(_ context.Context, name string) (ProtectedArtifact, error) {
+func (r closureResolverFixture) ResolveELF(_ context.Context, name string, _ []string) (ProtectedArtifact, error) {
 	a, ok := r[name]
 	if !ok {
 		return ProtectedArtifact{}, errors.New("unresolved")

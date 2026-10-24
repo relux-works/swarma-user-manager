@@ -3,13 +3,13 @@
 package linuxos
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"debug/elf"
 	"encoding/hex"
 	"encoding/json"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 )
@@ -94,12 +94,13 @@ func CaptureConfigurationClosure(ctx context.Context, artifacts []ProtectedArtif
 // in its reviewed configuration closure. A mere SONAME map is not such a proof.
 // This capability is supplied by the later Environment; nil refuses.
 type ELFResolver interface {
-	ResolveELF(context.Context, string) (ProtectedArtifact, error)
+	ResolveELF(context.Context, string, []string) (ProtectedArtifact, error)
 }
 
 // CaptureImplementationClosure traverses every ELF DT_NEEDED and PT_INTERP from
 // the module roots (and collector). Unresolvable dependencies, non-ELF objects or
-// unqualified RPATH/RUNPATH refuse. It never dlopens/executes inspected content.
+// unsupported search syntax refuses. Only each requesting object supplies its
+// own absolute RUNPATH. It never dlopens/executes inspected content.
 func CaptureImplementationClosure(ctx context.Context, roots []ProtectedArtifact, resolver ELFResolver, l Limits) ([]ClosureFile, string, error) {
 	c, cancel, e := budget(ctx, l)
 	if e != nil {
@@ -118,6 +119,8 @@ func CaptureImplementationClosure(ctx context.Context, roots []ProtectedArtifact
 		queue = append(queue, item{root, 1})
 	}
 	out := []ClosureFile{}
+	remaining := ImplementationTotalBytes
+	resolvedNames := map[string]string{}
 	seen := map[string]bool{}
 	for len(queue) > 0 {
 		next := queue[0]
@@ -129,44 +132,89 @@ func CaptureImplementationClosure(ctx context.Context, roots []ProtectedArtifact
 			return nil, "", refusal("directory_unknown", "closure_limit", nil)
 		}
 		seen[next.a.Path] = true
-		f, b, e := captureArtifact(c, next.a)
+		maximum := ImplementationFileBytes
+		if remaining < maximum {
+			maximum = remaining
+		}
+		held, file, size, e := openImplementation(c, next.a, maximum)
 		if e != nil {
+			return nil, "", refusal("directory_unknown", "implementation_closure", e)
+		}
+		remaining -= size
+		before, e := descriptorStat(held)
+		object, e2 := elf.NewFile(held)
+		if e != nil || e2 != nil {
+			held.Close()
+			return nil, "", refusal("directory_unknown", "closure_elf", e2)
+		}
+		machine := elf.EM_X86_64
+		if runtime.GOARCH == "arm64" {
+			machine = elf.EM_AARCH64
+		}
+		if (runtime.GOARCH != "amd64" && runtime.GOARCH != "arm64") || object.Class != elf.ELFCLASS64 || object.Data != elf.ELFDATA2LSB || object.Machine != machine {
+			held.Close()
+			return nil, "", refusal("directory_unknown", "closure_abi", nil)
+		}
+		deps, runpath, e := loaderDependencies(object, held, uint64(size))
+		if e != nil {
+			held.Close()
 			return nil, "", e
 		}
-		object, e := elf.NewFile(bytes.NewReader(b))
-		if e != nil {
-			return nil, "", refusal("directory_unknown", "closure_elf", nil)
+		type dependency struct {
+			name    string
+			runpath []string
 		}
-		deps, e := loaderDependencies(object, b)
-		if e != nil {
-			return nil, "", e
+		lookups := []dependency{}
+		for _, dep := range deps {
+			lookups = append(lookups, dependency{dep, runpath})
 		}
 		for _, p := range object.Progs {
 			if p.Type == elf.PT_INTERP {
-				if p.Filesz < 2 || p.Filesz > 4096 || p.Off > uint64(len(b)) || p.Filesz > uint64(len(b))-p.Off {
+				if p.Filesz < 2 || p.Filesz > 4096 || p.Off > uint64(size) || p.Filesz > uint64(size)-p.Off {
+					held.Close()
 					return nil, "", refusal("directory_unknown", "closure_interpreter", nil)
 				}
-				raw := b[p.Off : p.Off+p.Filesz]
-				if raw[len(raw)-1] != 0 || bytes.IndexByte(raw[:len(raw)-1], 0) >= 0 {
+				raw := make([]byte, p.Filesz)
+				_, e := held.ReadAt(raw, int64(p.Off))
+				if e != nil || raw[len(raw)-1] != 0 || strings.IndexByte(string(raw[:len(raw)-1]), 0) >= 0 {
+					held.Close()
 					return nil, "", refusal("directory_unknown", "closure_interpreter", nil)
 				}
-				deps = append(deps, string(raw[:len(raw)-1]))
+				lookups = append(lookups, dependency{string(raw[:len(raw)-1]), []string{}})
 			}
 		}
-		for _, dep := range deps {
-			if dep == "" || strings.ContainsRune(dep, 0) {
+		after, e := descriptorStat(held)
+		ce := held.Close()
+		if e != nil || ce != nil || !stableStat(before, after) {
+			return nil, "", refusal("path_changed", "closure_parse", e)
+		}
+		for _, dep := range lookups {
+			if dep.name == "" || strings.ContainsAny(dep.name, "$\x00\n\r") || strings.Contains(dep.name, "/") && (!filepath.IsAbs(dep.name) || filepath.Clean(dep.name) != dep.name) {
 				return nil, "", refusal("directory_unknown", "closure_dependency", nil)
 			}
-			a, e := resolver.ResolveELF(c, dep)
+			scope := dep.runpath
+			if filepath.IsAbs(dep.name) {
+				scope = []string{}
+			}
+			a, e := resolver.ResolveELF(c, dep.name, scope)
 			if e != nil {
 				return nil, "", refusal("directory_unknown", "closure_unresolved", e)
 			}
+			// A loaded SONAME cannot select different files in separate requester
+			// scopes. Refuse that ambiguous namespace instead of inventing load order.
+			if prior, ok := resolvedNames[dep.name]; ok && prior != a.Path {
+				return nil, "", refusal("directory_unknown", "closure_name_collision", nil)
+			}
+			resolvedNames[dep.name] = a.Path
 			if len(queue) >= l.Entries {
 				return nil, "", refusal("directory_unknown", "closure_limit", nil)
 			}
 			queue = append(queue, item{a, next.depth + 1})
 		}
-		out = append(out, f)
+		out = append(out, file)
+	}
+	if e := c.Err(); e != nil {
+		return nil, "", e
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
 	return out, closureDigest(out), nil
