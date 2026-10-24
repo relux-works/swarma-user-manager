@@ -170,7 +170,11 @@ never admits. Root installation and qualification remain pending.
 
 The core refuses production bump with `bump_key_admission_unconfirmed` before
 its journal or backend access until the Keymaker provision/confirm contract is
-accepted. Host qualification never authorizes account ownership or cleanup.
+accepted. The [joint PC2 activation-order draft](spec/activation-order.md)
+recommends a local transaction fence through durable activation; its Keymaker
+commitments and cross-process qualification remain pending. A provision/confirm
+observation alone cannot enable bump. Host qualification never authorizes
+account ownership or cleanup.
 
 The [account-directory contract](spec/station-effect-receipts.md#64-qualified-local-account-directory-and-nss-configuration)
 selects `files` and bounded `systemd`. The implementation compares protected

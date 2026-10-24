@@ -187,3 +187,17 @@ automatic pin protocol nor host qualification. Before deployment:
 - Integrate authenticated admission/containment and owner/curator pending-delivery
   receipts before any admission claim. A maintenance assertion alone is not P7
   containment evidence.
+
+## PC2: admission currency through activation
+
+The [joint activation-order draft](spec/activation-order.md) recommends the
+user-manager order effects -> gate -> data -> terminal authority fence, with
+both Keymaker facts current through durable active append and a recovery barrier
+for uncertain writes. This is a recommendation, not an accepted or implemented
+contract. Keymaker must publish fence ownership/access, real transaction state,
+complete writer/event participation, durability/recovery, incarnation/restore
+and budget/issuance commitments (K1–K6). PC1 observer/bootstrap and all existing
+qualification gates remain separate. No RPC is permitted under locks; the
+250 ms reader, 1000 ms writer and send-start+2000 ms observation budgets remain.
+Until joint acceptance and real cross-process qualification, production bump
+still refuses `bump_key_admission_unconfirmed` before journal/backend work.
