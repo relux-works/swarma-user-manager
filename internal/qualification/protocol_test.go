@@ -97,17 +97,18 @@ func (h *host) CheckAll(context.Context, manager.Policy, Inputs, []string) (Chec
 }
 
 type testUnit struct {
+	id    string
 	err   error
 	calls int
 }
 
-func (u *testUnit) Successful(context.Context, string) error { u.calls++; return u.err }
+func (u *testUnit) Successful(context.Context, string) (string, error) { u.calls++; return u.id, u.err }
 func setup() (Protocol, manager.Policy, *host, *memStorage, *testUnit) {
 	p := policy()
 	h := &host{i: inputs(p), names: []string{"worker-one"}, checks: passing()}
 	s := &memStorage{}
-	u := &testUnit{}
-	return Protocol{Deployment: h, Storage: s, Unit: u, Boot: func() (string, error) { return bootOne, nil }, Now: func() time.Time { return time.UnixMilli(1000) }}, p, h, s, u
+	u := &testUnit{id: strings.Repeat("a", 32)}
+	return Protocol{Deployment: h, Storage: s, Unit: u, Invocation: func(context.Context) (string, error) { return strings.Repeat("a", 32), nil }, Boot: func() (string, error) { return bootOne, nil }, Now: func() time.Time { return time.UnixMilli(1000) }}, p, h, s, u
 }
 func issued(t *testing.T) (Protocol, manager.Policy, *host, *memStorage, *testUnit) {
 	t.Helper()
@@ -118,6 +119,9 @@ func issued(t *testing.T) (Protocol, manager.Policy, *host, *memStorage, *testUn
 	}
 	p.Qualified = true
 	p.QualificationDigest = q.InputsDigest
+	if _, e = s.Issue(context.Background(), p, true); e != nil {
+		t.Fatal("boot control", e)
+	}
 	return s, p, h, m, u
 }
 
@@ -200,7 +204,7 @@ func TestQualificationBootRetryAndDrift(t *testing.T) {
 				t.Fatal("policy changed")
 			}
 			if mode == "valid" {
-				if e != nil || q.BootID != bootTwo || q.InputsDigest != p.QualificationDigest || h.checkCalls != 2 {
+				if e != nil || q.BootID != bootTwo || q.InputsDigest != p.QualificationDigest || h.checkCalls != 3 {
 					t.Fatal("boot failed to rerun", q, e)
 				}
 			} else if e != ErrRequired || m.b != nil {
@@ -317,4 +321,79 @@ func TestQualificationNewReservationKeepsPin(t *testing.T) {
 		t.Fatal(e)
 	}
 	g.Release()
+}
+
+// Initial operator qualification is only a candidate for pinning, even when
+// a prior same-boot unit success is available. It must never admit the host.
+func TestQualificationInitialRecordNeverAdmits(t *testing.T) {
+	s, p, _, _, _ := setup()
+	q, e := s.Issue(context.Background(), p, false)
+	if e != nil {
+		t.Fatal(e)
+	}
+	p.Qualified = true
+	p.QualificationDigest = q.InputsDigest
+	g, e := s.Pin(context.Background(), p)
+	if g != nil {
+		g.Release()
+	}
+	if e != ErrRequired {
+		t.Fatal("initial candidate admitted", e)
+	}
+}
+
+// An initial candidate is never admission, even beside a successful same-boot
+// unit. A different boot issuer invocation cannot reuse another run's success.
+func TestQualificationIssuerBinding(t *testing.T) {
+	for _, mode := range []string{"initial", "stale-success", "missing-id", "matching"} {
+		t.Run(mode, func(t *testing.T) {
+			s, p, _, m, u := issued(t)
+			q, e := Decode(m.b, p)
+			if e != nil {
+				t.Fatal(e)
+			}
+			if mode == "initial" {
+				q.Issuer = Issuer{Mode: "initial"}
+			} else {
+				q.Issuer = Issuer{Mode: "boot", InvocationID: strings.Repeat("b", 32)}
+			}
+			if mode == "missing-id" {
+				q.Issuer.InvocationID = ""
+			}
+			u.id = strings.Repeat("b", 32)
+			if mode == "stale-success" {
+				u.id = strings.Repeat("a", 32)
+			}
+			m.b, _ = Canonical(q)
+			g, e := s.Pin(context.Background(), p)
+			if mode == "matching" {
+				if e != nil {
+					t.Fatal("matching issuer refused", e)
+				}
+				g.Release()
+			} else if e != ErrRequired || g != nil {
+				t.Fatal("issuer mismatch admitted", e)
+			}
+		})
+	}
+}
+
+// A boot issuer must be the live own unit process, not an environment-only
+// claim, another PID/cgroup, a prior completed run, or an invalid identifier.
+func TestQualificationOwnUnitContext(t *testing.T) {
+	id := strings.Repeat("a", 32)
+	path := "/system.slice/swarma-user-manager-qualify.service"
+	raw := "LoadState=loaded\nType=oneshot\nUser=root\nActiveState=activating\nSubState=start\nExecMainPID=42\nInvocationID=" + id + "\nControlGroup=" + path + "\n"
+	cg := "0::" + path + "\n"
+	for _, bad := range []string{strings.Replace(raw, "ExecMainPID=42", "ExecMainPID=43", 1), strings.Replace(raw, "activating", "inactive", 1), strings.Replace(raw, id, strings.Repeat("b", 32), 1), strings.Replace(raw, "User=root", "User=other", 1), strings.Replace(raw, "ControlGroup="+path, "ControlGroup=/other", 1)} {
+		if ValidateOwnUnit(bad, cg, id, 42) != ErrRequired {
+			t.Fatal("foreign unit admitted")
+		}
+	}
+	if ValidateOwnUnit(raw, "0::/other\n", id, 42) != ErrRequired || ValidateOwnUnit(raw, cg, strings.Repeat("0", 32), 42) != ErrRequired {
+		t.Fatal("untrusted unit identity")
+	}
+	if ValidateOwnUnit(raw, cg, id, 42) != nil {
+		t.Fatal("own unit control refused")
+	}
 }

@@ -1,8 +1,15 @@
 package main
 
 import (
+	"bytes"
+	"context"
+	"errors"
 	"github.com/relux-works/swarma-user-manager/internal/manager"
+	"os"
+	"os/exec"
+	"strings"
 	"testing"
+	"time"
 )
 
 // Maintenance selects exactly two fixed forms, independently of stdin. Neither
@@ -29,5 +36,36 @@ func TestQualificationMaintenanceSelection(t *testing.T) {
 	}
 	if !maintenanceAllowed(manager.Invocation{EUID: 0}, 0, false) {
 		t.Fatal("trusted root control refused")
+	}
+}
+
+// Real entrypoint maintenance refusal is independent of stdin: an unprivileged
+// child with a held-open pipe exits immediately and emits no candidate digest.
+func TestQualificationMaintenanceEntrypoint(t *testing.T) {
+	if os.Getenv("QUALIFICATION_ENTRY_CHILD") == "1" {
+		os.Args = []string{"swarma-user-manager", "qualify", "--boot"}
+		os.Exit(run())
+	}
+	if os.Geteuid() == 0 {
+		t.Fatal("this fixture must run unprivileged")
+	}
+	r, w, e := os.Pipe()
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer r.Close()
+	defer w.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestQualificationMaintenanceEntrypoint$")
+	cmd.Env = []string{"QUALIFICATION_ENTRY_CHILD=1", "INVOCATION_ID=" + strings.Repeat("a", 32), "SUDO_UID=200"}
+	cmd.Stdin = r
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	e = cmd.Run()
+	var exit *exec.ExitError
+	if !errors.As(e, &exit) || exit.ExitCode() != 1 || ctx.Err() != nil || stdout.Len() != 0 || stderr.String() != "qualification_required\n" {
+		t.Fatal("maintenance boundary", e, stdout.String(), stderr.String())
 	}
 }

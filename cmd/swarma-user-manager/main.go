@@ -15,6 +15,7 @@ func main() { os.Exit(run()) }
 func run() int {
 	in := manager.VerifiedInvocation(os.Args[1:])
 	realUID := os.Getuid()
+	ownInvocation := os.Getenv("INVOCATION_ID")
 	sudoEnvironment := os.Getenv("SUDO_UID") != "" || os.Getenv("SUDO_USER") != "" || os.Getenv("SUDO_COMMAND") != ""
 	os.Clearenv()
 	syscall.Umask(0077)
@@ -28,7 +29,7 @@ func run() int {
 		return 1
 	}
 	if selected, boot := maintenanceMode(in.Args); selected {
-		return runQualification(in, realUID, sudoEnvironment, boot)
+		return runQualification(in, realUID, sudoEnvironment, boot, ownInvocation)
 	}
 	input := make(chan struct {
 		b []byte

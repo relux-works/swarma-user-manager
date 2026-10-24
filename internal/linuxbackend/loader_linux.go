@@ -52,7 +52,13 @@ func (r *deploymentResolver) ResolveELF(ctx context.Context, name string) (linux
 			actual, e = linuxos.ResolveProtectedPath(ctx, actual)
 		}
 	}
-	if e != nil || actual != expected {
+	covered := false
+	for _, root := range r.profile.SearchRoots {
+		if root.State == "present" && (filepath.Dir(expected) == root.Path || strings.HasPrefix(filepath.Dir(expected), root.Path+"/")) {
+			covered = true
+		}
+	}
+	if e != nil || actual != expected || !covered {
 		return linuxos.ProtectedArtifact{}, qualification.ErrRequired
 	}
 	return r.artifact(ctx, expected)

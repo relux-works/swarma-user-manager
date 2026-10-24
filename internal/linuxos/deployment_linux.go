@@ -31,11 +31,14 @@ func AcquireDeployment(ctx context.Context, path string, exclusive bool) (*Deplo
 	if e != nil {
 		return nil, e
 	}
-	if _, e = protectedRead(ctx, d, filepath.Base(path), 1, true); e != nil {
+	return acquireDeploymentAt(ctx, d, filepath.Base(path), exclusive)
+}
+func acquireDeploymentAt(ctx context.Context, d *Dir, name string, exclusive bool) (*DeploymentLease, error) {
+	if _, e := protectedRead(ctx, d, name, 1, true); e != nil {
 		d.Close()
 		return nil, e
 	}
-	f, e := child(d.f, filepath.Base(path), unix.O_RDONLY, 0)
+	f, e := child(d.f, name, unix.O_RDONLY, 0)
 	if e != nil {
 		d.Close()
 		return nil, e
@@ -45,6 +48,11 @@ func AcquireDeployment(ctx context.Context, path string, exclusive bool) (*Deplo
 		f.Close()
 		d.Close()
 		return nil, e
+	}
+	if s.Size != 0 || metadata(f, d.owner, d.group, 0600, unix.S_IFREG) != nil {
+		f.Close()
+		d.Close()
+		return nil, refusal("qualification_failed", "deployment_lock_metadata", nil)
 	}
 	lock := unix.LOCK_SH
 	if exclusive {
@@ -68,7 +76,7 @@ func AcquireDeployment(ctx context.Context, path string, exclusive bool) (*Deplo
 		case <-time.After(time.Millisecond):
 		}
 	}
-	g := &DeploymentLease{f: f, dir: d, name: filepath.Base(path), stat: s}
+	g := &DeploymentLease{f: f, dir: d, name: name, stat: s}
 	if e = g.Check(); e != nil {
 		g.Release()
 		return nil, e

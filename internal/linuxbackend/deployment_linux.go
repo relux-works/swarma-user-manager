@@ -20,6 +20,7 @@ import (
 type DeploymentManifest struct {
 	Format          string            `json:"format"`
 	BackendVersion  string            `json:"backend_version"`
+	BackendFiles    []FilePin         `json:"backend_files"`
 	LockPath        string            `json:"lock_path"`
 	MaintenancePath string            `json:"maintenance_path"`
 	NSSHelper       string            `json:"nss_helper"`
@@ -33,6 +34,7 @@ type DeploymentManifest struct {
 const deploymentVersion = "local-v0-linux-qualification/1"
 
 type TreePin struct {
+	State  string `json:"state"`
 	Path   string `json:"path"`
 	Digest string `json:"digest"`
 }
@@ -110,7 +112,7 @@ func treePins(p []TreePin) bool {
 		return false
 	}
 	for j, v := range p {
-		if !absolute(v.Path) || !hash(v.Digest) || j > 0 && p[j-1].Path >= v.Path {
+		if !absolute(v.Path) || !hash(v.Digest) || (v.State != "present" && v.State != "absent") || j > 0 && p[j-1].Path >= v.Path {
 			return false
 		}
 	}
@@ -119,6 +121,18 @@ func treePins(p []TreePin) bool {
 func (m DeploymentManifest) validate(p manager.Policy) error {
 	if m.Format != "station-deployment/1" || m.BackendVersion != deploymentVersion || m.LockPath != filepath.Join(p.Root, "lib/user-manager/deployment.lock") || m.MaintenancePath != filepath.Join(p.Root, "lib/user-manager/maintenance.json") || m.NSSHelper != filepath.Join(p.Root, "libexec/swarma-nss-probe") || !absolute(m.NSSLibrary) || !absolute(m.Skeleton) {
 		return qualification.ErrRequired
+	}
+	if !filePins(m.BackendFiles, true) {
+		return qualification.ErrRequired
+	}
+	for _, required := range []string{"/usr/bin/systemctl", "/usr/sbin/groupadd", "/usr/sbin/useradd", "/usr/sbin/userdel", "/usr/sbin/groupdel", "/usr/sbin/nologin", "/etc/systemd/system/swarma-user-manager-qualify.service"} {
+		found := false
+		for _, f := range m.BackendFiles {
+			found = found || f.Path == required
+		}
+		if !found {
+			return qualification.ErrRequired
+		}
 	}
 	l := m.Loader
 	if l.Format != "glibc-cache-closure/1" || l.Cache.Path != "/etc/ld.so.cache" || !hash(l.Cache.Digest) || !treePins(l.SearchRoots) || !filePins(l.Configuration, false) || len(l.Resolutions) == 0 || len(l.Resolutions) > int(p.Limits.DeleteEntries) {
@@ -140,6 +154,15 @@ func (m DeploymentManifest) validate(p manager.Policy) error {
 	}
 	if !found {
 		return qualification.ErrRequired
+	}
+	for _, required := range []string{"/etc/systemd/system", "/run/systemd/system", "/usr/lib/systemd/system"} {
+		found := false
+		for _, r := range n.ServiceRoots {
+			found = found || r.Path == required
+		}
+		if !found {
+			return qualification.ErrRequired
+		}
 	}
 	i := m.Inventory
 	if i.Format != "local-v0-reviewed-host-scope/1" || !paths(i.Files, true) || !paths(i.UserUnits, true) || !paths(i.UserRuntime, true) {
@@ -190,6 +213,21 @@ func loadDeployment(ctx context.Context, p manager.Policy) (DeploymentManifest, 
 	return m, raw, nil
 }
 func captureTree(ctx context.Context, pin TreePin, l linuxos.Limits) ([]linuxos.TreeEntry, error) {
+	if pin.State == "absent" {
+		if linuxos.ProtectedAbsent(pin.Path) != nil {
+			return nil, qualification.ErrRequired
+		}
+		b, _ := qualification.Canonical(struct {
+			State string `json:"state"`
+		}{"absent"})
+		if qualification.Hash(b) != pin.Digest {
+			return nil, qualification.ErrRequired
+		}
+		return []linuxos.TreeEntry{}, nil
+	}
+	if pin.State != "present" {
+		return nil, qualification.ErrRequired
+	}
 	d, e := linuxos.OpenRoot(pin.Path)
 	if e != nil {
 		return nil, e

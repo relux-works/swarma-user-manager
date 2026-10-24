@@ -144,3 +144,65 @@ func TestQualificationNetworkDenial(t *testing.T) {
 		t.Fatal("control did not execute", string(b))
 	}
 }
+
+// Empty current coverage does not invent a station username or skip protected
+// scheduler reads: complete empty fixtures pass, missing deny data still refuses.
+func TestQualificationEmptyCoverageReadsSources(t *testing.T) {
+	path := t.TempDir()
+	etc := fixtureDir(t, path)
+	linger := fixtureDir(t, t.TempDir())
+	for _, n := range []string{"cron.deny", "at.deny"} {
+		if e := os.WriteFile(filepath.Join(path, n), nil, 0600); e != nil {
+			t.Fatal(e)
+		}
+	}
+	all := func() bool {
+		r := CheckPersistenceDenial(context.Background(), etc, linger, []string{}, testLimits())
+		if len(r) != 3 {
+			return false
+		}
+		for _, v := range r {
+			if v.State != QualificationOK {
+				return false
+			}
+		}
+		return true
+	}
+	if !all() {
+		t.Fatal("empty protected coverage refused")
+	}
+	if e := os.Remove(filepath.Join(path, "at.deny")); e != nil {
+		t.Fatal(e)
+	}
+	if all() {
+		t.Fatal("empty coverage skipped missing source")
+	}
+}
+
+// Missing per-user roots are absence only with protected existing ancestry;
+// known present entries and unknown ancestry remain unknown. Only a fake local
+// systemctl response is used here, not a claim about the host's systemd state.
+func TestQualificationOptionalUserRoots(t *testing.T) {
+	linger := fixtureDir(t, t.TempDir())
+	query := func(context.Context, string, ...string) ([]byte, error) {
+		return []byte("Id=user@24000.service\nLoadState=not-found\nActiveState=inactive\nSubState=dead\nJob=\n\nId=user-runtime-dir@24000.service\nLoadState=not-found\nActiveState=inactive\nSubState=dead\nJob=\n"), nil
+	}
+	// /etc is read-only in this test. The random path is never created.
+	name, e := unique()
+	if e != nil {
+		t.Fatal(e)
+	}
+	absent := "/etc/" + name
+	s := SystemdSources{Linger: linger, User: "worker-one", MissingUnits: []string{absent}, MissingRuntime: []string{absent}}
+	if r := systemd(context.Background(), 24000, s, testLimits(), query); r.Verdict != Clean {
+		t.Fatal("proved absent roots", r.Err)
+	}
+	s.MissingRuntime = []string{"/etc/passwd"}
+	if r := systemd(context.Background(), 24000, s, testLimits(), query); r.Verdict != Unknown {
+		t.Fatal("present root treated absent")
+	}
+	s.MissingRuntime = []string{filepath.Join(t.TempDir(), "absent")}
+	if r := systemd(context.Background(), 24000, s, testLimits(), query); r.Verdict != Unknown {
+		t.Fatal("unsafe ancestry accepted")
+	}
+}

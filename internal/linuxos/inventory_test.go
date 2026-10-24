@@ -133,7 +133,7 @@ func TestSystemdUnknownAndAssociatedState(t *testing.T) {
 	unitPath := t.TempDir()
 	runtimePath := t.TempDir()
 	lingerPath := t.TempDir()
-	s := SystemdSources{[]*Dir{fixtureDir(t, unitPath)}, []*Dir{fixtureDir(t, runtimePath)}, fixtureDir(t, lingerPath), "fixture"}
+	s := SystemdSources{Units: []*Dir{fixtureDir(t, unitPath)}, Runtime: []*Dir{fixtureDir(t, runtimePath)}, Linger: fixtureDir(t, lingerPath), User: "fixture"}
 	ctx := context.Background()
 	query := func(context.Context, string, ...string) ([]byte, error) {
 		return []byte(fmt.Sprintf("Id=user@%d.service\nLoadState=loaded\nActiveState=inactive\nSubState=dead\nJob=\n\nId=user-runtime-dir@%d.service\nLoadState=loaded\nActiveState=inactive\nSubState=dead\nJob=\n", uid, uid)), nil

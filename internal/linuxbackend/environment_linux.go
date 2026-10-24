@@ -32,6 +32,15 @@ func NewProductionEnvironment(p manager.Policy) *ProductionEnvironment {
 	h.protocol = qualification.Protocol{Deployment: h, Storage: productionRecord{p.Root}, Unit: qualification.SystemdUnit{}, Boot: manager.BootIdentity, Now: time.Now}
 	return h
 }
+
+// NewBootQualificationEnvironment accepts only the entrypoint's pre-sanitization
+// own-unit environment snapshot. The protocol authenticates it against systemd
+// and the current kernel cgroup before issuing a boot record.
+func NewBootQualificationEnvironment(p manager.Policy, ownInvocation string) *ProductionEnvironment {
+	h := NewProductionEnvironment(p)
+	h.protocol.Invocation = func(ctx context.Context) (string, error) { return qualification.OwnUnitInvocation(ctx, ownInvocation) }
+	return h
+}
 func (h *ProductionEnvironment) Issue(ctx context.Context, boot bool) (qualification.Record, error) {
 	return h.protocol.Issue(ctx, h.policy, boot)
 }
@@ -39,7 +48,11 @@ func (h *ProductionEnvironment) Pin(ctx context.Context, p manager.Policy, _ *ma
 	if !sameJSON(p, h.policy) {
 		return nil, qualification.ErrRequired
 	}
-	return h.protocol.Pin(ctx, p)
+	g, e := h.protocol.Pin(ctx, p)
+	if e != nil {
+		return nil, e
+	}
+	return g, nil
 }
 func (h *ProductionEnvironment) Accounts() linuxos.AccountDirectory { return productionDirectory{h} }
 func (h *ProductionEnvironment) Manifest(ctx context.Context, t manager.Task) ([]linuxos.Control, []string, error) {
@@ -196,6 +209,9 @@ func (h *ProductionEnvironment) localFingerprint(ctx context.Context, p manager.
 	if e != nil {
 		return "", e
 	}
+	if e = verifyFiles(ctx, m.BackendFiles); e != nil {
+		return "", e
+	}
 	digest, e := linuxos.ExecutingDigest(ctx, filepath.Join(p.Root, "libexec/swarma-user-manager"))
 	if e != nil {
 		return "", e
@@ -231,6 +247,26 @@ func (h *ProductionEnvironment) localFingerprint(ctx context.Context, p manager.
 		return "", e
 	}
 	defer close()
+	// Bind the complete loader closure of the fixed backend programs as well as
+	// NSS. No executable dependency may be replaced by a version label alone.
+	reviewed, ok := runtime.(reviewedFilesRuntime)
+	if !ok {
+		return "", qualification.ErrRequired
+	}
+	{
+		resolver := reviewed.files.Resolver.(*deploymentResolver)
+		roots := []linuxos.ProtectedArtifact{}
+		for _, path := range []string{"/usr/bin/systemctl", "/usr/sbin/groupadd", "/usr/sbin/useradd", "/usr/sbin/userdel", "/usr/sbin/groupdel"} {
+			artifact, e := resolver.artifact(ctx, path)
+			if e != nil {
+				return "", e
+			}
+			roots = append(roots, artifact)
+		}
+		if _, _, e = linuxos.CaptureImplementationClosure(ctx, roots, resolver, l); e != nil {
+			return "", e
+		}
+	}
 	modules, e := runtime.CaptureModules(ctx, moduleNames, l)
 	if e != nil {
 		return "", e
@@ -251,6 +287,10 @@ func checkNoLauncher(ctx context.Context, m DeploymentManifest, l linuxos.Limits
 		if linuxos.ProtectedAbsent(path) != nil {
 			return qualification.ErrRequired
 		}
+	}
+	unit, e := readPublic(ctx, "/etc/systemd/system/swarma-user-manager-qualify.service")
+	if e != nil || validateQualificationUnit(string(unit), filepath.Join(filepath.Dir(m.NSSHelper), "swarma-user-manager")) != nil {
+		return qualification.ErrRequired
 	}
 	if e := verifyFiles(ctx, m.NoLauncher.Configuration); e != nil {
 		return e
@@ -444,6 +484,9 @@ func (d productionDirectory) Identity(ctx context.Context, uid, gid uint32, name
 	return provider.Identity(ctx, uid, gid, name)
 }
 func (h *ProductionEnvironment) Inventory(ctx context.Context, a manager.Account, l linuxos.Limits) ([]linuxos.Result, error) {
+	if accountID(h.policy, a) != nil {
+		return nil, qualification.ErrRequired
+	}
 	m, _, e := loadDeployment(ctx, h.policy)
 	if e != nil {
 		return nil, e
@@ -491,11 +534,29 @@ func (h *ProductionEnvironment) Inventory(ctx context.Context, a manager.Account
 		}
 		s.Spools = append(s.Spools, linuxos.Spool{Root: d, Kind: v.kind})
 	}
-	s.Systemd.Units, e = many(i.UserUnits)
+	optional := func(paths []string) ([]*linuxos.Dir, []string, error) {
+		out := []*linuxos.Dir{}
+		missing := []string{}
+		for _, path := range paths {
+			path = strings.ReplaceAll(path, "{uid}", strconv.FormatInt(a.UID, 10))
+			path = strings.ReplaceAll(path, "{name}", a.Username)
+			d, e := open(path)
+			if e != nil {
+				if errors.Is(e, unix.ENOENT) && linuxos.ProtectedAbsent(path) == nil {
+					missing = append(missing, path)
+					continue
+				}
+				return nil, nil, e
+			}
+			out = append(out, d)
+		}
+		return out, missing, nil
+	}
+	s.Systemd.Units, s.Systemd.MissingUnits, e = optional(i.UserUnits)
 	if e != nil {
 		return nil, e
 	}
-	s.Systemd.Runtime, e = many(i.UserRuntime)
+	s.Systemd.Runtime, s.Systemd.MissingRuntime, e = optional(i.UserRuntime)
 	if e != nil {
 		return nil, e
 	}

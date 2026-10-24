@@ -88,7 +88,17 @@ func (c Checks) Passing() bool {
 	return true
 }
 
+type Issuer struct {
+	Mode         string `json:"mode"`
+	InvocationID string `json:"invocation_id"`
+}
+
+func ValidInvocationID(s string) bool {
+	return len(s) == 32 && s != strings.Repeat("0", 32) && validHash(s+s)
+}
+
 type Record struct {
+	Issuer         Issuer   `json:"issuer"`
 	Format         string   `json:"format"`
 	Inputs         Inputs   `json:"inputs"`
 	InputsDigest   string   `json:"inputs_digest"`
@@ -196,6 +206,13 @@ func validNames(names []string, p manager.Policy) bool {
 	return true
 }
 func (q Record) Validate(p manager.Policy) error {
+	if q.Issuer.Mode == "initial" {
+		if q.Issuer.InvocationID != "" {
+			return ErrRequired
+		}
+	} else if q.Issuer.Mode != "boot" || !ValidInvocationID(q.Issuer.InvocationID) {
+		return ErrRequired
+	}
 	if q.Format != "station-qualification/2" || q.Inputs.Validate(p) != nil || !validNames(q.StationNames, p) || !q.Checks.valid() || !bootID.MatchString(q.BootID) || q.IssuedAtUnixMS <= 0 {
 		return ErrRequired
 	}

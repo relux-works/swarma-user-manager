@@ -1,0 +1,154 @@
+//go:build linux
+
+package linuxbackend
+
+import (
+	"context"
+	"encoding/binary"
+	"strings"
+	"testing"
+
+	"github.com/relux-works/swarma-user-manager/internal/qualification"
+)
+
+func manifestFixture() DeploymentManifest {
+	h := strings.Repeat("a", 64)
+	files := []FilePin{}
+	for _, p := range []string{"/etc/systemd/system/swarma-user-manager-qualify.service", "/usr/bin/systemctl", "/usr/sbin/groupadd", "/usr/sbin/groupdel", "/usr/sbin/nologin", "/usr/sbin/useradd", "/usr/sbin/userdel"} {
+		files = append(files, FilePin{Path: p, Digest: h})
+	}
+	return DeploymentManifest{Format: "station-deployment/1", BackendVersion: deploymentVersion, BackendFiles: files, LockPath: "/opt/swarma/lib/user-manager/deployment.lock", MaintenancePath: "/opt/swarma/lib/user-manager/maintenance.json", NSSHelper: "/opt/swarma/libexec/swarma-nss-probe", NSSLibrary: "/usr/lib/libc.so.6", Loader: LoaderProfile{Format: "glibc-cache-closure/1", Cache: FilePin{Path: "/etc/ld.so.cache", Digest: h}, SearchRoots: []TreePin{{Path: "/usr/lib", State: "present", Digest: h}}, Resolutions: []ELFResolution{{Name: "libc.so.6", Path: "/usr/lib/libc.so.6"}}, Configuration: []FilePin{}}, Skeleton: "/opt/swarma/etc/skeleton.json", NoLauncher: NoLauncherProfile{AbsentEntries: []string{"/opt/swarma/libexec/swarma-user-launcher"}, ServiceRoots: []TreePin{{Path: "/etc/systemd/system", State: "present", Digest: h}, {Path: "/run/systemd/system", State: "absent", Digest: h}, {Path: "/usr/lib/systemd/system", State: "present", Digest: h}}, Configuration: []FilePin{{Path: "/etc/systemd/system/swarma-user-manager-qualify.service", Digest: h}}}, Inventory: InventoryProfile{Format: "local-v0-reviewed-host-scope/1", Files: []string{"/tmp", "/var/tmp"}, Shm: "/dev/shm", Mqueue: "/dev/mqueue", Cron: "/var/spool/cron/crontabs", SystemCron: "/etc/cron.d", At: "/var/spool/cron/atjobs", Linger: "/var/lib/systemd/linger", UserUnits: []string{"/opt/swarma/workers/{name}/.config/systemd/user"}, UserRuntime: []string{"/run/user/{uid}"}}}
+}
+
+// The manifest is a closed versioned deployment capability record, bound by its
+// full hash. Missing dependencies, unsafe paths, unknown scope and drift refuse;
+// the valid control establishes encoding/schema only, not root host completeness.
+func TestQualificationDeploymentSchema(t *testing.T) {
+	for _, mode := range []string{"unknown", "omitted", "backend-drift", "backend-file-missing", "lock-path", "loader-unknown", "scope-unknown", "launcher-unknown", "valid"} {
+		t.Run(mode, func(t *testing.T) {
+			m := manifestFixture()
+			p, _ := fixture()
+			raw, _ := qualification.Canonical(m)
+			p.BackendDigest = qualification.Hash(raw)
+			switch mode {
+			case "unknown":
+				raw = append([]byte(`{"extra":0,`), raw[1:]...)
+			case "omitted":
+				raw = []byte(`{"format":"station-deployment/1"}`)
+			case "backend-drift":
+				p.BackendDigest = strings.Repeat("b", 64)
+			case "backend-file-missing":
+				m.BackendFiles = m.BackendFiles[1:]
+			case "lock-path":
+				m.LockPath = "/tmp/lock"
+			case "loader-unknown":
+				m.Loader.Resolutions = nil
+			case "scope-unknown":
+				m.Inventory.Files = nil
+			case "launcher-unknown":
+				m.NoLauncher.ServiceRoots = nil
+			}
+			if mode != "unknown" && mode != "omitted" {
+				raw, _ = qualification.Canonical(m)
+				if mode != "backend-drift" {
+					p.BackendDigest = qualification.Hash(raw)
+				}
+			}
+			var parsed DeploymentManifest
+			e := qualification.DecodeClosed(raw, &parsed, 65536)
+			if e == nil {
+				e = parsed.validate(p)
+			}
+			if mode == "valid" {
+				if e != nil {
+					t.Fatal("valid schema", e)
+				}
+			} else if e == nil {
+				t.Fatal("invalid deployment admitted")
+			}
+		})
+	}
+}
+func cacheFixture(paths []string) []byte {
+	n := len(paths)
+	start := 48 + 24*n
+	str := []byte("libc.so.6\x00")
+	offset := make([]int, n)
+	for j, p := range paths {
+		offset[j] = start + len(str)
+		str = append(str, []byte(p+"\x00")...)
+	}
+	b := make([]byte, start)
+	copy(b, "glibc-ld.so.cache1.1")
+	b[28] = 2
+	binary.LittleEndian.PutUint32(b[20:], uint32(n))
+	binary.LittleEndian.PutUint32(b[24:], uint32(len(str)))
+	for j := range paths {
+		row := b[48+24*j : 48+24*(j+1)]
+		binary.LittleEndian.PutUint32(row, 0x303)
+		binary.LittleEndian.PutUint32(row[4:], uint32(start))
+		binary.LittleEndian.PutUint32(row[8:], uint32(offset[j]))
+	}
+	return append(b, str...)
+}
+
+// This bounded cache profile requires an unambiguous protected resolution. Hwcaps,
+// unknown versions, missing names and invalid offsets cannot turn into a map hit.
+func TestQualificationLoaderCache(t *testing.T) {
+	good := cacheFixture([]string{"/usr/lib/libc.so.6"})
+	for _, mode := range []string{"ambiguous", "hwcaps", "bad-offset", "missing", "unknown-format", "valid"} {
+		t.Run(mode, func(t *testing.T) {
+			b := append([]byte{}, good...)
+			name := "libc.so.6"
+			switch mode {
+			case "ambiguous":
+				b = cacheFixture([]string{"/usr/lib/libc.so.6", "/other/libc.so.6"})
+			case "hwcaps":
+				binary.LittleEndian.PutUint64(b[64:], 1)
+			case "bad-offset":
+				binary.LittleEndian.PutUint32(b[52:], 0xffffffff)
+			case "missing":
+				name = "missing.so"
+			case "unknown-format":
+				b[0] = 'X'
+			}
+			p, e := cacheResolve(b, name)
+			if mode == "valid" {
+				if e != nil || p != "/usr/lib/libc.so.6" {
+					t.Fatal("valid cache", e)
+				}
+			} else if e == nil {
+				t.Fatal("invalid cache admitted")
+			}
+		})
+	}
+}
+
+// Closed unit selection and kernel-level network denial are prerequisites; a
+// pinned file with another command, root identity or environment source refuses.
+func TestQualificationUnitProfile(t *testing.T) {
+	raw := "[Unit]\nDescription=Qualification\n[Service]\nType=oneshot\nUser=root\nExecStart=/opt/swarma/libexec/swarma-user-manager qualify --boot\nPrivateNetwork=yes\nRestrictAddressFamilies=AF_UNIX\n"
+	bin := "/opt/swarma/libexec/swarma-user-manager"
+	for _, bad := range []string{strings.Replace(raw, " --boot", "", 1), strings.Replace(raw, "User=root", "User=daemon", 1), strings.Replace(raw, "PrivateNetwork=yes", "PrivateNetwork=no", 1), raw + "ExecStartPre=/bin/true\n", raw + "EnvironmentFile=/tmp/env\n", raw + "ExecStart=/bin/true\n"} {
+		if validateQualificationUnit(bad, bin) == nil {
+			t.Fatal("bad unit admitted")
+		}
+	}
+	if validateQualificationUnit(raw, bin) != nil {
+		t.Fatal("valid unit refused")
+	}
+}
+
+// The real production constructor does not adopt fixture callbacks or accept a
+// qualified flag with missing root-owned deployment/record capabilities.
+func TestQualificationProductionMissingRefuses(t *testing.T) {
+	p, _ := fixture()
+	p.NoLauncher = true
+	h := NewProductionEnvironment(p)
+	if g, e := h.Pin(context.Background(), p, nil); e == nil || g != nil {
+		t.Fatal("flag-only production admission")
+	}
+	if _, e := h.Issue(context.Background(), false); e == nil {
+		t.Fatal("missing production qualified")
+	}
+}

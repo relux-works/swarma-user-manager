@@ -156,8 +156,10 @@ func schedulerOwners(ctx context.Context, kind, name string, b []byte, names Nam
 // empty environment and no shell, and must run outside the caller's state lock.
 type SystemdSources struct {
 	Units, Runtime []*Dir
-	Linger         *Dir
-	User           string
+	// Missing paths are re-proved absent under protected parents on each observation.
+	MissingUnits, MissingRuntime []string
+	Linger                       *Dir
+	User                         string
 }
 
 func Systemd(ctx context.Context, uid uint32, s SystemdSources, l Limits) Result {
@@ -199,8 +201,13 @@ func systemd(ctx context.Context, uid uint32, s SystemdSources, l Limits, query 
 	defer cancel()
 	count := 0
 
-	if uid == 0 || s.User == "" || !component(s.User) || s.Linger == nil || len(s.Units) == 0 || len(s.Runtime) == 0 {
+	if uid == 0 || s.User == "" || !component(s.User) || s.Linger == nil || len(s.Units)+len(s.MissingUnits) == 0 || len(s.Runtime)+len(s.MissingRuntime) == 0 {
 		return result("systemd", objects, refusal("inventory_unknown", "systemd_sources", nil))
+	}
+	for _, path := range append(append([]string{}, s.MissingUnits...), s.MissingRuntime...) {
+		if e = ProtectedAbsent(path); e != nil {
+			return result("systemd", objects, e)
+		}
 	}
 	for _, class := range []struct {
 		roots []*Dir

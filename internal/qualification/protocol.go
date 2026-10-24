@@ -28,7 +28,7 @@ type Storage interface {
 	Publish(context.Context, []byte) error
 }
 type Unit interface {
-	Successful(context.Context, string) error
+	Successful(context.Context, string) (string, error)
 }
 type Protocol struct {
 	Deployment Deployment
@@ -36,6 +36,7 @@ type Protocol struct {
 	Unit       Unit
 	Boot       func() (string, error)
 	Now        func() time.Time
+	Invocation func(context.Context) (string, error)
 }
 
 // Issue withdraws the prior record before any checks. A failed retry cannot
@@ -50,6 +51,17 @@ func (s Protocol) Issue(ctx context.Context, p manager.Policy, bootMode bool) (R
 		}
 	} else if p.Qualified || p.QualificationDigest != ZeroDigest {
 		return Record{}, ErrRequired
+	}
+	issuer := Issuer{Mode: "initial"}
+	if bootMode {
+		if s.Invocation == nil {
+			return Record{}, ErrRequired
+		}
+		id, e := s.Invocation(ctx)
+		if e != nil || !ValidInvocationID(id) {
+			return Record{}, ErrRequired
+		}
+		issuer = Issuer{Mode: "boot", InvocationID: id}
 	}
 	ctx = context.WithValue(ctx, bootIssuanceKey{}, bootMode)
 	g, e := s.Deployment.Acquire(ctx, true)
@@ -89,7 +101,7 @@ func (s Protocol) Issue(ctx context.Context, p manager.Policy, bootMode bool) (R
 	if e != nil || current != boot {
 		return Record{}, ErrRequired
 	}
-	q := Record{Format: "station-qualification/2", Inputs: i, InputsDigest: digest, StationNames: names, Checks: checks, BootID: boot, IssuedAtUnixMS: s.Now().UnixMilli()}
+	q := Record{Issuer: issuer, Format: "station-qualification/2", Inputs: i, InputsDigest: digest, StationNames: names, Checks: checks, BootID: boot, IssuedAtUnixMS: s.Now().UnixMilli()}
 	raw, e := Canonical(q)
 	if e != nil || q.Validate(p) != nil || int64(len(raw)) > p.Limits.RecordBytes {
 		return Record{}, ErrRequired
@@ -163,7 +175,7 @@ func (s Protocol) Pin(ctx context.Context, p manager.Policy) (*RecordGuard, erro
 		return nil, ErrRequired
 	}
 	q, e := Decode(raw, p)
-	if e != nil || !q.Checks.Passing() || q.InputsDigest != p.QualificationDigest {
+	if e != nil || !q.Checks.Passing() || q.InputsDigest != p.QualificationDigest || q.Issuer.Mode != "boot" {
 		return nil, ErrRequired
 	}
 	boot, e := s.Boot()
@@ -174,7 +186,8 @@ func (s Protocol) Pin(ctx context.Context, p manager.Policy) (*RecordGuard, erro
 	if e != nil || current.Validate(p) != nil || !equal(current, q.Inputs) || !validNames(names, p) {
 		return nil, ErrRequired
 	}
-	if s.Unit.Successful(ctx, boot) != nil || g.Check() != nil || ctx.Err() != nil {
+	unitID, e := s.Unit.Successful(ctx, boot)
+	if e != nil || unitID != q.Issuer.InvocationID || g.Check() != nil || ctx.Err() != nil {
 		return nil, ErrRequired
 	}
 	out := &RecordGuard{storage: s.Storage, inner: g, raw: append([]byte(nil), raw...), limit: p.Limits.RecordBytes, ctx: ctx}

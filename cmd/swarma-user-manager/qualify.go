@@ -23,7 +23,7 @@ func maintenanceMode(args []string) (selected, boot bool) {
 func maintenanceAllowed(in manager.Invocation, realUID int, sudoEnvironment bool) bool {
 	return in.EUID == 0 && realUID == 0 && !in.Sudo && !sudoEnvironment
 }
-func runQualification(in manager.Invocation, realUID int, sudoEnvironment, boot bool) int {
+func runQualification(in manager.Invocation, realUID int, sudoEnvironment, boot bool, ownInvocation string) int {
 	refuse := func() int { _, _ = fmt.Fprintln(os.Stderr, "qualification_required"); return 1 }
 	if !maintenanceAllowed(in, realUID, sudoEnvironment) {
 		return refuse()
@@ -37,7 +37,11 @@ func runQualification(in manager.Invocation, realUID int, sudoEnvironment, boot 
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(p.Limits.OperationMS)*time.Millisecond)
 	defer cancel()
-	q, e := linuxbackend.NewProductionEnvironment(p).Issue(ctx, boot)
+	host := linuxbackend.NewProductionEnvironment(p)
+	if boot {
+		host = linuxbackend.NewBootQualificationEnvironment(p, ownInvocation)
+	}
+	q, e := host.Issue(ctx, boot)
 	if e != nil {
 		return refuse()
 	}
