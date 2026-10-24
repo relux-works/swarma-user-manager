@@ -67,7 +67,7 @@ func directoryProviderFixture(t *testing.T) (*QualifiedDirectory, string, *runti
 			t.Fatal(e)
 		}
 	}
-	if e = os.WriteFile(filepath.Join(path, "gshadow"), nil, 0600); e != nil {
+	if e = os.WriteFile(filepath.Join(path, "gshadow"), []byte("fixture-readers:!::\n"), 0600); e != nil {
 		t.Fatal(e)
 	}
 	if e = os.WriteFile(filepath.Join(path, "nsswitch.conf"), []byte(conf.Passwd+conf.Group+conf.Shadow), 0600); e != nil {

@@ -117,6 +117,10 @@ func TestQualificationShadowObservation(t *testing.T) {
 			case "gshadow-admin":
 				gs = []byte("shadow:!:someone:\n")
 			}
+			if mode == "control-0640" || mode == "mode-drift" {
+				group = append(group, []byte("fixture-readers:x:"+number(d.etc.group)+":\n")...)
+				gs = append(gs, []byte("fixture-readers:!::\n")...)
+			}
 			r.data["group"] = group
 			if e := os.WriteFile(filepath.Join(path, "group"), group, 0600); e != nil {
 				t.Fatal(e)

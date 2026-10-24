@@ -105,6 +105,77 @@ func shadowProtection(name string, s unix.Stat_t, owner, rootGID, shadowGID uint
 		(s.Gid == rootGID || allowShadow && s.Gid == shadowGID)
 }
 
+// Every actual 0640 read group needs complete local evidence, including root.
+// Explicit member lists alone omit primary membership and newgrp credentials.
+func (a accountDatabases) checkReadGroups(limit int) error {
+	if e := shadowMembers(a.gshadow, a.shadowGroup, limit); e != nil {
+		return e
+	}
+	if e := validateDirectoryDatabases(a.data, limit, false); e != nil {
+		return e
+	}
+	readGIDs := map[uint32]bool{}
+	for _, name := range []string{"shadow", "gshadow"} {
+		st := a.protection[name]
+		if st.Mode&0040 != 0 {
+			readGIDs[st.Gid] = true
+		}
+	}
+	if len(readGIDs) == 0 {
+		return nil
+	}
+	for _, line := range strings.Split(string(a.data["passwd"]), "\n") {
+		if line == "" {
+			continue
+		}
+		f := strings.Split(line, ":")
+		uid, _ := numeric(f[2])
+		gid, _ := numeric(f[3])
+		if uid != 0 && readGIDs[gid] {
+			return refusal("directory_unknown", "shadow_read_group_primary", nil)
+		}
+	}
+	groups := map[string]bool{}
+	for _, line := range strings.Split(string(a.data["group"]), "\n") {
+		if line == "" {
+			continue
+		}
+		f := strings.Split(line, ":")
+		gid, _ := numeric(f[2])
+		if !readGIDs[gid] {
+			continue
+		}
+		if f[3] != "" {
+			return refusal("directory_unknown", "shadow_read_group_members", nil)
+		}
+		groups[f[0]] = false
+	}
+	// The validated group database has unique names AND numeric GIDs.
+	if len(groups) != len(readGIDs) {
+		return refusal("directory_unknown", "shadow_read_group_missing", nil)
+	}
+	for _, line := range strings.Split(string(a.gshadow), "\n") {
+		if line == "" {
+			continue
+		}
+		f := strings.Split(line, ":")
+		// shadowMembers validates every gshadow row before this check.
+		if _, required := groups[f[0]]; !required {
+			continue
+		}
+		if f[2] != "" || f[3] != "" || !(strings.HasPrefix(f[1], "!") || strings.HasPrefix(f[1], "*")) {
+			return refusal("directory_unknown", "shadow_read_group_access", nil)
+		}
+		groups[f[0]] = true
+	}
+	for _, present := range groups {
+		if !present {
+			return refusal("directory_unknown", "shadow_read_group_gshadow", nil)
+		}
+	}
+	return nil
+}
+
 func captureAccountDatabases(ctx context.Context, etc *Dir, l Limits, ranges []IDInterval) (accountDatabases, error) {
 	zero := accountDatabases{}
 	out := accountDatabases{data: NSSDatabases{}, protection: map[string]unix.Stat_t{}}
@@ -138,10 +209,7 @@ func captureAccountDatabases(ctx context.Context, etc *Dir, l Limits, ranges []I
 			out.data[name] = b
 		}
 	}
-	if e = shadowMembers(out.gshadow, found, l.Entries); e != nil {
-		return zero, e
-	}
-	if e = validateDirectoryDatabases(out.data, l.Entries, false); e != nil {
+	if e = out.checkReadGroups(l.Entries); e != nil {
 		return zero, e
 	}
 	return out, nil

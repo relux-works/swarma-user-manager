@@ -129,7 +129,15 @@ and group root or the distribution's `shadow` group. The latter is resolved from
 the captured local group database, must have a unique nonzero system GID below
 1000 outside every configured station UID/GID range, and must have empty member
 lists in both group and gshadow (and no gshadow administrators). Missing or
-ambiguous membership evidence refuses. Standalone `ObserveAccounts` callers must
+ambiguous membership evidence refuses. For each actual file group granted read
+access by mode 0640, including root, the same captured passwd must contain no
+non-root account with that primary GID. Its unique local group row and matching
+gshadow row are required; both member lists and the gshadow administrator list
+must be empty, and its gshadow credential must start with `!` or `*` (locked).
+Empty and unlocked credentials refuse because they can authorize `newgrp` access.
+Thus root:root 0640 remains supported only with the same complete read-group
+proof as root:shadow 0640. Mode 0600 grants no group read access. Standalone
+`ObserveAccounts` callers must
 supply all trusted station intervals to enable this group exception. Both
 files remain single-link regular files under protected ancestors, without ACLs
 or capabilities. The private observation retains accepted GIDs, modes, identities
