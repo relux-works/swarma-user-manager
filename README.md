@@ -106,14 +106,17 @@ pin. These entries and their production reader remain unimplemented; a
 `qualified` flag alone never admits.
 The [account-directory implementation](docs/linux-backend.md#qualified-account-directory-implementation)
 now captures exact NSS lines and closure facts and compares complete local/NSS
-observations. Its files collector uses cgo; systemd remains unknown pending its
-userdb closure provider, and production admission stays closed.
+observations. Its cgo collector supports `files systemd` with the
+[bounded userdb closure](docs/linux-backend.md#systemd-userdb-closure-and-runtime).
+The reviewed boot unit is a repository artifact; deployment and production
+qualification remain pending.
 
 | Tool | Purpose | Command | Output |
 |---|---|---|---|
 | Station core build | Build the bounded one-request entrypoint | `go build -o .temp/swarma-user-manager ./cmd/swarma-user-manager` | Binary in `.temp/`; closed result JSON on stdout |
 | NSS collector build (Linux, Go with cgo and C compiler) | Build the status-aware read-only NSS ABI helper | `go build -o .temp/swarma-nss-probe ./cmd/swarma-nss-probe` | Helper binary in `.temp/`; parent consumes bounded sanitized JSON; no password hashes |
 | Account-directory tests | Exact NSS lines, full agreement, module closure/range drift, direct NSS statuses | `go test -p 1 ./internal/linuxos -run '^TestDirectory' -count=1`; `go test -p 1 ./internal/nssprobe -count=1` | Named verdicts; test-owned Go temporary fixtures |
+| Systemd closure/unit tests | Private userdb roots, exact socket set, manifest/provenance drift, direct NSS completion and static boot-unit contract | `go test -p 1 ./internal/linuxos -run '^TestSystemd' -count=1`; `go test -p 1 ./internal/nssprobe -run '^TestProbe' -count=1` | Test-owned temporary roots; no unit installation or host mutation |
 | C compiler (ABI fixtures only) | Build isolated NSS-status and ELF dependency fixtures | `/usr/bin/cc -shared -fPIC -nostdlib -o FIXTURE_SO FIXTURE_C` (package tests supply exact paths) | Test-owned temporary shared objects |
 | Linux adapter tests | Exact lifetime/receipt mappings, split writes, source binding and closed production authority | `go test -p 1 ./internal/linuxbackend -count=1` | Named test verdicts; private seams |
 | Core/backend tests | Fake lifecycle, v2 receipts/flights, authority, operator admission and protected evidence | `go test -p 1 ./internal/manager -count=1` | Named test verdicts; isolated Go temporary fixtures |

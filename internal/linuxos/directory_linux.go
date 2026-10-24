@@ -18,8 +18,8 @@ type DirectoryFence interface {
 }
 
 // NSSRuntime is a reviewed module implementation, not record-supplied code. Both
-// methods must be bounded and complete or return error. systemd remains unknown
-// until its userdb/Varlink closure provider is published; no range default admits.
+// methods must be bounded and complete or return error. SystemdNSSRuntime binds
+// the userdb/Varlink closure; no module label or range default admits.
 type NSSRuntime interface {
 	CaptureModules(context.Context, []string, Limits) ([]NSSModule, error)
 	Enumerate(context.Context, []string, Limits) (NSSDatabases, error)

@@ -89,25 +89,42 @@ func (r FilesNSSRuntime) Enumerate(ctx context.Context, names []string, l Limits
 	if !onlyFiles(names) {
 		return nil, refusal("directory_unknown", "module_unsupported_or_unqualified", nil)
 	}
+	return enumerateNSS(ctx, r.Collector, []ProtectedArtifact{r.Library}, l)
+}
+
+// enumerateNSS holds the executable and each reviewed module descriptor through
+// subprocess completion. Only the two fixed module layouts are accepted.
+func enumerateNSS(ctx context.Context, collector ProtectedArtifact, libraries []ProtectedArtifact, l Limits) (out NSSDatabases, err error) {
+	if len(libraries) != 1 && len(libraries) != 2 {
+		return nil, refusal("directory_unknown", "collector_modules", nil)
+	}
 	c, cancel, e := budget(ctx, l)
 	if e != nil {
 		return nil, e
 	}
 	defer cancel()
-	program, e := openCaptured(c, r.Collector)
+	program, e := openCaptured(c, collector)
 	if e != nil {
 		return nil, e
 	}
 	defer closed(program, &err)
-	library, e := openCaptured(c, r.Library)
-	if e != nil {
-		return nil, e
+	handles := []*os.File{program}
+	for _, artifact := range libraries {
+		library, e := openCaptured(c, artifact)
+		if e != nil {
+			return nil, e
+		}
+		defer closed(library, &err)
+		handles = append(handles, library)
 	}
-	defer closed(library, &err)
-	// Held descriptors bind execution/dlopen to the inspected objects. Exclusion
-	// additionally protects their qualified loader/configuration dependencies.
-	cmd := exec.CommandContext(c, "/proc/self/fd/3", "/proc/self/fd/4", strconv.Itoa(l.Entries))
-	cmd.ExtraFiles = []*os.File{program, library}
+	// Held descriptors bind execution/dlopen to inspected objects. The caller's
+	// maintained exclusion also protects their loader/configuration dependencies.
+	args := []string{"/proc/self/fd/4", strconv.Itoa(l.Entries)}
+	if len(libraries) == 2 {
+		args = []string{"--files-systemd", strconv.Itoa(l.Entries), "/proc/self/fd/4", "/proc/self/fd/5"}
+	}
+	cmd := exec.CommandContext(c, "/proc/self/fd/3", args...)
+	cmd.ExtraFiles = handles
 	cmd.Env = []string{}
 	cmd.Dir = "/"
 	cmd.Stderr = io.Discard

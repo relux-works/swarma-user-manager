@@ -22,15 +22,18 @@ struct probe {
  void *handle; void *next; void *end; char *buffer;
  struct passwd pw; struct group gr; struct spwd sp;
 };
-static struct probe* begin(const char *path, int kind) {
+static struct probe* begin(const char *path, int module, int kind) {
  struct probe *p = calloc(1, sizeof(*p)); if (!p) return NULL;
  p->handle = dlopen(path, RTLD_NOW|RTLD_LOCAL);
  if (!p->handle) { free(p); return NULL; }
  const char *sets[] = {"_nss_files_setpwent", "_nss_files_setgrent", "_nss_files_setspent"};
  const char *gets[] = {"_nss_files_getpwent_r", "_nss_files_getgrent_r", "_nss_files_getspent_r"};
  const char *ends[] = {"_nss_files_endpwent", "_nss_files_endgrent", "_nss_files_endspent"};
- enum nss_status (*set)(int) = dlsym(p->handle, sets[kind]);
- p->next = dlsym(p->handle, gets[kind]); p->end = dlsym(p->handle, ends[kind]);
+ const char *systemd_sets[] = {"_nss_systemd_setpwent", "_nss_systemd_setgrent", "_nss_systemd_setspent"};
+ const char *systemd_gets[] = {"_nss_systemd_getpwent_r", "_nss_systemd_getgrent_r", "_nss_systemd_getspent_r"};
+ const char *systemd_ends[] = {"_nss_systemd_endpwent", "_nss_systemd_endgrent", "_nss_systemd_endspent"};
+ enum nss_status (*set)(int) = dlsym(p->handle, module ? systemd_sets[kind] : sets[kind]);
+ p->next = dlsym(p->handle, module ? systemd_gets[kind] : gets[kind]); p->end = dlsym(p->handle, module ? systemd_ends[kind] : ends[kind]);
  p->buffer = calloc(1, 1048576);
  if (!set || !p->next || !p->end || !p->buffer || set(0)!=NSS_STATUS_SUCCESS) {
   if(p->buffer) free(p->buffer); dlclose(p->handle); free(p); return NULL;
@@ -75,7 +78,44 @@ type Snapshot struct {
 
 var errUnknown = errors.New("nss_probe_unknown")
 
-func ReadFiles(path string, limit int) (Snapshot, error) {
+func ReadFiles(path string, limit int) (Snapshot, error) { return readModule(path, 0, limit) }
+
+// ReadFilesSystemd queries both reviewed ABIs rather than trusting glibc getent's
+// exit code. Duplicate identical projections are coalesced, never conflicts.
+func ReadFilesSystemd(files, systemd string, limit int) (Snapshot, error) {
+	a, e := readModule(files, 0, limit)
+	if e != nil {
+		return Snapshot{}, e
+	}
+	b, e := readModule(systemd, 1, limit)
+	if e != nil {
+		return Snapshot{}, e
+	}
+	var out [3]string
+	count, total := 0, 0
+	for i, pair := range [][2]string{{a.Passwd, b.Passwd}, {a.Group, b.Group}, {a.Shadow, b.Shadow}} {
+		seen := map[string]bool{}
+		var rows strings.Builder
+		for _, data := range pair {
+			for _, line := range strings.Split(data, "\n") {
+				if line == "" || seen[line] {
+					continue
+				}
+				seen[line] = true
+				count++
+				total += len(line) + 1
+				if count > limit || total > 8<<20 {
+					return Snapshot{}, errUnknown
+				}
+				rows.WriteString(line)
+				rows.WriteByte('\n')
+			}
+		}
+		out[i] = rows.String()
+	}
+	return Snapshot{out[0], out[1], out[2]}, nil
+}
+func readModule(path string, module int, limit int) (Snapshot, error) {
 	if limit < 1 || limit > 100000 {
 		return Snapshot{}, errUnknown
 	}
@@ -84,7 +124,7 @@ func ReadFiles(path string, limit int) (Snapshot, error) {
 	var tables [3]strings.Builder
 	count := 0
 	for kind := 0; kind < 3; kind++ {
-		p := C.begin(cpath, C.int(kind))
+		p := C.begin(cpath, C.int(module), C.int(kind))
 		if p == nil {
 			return Snapshot{}, errUnknown
 		}

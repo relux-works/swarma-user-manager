@@ -1,0 +1,37 @@
+# Install root:root 0644 under protected /etc/systemd/system; do not run from a checkout.
+# Consumers require this unit AND order After it (qualify-consumer.conf).
+# Direct invocations must also check the latest current-boot success and record.
+[Unit]
+Description=Qualify the pinned Swarma user-manager host for this boot
+After=local-fs.target systemd-tmpfiles-setup.service nss-user-lookup.target
+Before=multi-user.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+UMask=0077
+WorkingDirectory=/
+ExecStart=/opt/swarma/libexec/swarma-user-manager qualify --boot
+RemainAfterExit=yes
+Restart=no
+TimeoutStartSec=120
+StandardInput=null
+StandardOutput=journal
+StandardError=journal
+Environment=PATH=/usr/sbin:/usr/bin LANG=C LC_ALL=C
+UnsetEnvironment=LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT GLIBC_TUNABLES GCONV_PATH LOCPATH
+# Keep host mounts, IPC, /proc, /tmp and network namespace visible to inventory.
+# Deny IP sockets/traffic while preserving local filesystem/abstract Unix IPC.
+RestrictAddressFamilies=AF_UNIX
+IPAddressDeny=any
+SystemCallFilter=~io_uring_setup io_uring_enter io_uring_register
+SystemCallArchitectures=native
+NoNewPrivileges=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+LockPersonality=yes
+RestrictNamespaces=yes
+
+[Install]
+WantedBy=multi-user.target

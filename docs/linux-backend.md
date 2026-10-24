@@ -132,7 +132,7 @@ this initial qualified profile, with protected ancestors and no ACLs/capabilitie
 | Module | Reviewed implementation boundary | Qualification state |
 |---|---|---|
 | `files` | Direct `_nss_files_*` enumeration in the isolated `swarma-nss-probe` helper; complete passwd/group/shadow status and membership checks. On modern glibc the exporting implementation is libc, not the legacy stub library. | Usable with a reviewed protected collector/library/loader configuration closure and authenticated inputs/exclusion. No implicit host resolver is supplied. |
-| `systemd` | Requires the full userdb drop-in and Varlink service closure, its implementation/configuration provenance and proved dynamic ranges through `NSSRuntime`. | Recognized but unknown until that separate closure contract/provider is published. Default allocation ranges alone cannot qualify it. |
+| `systemd` | `SystemdNSSRuntime` checks the closed userdb manifest, protected empty/absent roots, exact Varlink set, provider artifacts/sources and inclusive ranges; the direct ABI collector enumerates both modules. | Usable only with the reviewed capabilities below and authenticated inputs/exclusion. Default ranges or socket filenames alone never qualify it. |
 | Any other module | No bounded complete implementation is published. | Refuse. |
 
 Capture understands module names and closed NSS status/action syntax and records
@@ -161,8 +161,8 @@ is retained in `DocumentedSystemdRanges`, including root `[0,0]`; it is a review
 input, never proof of complete userdb coverage. In particular,
 [systemd's NSS documentation](https://www.freedesktop.org/software/systemd/man/257/nss-systemd.html)
 also permits arbitrary JSON records and Varlink providers. Their configuration
-and behavior require the separate closure provider. The qualification record's
-range encoding must accommodate synthetic root as specified by that contract.
+and behavior require the bounded closure below. Module range encoding permits
+root `[0,0]` and nobody `[65534,65534]`, without allowing station ID zero.
 
 The helper uses a small cgo NSS ABI shim because Go's `os/user` and
 [glibc `getent`](https://sourceware.org/git/?p=glibc.git;a=blob;f=nss/getent.c;hb=HEAD)
@@ -200,3 +200,152 @@ file offset mapped at its virtual address; an unloaded decoy or a partially
 overlapping load refuses. Optional section addresses and offsets must agree.
 Relevant names and numeric identities are collected from both database views
 before comparison, including passwd entries introduced by in-range group names.
+
+## Systemd userdb closure and runtime
+
+`*linuxos.SystemdNSSRuntime` implements `NSSRuntime` for exactly `files` or
+`files systemd`; `FilesNSSRuntime` remains the files-only implementation. The
+reviewed deployment supplies these capabilities, never record-decoded paths:
+
+| Field | Required input |
+|---|---|
+| `Files` | Existing protected collector, actual files-exporting library, complete reviewed ELF resolver and configuration artifacts. |
+| `Library` | Actual reviewed `libnss_systemd` implementation, resolved through the same protected loader closure. |
+| `Manifest` | Fixed `<root>/etc/user-manager-systemd-closure.json`, root:root 0600, regular single-link, protected ancestors; operator-installed before qualification. |
+| `Etc`, `Run`, `UsrLib` | Protected root-owned descriptors for `/etc`, `/run`, `/usr/lib`. These are separate configured mount anchors; child walks refuse symlinks and mount transitions. |
+| `Providers` | Exact service-name map to `UserDBProviderClosure`: reviewed `Implementation` ELF roots, `Configuration` artifacts and complete `Resolver`. Nil configuration is unknown; an explicit empty set requires reviewed semantics. |
+| `Sources` | Exact source-URL map to protected retained documentation artifacts. Their bytes must match each source reference's SHA-256. No runtime network fetch. |
+
+The manifest is a closed CCJ-1 document, at most 1 MiB, with no trailing LF.
+`ParseSystemdClosure` uses the pinned registrar canonicalizer, rejects duplicate
+or unknown fields, omission, malformed types, noncanonical bytes and exceeded
+bounds. The exact field schema is:
+
+```text
+{format:"station-systemd-closure/1",directories,services,synthesis}
+directories entry = {path,state}
+services entry = {name,implementation_digest,configuration_digest,
+                  uid_ranges,gid_ranges,forwards,source}
+synthesis = {uid_ranges,gid_ranges,source}
+source = {url,revision,sha256}
+range entry = {min,max}
+```
+
+All arrays are explicit. Directories are in this fixed lexical order:
+`/etc/userdb`, `/run/host/userdb`, `/run/userdb`, `/usr/lib/userdb`; each state
+is `absent` or `empty`. A precise ENOENT at a component reached from a verified
+protected parent proves absence, including a missing intermediate `host`
+directory. Permission/I/O failures, a symlink or other object, unsafe ancestors,
+partial enumeration and every child entry refuse. Hidden and membership-only
+entries are included; no suffix filter is used.
+
+Services are unique and sorted by name. `io.systemd.DynamicUser` is required;
+`io.systemd.Multiplexer`, `io.systemd.NameServiceSwitch`, `io.systemd.Home` and
+`io.systemd.Machine` are the only optional names. The complete protected
+`/run/systemd/userdb` entry set must equal the manifest. `io.systemd.DropIn`
+and custom endpoints refuse even if drop-in roots are empty. Entries must be
+owned sockets with one link, reached without following links. Client write
+permission on the socket is allowed; mutation of its parent is root-only.
+
+The runtime checks provider ELF/dependency and configuration digests against
+`Providers`, and source content digests against `Sources`. The range source is
+an HTTPS URL without credentials, a nonempty reviewed revision and a content
+digest. Its text and the provider configuration's semantic completeness still
+require review: a hash does not prove a claimed range is correct. DynamicUser's
+initial supported profile records `[61184,65519]` for both namespaces; other
+build boundaries are unsupported. Synthesis records exactly `[0,0]` and
+`[65534,65534]`. Home/Machine require nonempty complete reviewed ranges, including
+explicit/migrated identities and configured container mappings; their default
+automatic pools alone are insufficient. See the source contracts in
+[receipts §6.4](../spec/station-effect-receipts.md#64-qualified-local-account-directory-and-nss-configuration),
+[nss-systemd 257](https://www.freedesktop.org/software/systemd/man/257/nss-systemd.html)
+and [UID/GID allocation](https://systemd.io/UIDS-GIDS/).
+
+Allocators have empty `forwards`. Multiplexer records exactly every other
+selected service; NameServiceSwitch records exactly `files`, relying on the
+reviewed NSS re-entry suppression and local-file closure. Bridges have empty
+own allocator arrays, but every allocator/synthesis contribution remains in
+the aggregate ranges. Inclusive sorted unions preserve singleton intervals.
+The directory's existing validator refuses either station range overlapping
+those module ranges, including one shared endpoint.
+
+`systemd.configuration_digest` is SHA256 of the exact canonical manifest
+bytes. Current provider artifacts and sources must still match its declared
+digests, so hashing a stale manifest is insufficient. Runtime comparison with
+the authenticated qualification inputs detects manifest/range changes. The
+runtime additionally retains current-process endpoint/directory identities and
+refuses replacement; these ephemeral facts are outside the stable boot input
+pin. Ordinary unrelated ancestor-directory contents/timestamps are not pinned.
+A new boot requires new observations, not reused inode/PID authority. The
+existing `DirectoryFence` must exclude account, source and provider changes
+through capture, collection and final revalidation.
+
+Socket checks prove type, filesystem owner/protection, exact entry set,
+observed continuity and a bounded Unix-stream connection with root peer
+credentials. A dead endpoint refuses. No request is sent. These checks do
+**not** independently authenticate the serving
+process, inspect its live memory or prove the semantic completeness of a
+provider's declared ranges/configuration. The reviewed deployment manifest and
+its exclusion must establish which service owns each endpoint and that the
+listed artifacts are its complete configuration. Missing that evidence is
+unknown; this API supplies no implicit deployment approval or host defaults.
+
+The collector uses direct `_nss_files_*` and `_nss_systemd_*` enumeration for
+passwd/group/shadow with independent terminal-status checks. Earlier files
+success cannot hide a later systemd failure. Exact identical sanitized rows
+are coalesced; conflicting name/number rows remain visible and refuse through
+the directory validator. Both implementations, loader dependencies and the
+collector remain pinned. Upstream's
+[systemd NSS implementation](https://raw.githubusercontent.com/systemd/systemd/v257/src/nss-systemd/nss-systemd.c)
+provides all three enumeration ABIs and suppresses fallback root/nobody during
+iteration; root/nobody point synthesis still belongs in the recorded ranges.
+Fixtures exercise this transport, not the installed host module's behavior.
+
+## Boot qualification unit artifact
+
+[The oneshot](../deploy/systemd/swarma-user-manager-qualify.service) and
+[consumer drop-in](../deploy/systemd/qualify-consumer.conf) are reviewed repository
+artifacts, not installed services. The owner installs the unit root:root 0644
+under protected `/etc/systemd/system` and the reviewed binary under the
+root:root 0755 platform tree. The documented root is `/opt/swarma`, so ExecStart
+is exactly `/opt/swarma/libexec/swarma-user-manager qualify --boot`. A different
+installation root requires that root's fixed absolute binary path in the
+reviewed unit; no PATH lookup, environment substitution or caller path selects
+it. The qualification record binds that installed executable path through its
+normalized policy/deployment inputs and the executable content digest. Unit and
+binary changes require the corresponding deployment review/requalification.
+
+The root oneshot orders after local filesystems, tmpfiles and NSS readiness,
+and before multi-user. Every platform service that can invoke the manager must
+receive the drop-in's `Requires=` **and** `After=` dependency; ordering alone
+does not require successful qualification. Direct invocations still require
+the latest successful current-boot unit result and matching protected record.
+Retry withdrawal, input revalidation and record publication belong to the
+qualifier/reader implementation; this unit never sets the policy pin.
+
+The unit permits only AF_UNIX socket creation and denies IP traffic. It also
+disables io_uring to avoid an alternate socket-creation route. It retains the
+host mount, IPC, network and temporary-file views needed by complete inventory;
+PrivateTmp, PrivateIPC, PrivateNetwork, ProtectProc and filesystem overlays are
+not enabled. The fixed environment and loader-variable removals supplement the
+maintenance entry's required environment sanitization before checks. Root
+capabilities needed for read-only inventory are retained; no-new-privileges,
+namespace creation, realtime and SUID/SGID restrictions do not hide host state.
+These settings follow the
+[systemd execution contract](https://www.freedesktop.org/software/systemd/man/257/systemd.exec.html);
+static tests do not establish kernel enforcement on a deployed host.
+
+No unit was installed or run for this change. Root deployment, actual unit
+ordering/network enforcement, complete host inventories/exclusion and production
+qualification remain pending. Narrow validation is:
+
+```sh
+env GORACE=atexit_sleep_ms=0 GOMAXPROCS=2 heavy-slot --label architect -- go test -p 1 ./internal/linuxos -run '^TestSystemd' -count=1 -v
+env GORACE=atexit_sleep_ms=0 GOMAXPROCS=2 heavy-slot --label architect -- go test -p 1 ./internal/nssprobe -run '^TestProbe' -count=1 -v
+```
+
+Tests use private directories and Unix sockets, fixture ELF/NSS modules, retained
+public host loader objects read-only, and the actual isolated helper. The static
+unit test rejects changed argv/root, network exceptions, hidden namespaces,
+extra commands and ordering without a success dependency. No fixture result
+qualifies real root account/provider behavior.
