@@ -51,7 +51,7 @@ func validateQualificationUnit(text, consumer string) error {
 		"Service/RestrictAddressFamilies": "AF_UNIX", "Service/IPAddressDeny": "any",
 		"Service/SystemCallFilter":        "~io_uring_setup io_uring_enter io_uring_register",
 		"Service/SystemCallArchitectures": "native", "Service/NoNewPrivileges": "yes",
-		"Service/RestrictSUIDSGID": "yes", "Service/RestrictRealtime": "yes", "Service/LockPersonality": "yes", "Service/RestrictNamespaces": "yes",
+		"Service/RestrictSUIDSGID": "no", "Service/RestrictRealtime": "yes", "Service/LockPersonality": "yes", "Service/RestrictNamespaces": "yes",
 		"Install/WantedBy": "multi-user.target",
 	}
 	// A closed artifact contract catches extra Exec*, environment files, network
@@ -80,6 +80,8 @@ func validateQualificationUnit(text, consumer string) error {
 // The repository artifact has exact root/argv/order/network/hardening settings
 // and a consumer success dependency. This is static validation, not installation,
 // systemd execution, actual kernel enforcement or root host qualification.
+// The openat2-compatible profile requires RestrictSUIDSGID=no; the old setting
+// is rejected with its specific mismatch rather than an unrelated failure.
 func TestSystemdQualificationUnit(t *testing.T) {
 	b, e := os.ReadFile("../../deploy/systemd/swarma-user-manager-qualify.service")
 	if e != nil {
@@ -92,6 +94,15 @@ func TestSystemdQualificationUnit(t *testing.T) {
 	if e = validateQualificationUnit(string(b), string(c)); e != nil {
 		t.Fatal(e)
 	}
+	t.Run("openat2-denial", func(t *testing.T) {
+		blocked := strings.Replace(string(b), "RestrictSUIDSGID=no", "RestrictSUIDSGID=yes", 1)
+		if blocked == string(b) {
+			t.Fatal("old-sandbox control was not applied")
+		}
+		if e := validateQualificationUnit(blocked, string(c)); e == nil || e.Error() != "mismatched Service/RestrictSUIDSGID" {
+			t.Fatalf("old sandbox must fail its specific setting: %v", e)
+		}
+	})
 	// Negative controls require rejection of the intended contract violation.
 	for name, text := range map[string]string{
 		"network":       strings.Replace(string(b), "RestrictAddressFamilies=AF_UNIX", "RestrictAddressFamilies=AF_UNIX AF_INET", 1),
