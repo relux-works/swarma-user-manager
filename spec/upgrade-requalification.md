@@ -72,29 +72,64 @@ with an explicit aggregate/invocation kind, not a timestamp, history line, PID o
 package name. The aggregate retains its ordered complete invocation-ID list;
 a standalone direct-dpkg invocation has its own ID without a fabricated apt
 aggregate. Record each invocation's complete before/after package/version/
-architecture states, archive digests, completion/failure status and association
-with changed closure files, including intervening versions. A downgrade followed
-by an upgrade MUST NOT disappear.
+architecture states, archive digests, hook phases and association with changed
+closure files, including intervening versions. Process exit/completion/failure
+status, where available, is diagnostic chronology, not the terminal acceptance
+condition. A downgrade followed by an upgrade MUST NOT disappear.
 The once-per-batch apt hook references the aggregate; dpkg hooks reference their
 recorded invocation and any parent aggregate. Repeated notifications deduplicate
 by recorded ID and event phase: identical retained event bytes enqueue no second
 effect; conflicting reuse refuses. Never merge distinct invocation IDs or infer
 one from a hook count. Reconciliation accounts for every listed invocation
+using observed state, without manufacturing successful process exits,
 before advancing the aggregate/frontier; unknown membership or missing attribution
 refuses. Package logs alone cannot manufacture transaction receipts.
 
 Hooks MUST only record/fence/enqueue bounded work while package locks may be
 held. They MUST NOT synchronously call apt again or wait for a worker needing
-those locks. Reconciliation waits for package configuration and triggers to
-finish, then acquires qualified package-writer exclusion and the existing
-deployment exclusion. Deployment-lock ownership transfers to each qualifier
-run as §4 specifies; maintenance and package/root-writer exclusion remain
-continuous. It MUST exclude a new package/root configuration writer
-through capture, checks and publication, with one documented lock order; no
-external calls occur under manager state locks. Partial transactions, pending
-triggers, unavailable exclusion or another transaction arriving during capture
-leave admission closed. Queue durability/notification failure MUST be visible
-as failure, never reported as requalification success.
+those locks. Post-Invoke is a trigger and chronology observation, never proof
+that its still-running parent succeeded. The worker runs after the package
+manager releases its locks; boot recovery uses the same reconciliation.
+
+Reconciliation MUST hold `/var/lib/dpkg/lock-frontend` with qualified dpkg-writer
+exclusion while taking the database snapshot and proving the terminal state:
+
+- Every package owning a closure file is exactly `install ok installed`.
+- No package is half-installed, half-configured, unpacked or awaiting/pending
+  triggers. A bounded pinned `dpkg --audit` must succeed with clean output;
+  a zero process exit with audit diagnostics is not clean.
+- Every closure object equals its exact authenticated package payload under §3,
+  including checksum, type, owner and mode checks. An installed status is
+  insufficient evidence of intact bytes.
+
+Compare the coherent dpkg database snapshot under that lock with the **last
+accepted** database/package/closure snapshot and its protected recorder frontier.
+Every intervening difference MUST be covered by the ordered recorded chronology;
+compare the first before observation to that accepted snapshot and the final
+observation to the locked current state. Include database-only changes, even
+when package versions and closure bytes appear unchanged. An unexplained
+change, absent accepted snapshot, gap or unknown attribution MUST refuse.
+Never initialize or replace the accepted snapshot with current state to make
+reconciliation pass. Hook observations can delimit intermediate unpack/configure
+states; terminal requirements apply at the reconciled endpoint, while every
+intermediate package identity, archive identity and downgrade check remains.
+
+If dpkg failed midway while the database reports installed, a mismatching
+closure payload MUST refuse. If the complete recorded chronology, terminal
+state, clean audit and authentic payload all agree, verification may honestly
+pass despite that process failure. Neither a success exit nor a failure exit
+substitutes for these observed-state checks. A missed post notification may be
+recovered only if the protected recorder retained complete after observations
+for every invocation. The locked endpoint confirms those observations; it
+cannot fill a missing after state from current or excuse unexplained drift.
+
+Retain package/root-writer exclusion and the existing deployment exclusion
+through capture, checks and publication. Deployment-lock ownership transfers to
+each qualifier run as §4 specifies; maintenance and package/root-writer exclusion
+remain continuous. Use one documented lock order, with no external calls under
+manager state locks. Unfinished terminal state, pending triggers, unavailable
+exclusion or a capture race leaves admission closed. Queue durability/notification
+failure MUST be visible as failure, never reported as requalification success.
 
 Before ordinary boot qualification/consumer readiness, a boot-time check MUST
 compare the complete pinned closure and protected package baseline against the
@@ -102,9 +137,9 @@ last reconciled transaction frontier. It enqueues every unmatched transaction,
 including ones whose post-hook could not run. Unchanged closure bytes do not
 excuse an unaccounted package transition. If the independent protected recorder
 retained complete evidence, this is the same verification as a live trigger.
-If all recording was unavailable, a transaction is incomplete or chronology is
-unknown, boot MUST refuse and signal §6; it MUST NOT infer success from current
-versions alone. A byte change with no recorded package transaction also refuses.
+If all recording was unavailable, the observed terminal state is incomplete or
+chronology is unknown, boot MUST refuse and signal §6; it MUST NOT infer success
+from current versions alone. A byte change with no recorded package transaction also refuses.
 An unchanged, fully accounted baseline proceeds to ordinary networkless boot
 renewal with its existing pin. Boot never silently chooses an arbitrary pin.
 
@@ -325,6 +360,8 @@ Use disposable owned fixtures; no live-package mutation is authorized here.
 | `UpdateOfflineMissingEvidenceRefused`: missing cache link and no permitted exact re-fetch | Complete offline bundle; exact approved re-fetch online | Accept apt success/cached verdict or substitute current candidate |
 | `UpdateScopeExpansionRefused`: changed config, NSS range/path set, station policy or skeleton beside eligible leaf | Only eligible leaf/derived-digest replacements | Automatically discover and approve new closure topology |
 | `UpdateHookGapRefused`: absent transaction attribution, lost invocation within an aggregate, partial dpkg/triggers or capture race | One apt aggregate with multiple recorded dpkg invocations and one final Post-Invoke reconciles every invocation once, even with duplicate notifications; missed post-hook with complete recorder reconciles at boot | Infer one invocation per apt hook, merge invocation IDs, or treat logs/current versions as receipts |
+| `UpdateUnrecordedDatabaseChangeRefused`: dpkg database-only drift or a first-before snapshot differing from last accepted, even with unchanged closure bytes | Exact accepted snapshot, or a fully covered recorded transition | Compare only with the last recorded/current snapshot or omit database-only fields |
+| `UpdateMidwayFailurePayloadRefused`: failed dpkg reports installed while closure payload differs | Same failed-process chronology with clean audit and fully authentic matching installed payload honestly passes | Trust installed status or process exit instead of payload bytes |
 | `UpdateCrashCannotAdmit`: crash before/after intent, pin, Q and accepted-outcome durability boundaries | Full run records matching accepted outcome and latest unit invocation | Admit from pin/Q alone or skip post-lock final snapshot |
 | `UpdateQualificationFailureRefused`: failed/unknown check, stale unit success, uninstalled candidate P0/manifest or parent holding the deployment lock during either qualifier | Both qualifier modes own their deployment leases; parent retains maintenance/package exclusion and reacquires/revalidates before pin/outcome; fresh authenticated boot invocation | Retain the parent deployment lease, skip candidate installation/revalidation or reuse initial/old success |
 | `UpdateCannotOpenAdmission`: success tries to clear fence, activate/resume or mutate a generation | Success only publishes qualification/evidence to separate admission owner | Couple pin success to admission reopening |

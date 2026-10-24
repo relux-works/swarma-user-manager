@@ -165,12 +165,12 @@ The [evidence implementation](docs/update-evidence.md) adds a recorder, local
 archive-chain verifier and uninstalled hook examples. It supplies neither an
 automatic pin protocol nor host qualification. Before deployment:
 
-- Choose and qualify the independent dpkg terminal observer. An in-process post
-  hook cannot observe its still-running parent's exit; `post-observed` cannot
-  become terminal success without an authenticated independent observation.
-  Supervisor and external process/audit observer options and their requirements
-  are recorded in the implementation document. This blocks end-to-end recorder
-  acceptance with the sample hooks alone.
+- Qualify the decided state-based terminal observation under dpkg frontend
+  exclusion: exact installed state, clean bounded audit, complete database
+  chronology from the protected last accepted snapshot and every authentic
+  closure payload. The implementation never converts hook status to process
+  success or fills missing after evidence from current state. Qualify native
+  hook ordering, database profile and event-driven worker/boot delivery.
 - Wire the pinned public timeconf collector entry/policy into the service and
   qualify durable time continuity. Unknown/untrusted time refuses. Release age
   seven days, future-Date skew five minutes and P7 response five minutes are
@@ -181,7 +181,9 @@ automatic pin protocol nor host qualification. Before deployment:
   covers the finite approved source set; its actual deployed profile still
   requires explicit qualification.
 - Implement the A3 §4 maintenance journal and qualifier lock handoffs, candidate
-  diff checks, accepted frontier, original evidence retention and boot binding.
+  diff checks, accepted-frontier publication, original evidence retention and
+  boot binding. The reconciler already reads and checks the protected accepted
+  baseline; it never advances it.
 - Integrate authenticated admission/containment and owner/curator pending-delivery
   receipts before any admission claim. A maintenance assertion alone is not P7
   containment evidence.

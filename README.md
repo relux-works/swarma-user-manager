@@ -230,6 +230,8 @@ privileged qualification.
 
 The [A3 evidence implementation](docs/update-evidence.md) documents the protected
 transaction recorder, archive-chain verifier, fixed hook forms and separate
-formats. Hook terminal observation and the other listed deployment gates remain
+formats. State-based reconciliation checks a clean locked dpkg endpoint against
+the last accepted database snapshot and authentic payloads. Native root/time
+qualification, accepted-frontier publication and other listed deployment gates remain
 open; automatic pinning and deployment remain closed. The document includes exact
 narrow test/tool commands and fixture/artifact locations.
