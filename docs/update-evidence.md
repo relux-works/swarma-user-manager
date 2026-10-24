@@ -197,7 +197,7 @@ custody remain unqualified. No root action or package mutation was performed.
 | `UpdateUnsignedOrExpiredRefused` | Signer/algorithm policy, Date/expiry/skew/time/release high-water; time/trust subtests | Pinned public timeconf source behind interface; SystemRunner/CollectorEntry embedding pending; unknown/untrusted source refuses |
 | `UpdateKeyringOrVerifierDriftRefused` | Held pinned tool/keyring/dependency checks; keyring/verifier subtests | Independently held complete tool closure requires root qualification |
 | `UpdateDowngradeRefused` | Debian ordering and archive identity, per-invocation batch chronology; `TestDebianVersionOrdering`, `TestUpdateBatchChronology` | High-water acceptance belongs to the next slice |
-| `UpdateOfflineMissingEvidenceRefused` | Missing local archive refuses; complete signed local bundle is the positive control | No acquisition/network component implemented |
+| `UpdateOfflineMissingEvidenceRefused` | Missing local archive or recorded/baseline archive identity refuses; complete signed local bundle is the positive control | No acquisition/network component implemented |
 | `UpdateScopeExpansionRefused` | Closed mapping/path set, protected before leaves, owner/mode/type and conffile checks; scope subtest | Candidate manifest/policy diff validation belongs to the pin slice |
 | `UpdateHookGapRefused` | `TestUpdateHookGapRefused`, `TestUpdateMissedHookAtBoot`, `TestUpdatePostHookIsNotTerminal`, `TestUpdateBatchUnpackConfigure` | Independent terminal source and native hook/exclusion qualifications block deployment |
 | `UpdateCrashCannotAdmit` | Recorder torn/corrupt/saturated evidence refuses; no API publishes accepted outcomes | Intent/pin/Q/outcome crash protocol not implemented here (§4 next slice) |

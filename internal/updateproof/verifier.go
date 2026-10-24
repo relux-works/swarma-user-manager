@@ -233,6 +233,9 @@ func verify(ctx context.Context, p Profile, base Baseline, inv Invocation, b Bun
 		if !known || !packageStateAllowed(newPkg.Status, transitional) || !packageStateAllowed(old.Status, transitional) || !packageStateAllowed(prior.Status, transitional) || newPkg.Architecture != p.Architecture {
 			return fail(ErrScope)
 		}
+		if !digestOK(prior.ArchiveSHA256) || !digestOK(old.ArchiveSHA256) || !digestOK(newPkg.ArchiveSHA256) {
+			return fail(ErrMissing)
+		}
 		if CompareVersions(newPkg.Version, old.Version) < 0 || CompareVersions(old.Version, prior.Version) < 0 || CompareVersions(newPkg.Version, prior.Version) < 0 {
 			return fail(ErrRollback)
 		}

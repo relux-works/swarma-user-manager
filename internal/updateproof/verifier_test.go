@@ -201,6 +201,8 @@ func TestVerifierRefusals(t *testing.T) {
 			v.MD5 = ""
 			f.bundle.Installed["/usr/lib/fixture"] = v
 		}},
+		{"UpdateOfflineMissingEvidenceRefused_attribution", ErrMissing, func() { f.inv.After.Packages[0].ArchiveSHA256 = "" }},
+		{"UpdateOfflineMissingEvidenceRefused_baseline", ErrMissing, func() { f.baseline.Packages[0].ArchiveSHA256 = "" }},
 		{"UpdateOfflineMissingEvidenceRefused", ErrMissing, func() { delete(f.bundle.Archives, "fixture:amd64") }},
 		{"UpdateKeyringOrVerifierDriftRefused_keyring", ErrTool, func() { f.profile.Keyring.SHA256 = Digest([]byte("changed keyring")) }},
 		{"UpdateKeyringOrVerifierDriftRefused_verifier", ErrTool, func() { f.profile.GPGV.SHA256 = Digest([]byte("changed verifier")) }},
