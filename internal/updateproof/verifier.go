@@ -30,6 +30,9 @@ type Mapping struct {
 	Mode, UID, GID              uint32
 }
 type Profile struct {
+	P7Deadline                                                  time.Duration
+	FutureSkewConfirmed                                         bool
+	Distribution, Release                                       string
 	Origin, Suite, Codename, Architecture, Component, IndexPath string
 	Keyring                                                     FilePin
 	GPGV, DPKGDeb                                               Tool
@@ -51,9 +54,10 @@ type Baseline struct {
 // Clock is an observation from the previously qualified platform time adapter,
 // never a caller flag in a manager command. There is no production adapter yet.
 type Clock struct {
-	Now     time.Time
-	Source  string
-	Trusted bool
+	Earliest, Latest time.Time
+	Now              time.Time
+	Source           string
+	Trusted          bool
 }
 
 func PlatformTime() Clock { return Clock{Source: "unknown"} }
@@ -104,7 +108,17 @@ func verify(ctx context.Context, p Profile, base Baseline, inv Invocation, b Bun
 	if !p.Limits.valid() || !inv.ID.valid() || inv.ID.Kind != "invocation" || inv.Status != "complete" || (!transitional && (inv.Before.PendingTriggers || inv.After.PendingTriggers)) || !inv.Before.valid(p.Limits) || !inv.After.valid(p.Limits) {
 		return fail(ErrGap)
 	}
-	if !clock.Trusted || clock.Source != "platform-time-policy" || clock.Now.IsZero() || base.LastTime.IsZero() || clock.Now.Before(base.LastTime) || p.MaxAge <= 0 || p.FutureSkew < 0 || p.MaxAge > 365*24*time.Hour || p.FutureSkew > time.Hour {
+	lower, upper := clock.Now, clock.Now
+	if !clock.Earliest.IsZero() {
+		lower = clock.Earliest
+	}
+	if !clock.Latest.IsZero() {
+		upper = clock.Latest
+	}
+	if lower.After(clock.Now) || upper.Before(clock.Now) {
+		return fail(ErrTime)
+	}
+	if !p.FutureSkewConfirmed || !clock.Trusted || clock.Source != "platform-time-policy" || clock.Now.IsZero() || base.LastTime.IsZero() || lower.Before(base.LastTime) || p.MaxAge <= 0 || p.FutureSkew < 0 || p.MaxAge > 365*24*time.Hour || p.FutureSkew > time.Hour {
 		return fail(ErrTime)
 	}
 	if len(b.Release) == 0 || len(b.Index) == 0 {
@@ -148,7 +162,7 @@ func verify(ctx context.Context, p Profile, base Baseline, inv Invocation, b Bun
 			expiry = end
 		}
 	}
-	if date.After(clock.Now.Add(p.FutureSkew)) || !clock.Now.Before(expiry) || base.ReleaseDate.IsZero() || !digestOK(base.ReleaseSHA256) || date.Before(base.ReleaseDate) || date.Equal(base.ReleaseDate) && Digest(release) != base.ReleaseSHA256 {
+	if date.After(lower.Add(p.FutureSkew)) || !upper.Before(expiry) || base.ReleaseDate.IsZero() || !digestOK(base.ReleaseSHA256) || date.Before(base.ReleaseDate) || date.Equal(base.ReleaseDate) && Digest(release) != base.ReleaseSHA256 {
 		return fail(ErrTime)
 	}
 	if !signedIndex(fields["SHA256"], p.IndexPath, b.Index) {
@@ -357,7 +371,6 @@ func VerifyBatch(ctx context.Context, p Profile, base Baseline, batch Batch, bun
 		base.Packages = inv.After.Packages
 		base.ReleaseDate = ev.ReleaseDate
 		base.ReleaseSHA256 = ev.Links[2].SHA256
-		base.LastTime = ev.ObservedTime
 		prior = &batch.Invocations[n]
 	}
 	return out, nil

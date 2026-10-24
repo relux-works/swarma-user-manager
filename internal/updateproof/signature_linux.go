@@ -73,6 +73,13 @@ func pinnedTool(t Tool) (*os.File, error) {
 	return pinnedFile(FilePin{t.Path, t.SHA256}, 0, "/", 128<<20)
 }
 func authenticate(ctx context.Context, p Profile, b Bundle, clock Clock) ([]byte, string, error) {
+	lower, upper := clock.Now, clock.Now
+	if !clock.Earliest.IsZero() {
+		lower = clock.Earliest
+	}
+	if !clock.Latest.IsZero() {
+		upper = clock.Latest
+	}
 	tool, e := pinnedTool(p.GPGV)
 	if e != nil {
 		return nil, "", e
@@ -140,12 +147,12 @@ func authenticate(ctx context.Context, p Profile, b Bundle, clock Clock) ([]byte
 			}
 			created, e1 := strconv.ParseInt(f[3], 10, 64)
 			expires, e2 := strconv.ParseInt(f[4], 10, 64)
-			if e1 != nil || e2 != nil || created > clock.Now.Add(p.FutureSkew).Unix() || expires != 0 && expires <= clock.Now.Unix() || (f[7] != "1" && f[7] != "22") || (f[8] != "8" && f[8] != "9" && f[8] != "10") || (f[9] != "00" && f[9] != "01") {
+			if e1 != nil || e2 != nil || created > lower.Add(p.FutureSkew).Unix() || expires != 0 && expires <= upper.Unix() || (f[7] != "1" && f[7] != "22") || (f[8] != "8" && f[8] != "9" && f[8] != "10") || (f[9] != "00" && f[9] != "01") {
 				return nil, "", ErrTrust
 			}
 			allowed := false
 			for _, s := range p.Signers {
-				if s.Fingerprint == f[1] && !s.Revoked && !s.NotBefore.IsZero() && s.NotAfter.After(s.NotBefore) && !clock.Now.Before(s.NotBefore) && clock.Now.Before(s.NotAfter) && !time.Unix(created, 0).Before(s.NotBefore) && time.Unix(created, 0).Before(s.NotAfter) {
+				if s.Fingerprint == f[1] && !s.Revoked && !s.NotBefore.IsZero() && s.NotAfter.After(s.NotBefore) && !lower.Before(s.NotBefore) && upper.Before(s.NotAfter) && !time.Unix(created, 0).Before(s.NotBefore) && time.Unix(created, 0).Before(s.NotAfter) {
 					allowed = true
 				}
 			}

@@ -39,6 +39,9 @@ func run() int {
 	if len(in.Args) == 1 && in.Args[0] == "qualify-preflight" {
 		return runQualificationPreflight(ownInvocation)
 	}
+	if phase, selected := updateHookMode(in.Args); selected {
+		return runUpdateHook(in, realUID, sudoEnvironment, phase)
+	}
 	if selected, boot := maintenanceMode(in.Args); selected {
 		return runQualification(in, realUID, sudoEnvironment, boot, ownInvocation)
 	}

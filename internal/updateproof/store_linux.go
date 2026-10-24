@@ -17,6 +17,7 @@ import (
 )
 
 type Recorder struct {
+	anchor string
 	path   string
 	dir    *os.File
 	owner  uint32
@@ -87,7 +88,7 @@ func openRecorder(path string, owner uint32, anchor string, l Limits) (*Recorder
 		d.Close()
 		return nil, ErrStore
 	}
-	return &Recorder{path: path, dir: d, owner: owner, limits: l}, nil
+	return &Recorder{anchor: anchor, path: path, dir: d, owner: owner, limits: l}, nil
 }
 func (r *Recorder) Close() error { return r.dir.Close() }
 func (r *Recorder) file(name string) (*os.File, error) {
@@ -110,6 +111,16 @@ func (r *Recorder) lock(ctx context.Context) (func(), error) {
 	}
 	var st unix.Stat_t
 	if unix.Fstat(int(r.dir.Fd()), &st) != nil || st.Mode&07777 != 0700 {
+		return fail()
+	}
+	fresh, e := openProtectedDir(r.path, r.owner, r.anchor)
+	if e != nil {
+		return fail()
+	}
+	a, ea := fresh.Stat()
+	b, eb := r.dir.Stat()
+	fresh.Close()
+	if ea != nil || eb != nil || !os.SameFile(a, b) {
 		return fail()
 	}
 	f, e := r.file("recorder.lock")
@@ -140,15 +151,16 @@ func (r *Recorder) lock(ctx context.Context) (func(), error) {
 }
 
 type event struct {
-	Format   string   `json:"format"`
-	Sequence uint64   `json:"sequence"`
-	Previous string   `json:"previous"`
-	Phase    string   `json:"phase"`
-	ID       ID       `json:"id"`
-	Parent   ID       `json:"parent"`
-	Token    string   `json:"token"`
-	Snapshot Snapshot `json:"snapshot"`
-	Status   string   `json:"status"`
+	Format    string    `json:"format"`
+	Sequence  uint64    `json:"sequence"`
+	Previous  string    `json:"previous"`
+	Phase     string    `json:"phase"`
+	ID        ID        `json:"id"`
+	Parent    ID        `json:"parent"`
+	Token     string    `json:"token"`
+	Snapshot  Snapshot  `json:"snapshot"`
+	Status    string    `json:"status"`
+	Artifacts []Package `json:"artifacts"`
 }
 
 func (r *Recorder) load() ([]event, error) {
@@ -192,7 +204,7 @@ func (r *Recorder) load() ([]event, error) {
 			return nil, ErrStore
 		}
 		var v event
-		if closed(b, &v) != nil || v.Format != "station-update-recorder/1" || v.Sequence != uint64(n) || v.Previous != prev || !v.ID.valid() || !v.Snapshot.valid(r.limits) || (v.Phase != "begin" && v.Phase != "end") {
+		if closed(b, &v) != nil || v.Format != "station-update-recorder/1" || v.Sequence != uint64(n) || v.Previous != prev || !v.ID.valid() || !v.Snapshot.valid(r.limits) || !validArtifacts(v.Artifacts, r.limits) || (v.Phase != "begin" && v.Phase != "end" && v.Phase != "post-observed") {
 			return nil, ErrStore
 		}
 		canonical, _ := json.Marshal(v)

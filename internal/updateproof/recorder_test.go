@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func sampleSnapshot(version string) Snapshot {
@@ -113,5 +114,137 @@ func TestRecorderProtection(t *testing.T) {
 	}
 	if _, err := r.Begin(context.Background(), "boot-a", "invocation", "one", ID{}, sampleSnapshot("1")); !errors.Is(err, ErrStore) {
 		t.Fatalf("unprotected state: %v", err)
+	}
+}
+
+// Claim: an in-process post hook cannot certify terminal success; its identical
+// duplicate is harmless, conflicting evidence refuses, and a separate terminal
+// observation is required before boot can enqueue a complete invocation.
+func TestUpdatePostHookIsNotTerminal(t *testing.T) {
+	r := recorderFixture(t)
+	ctx := context.Background()
+	s := sampleSnapshot("1")
+	id, e := r.Begin(ctx, "boot-a", "invocation", "post-observation", ID{}, s)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if e = r.ObservePost(ctx, id, s); e != nil {
+		t.Fatal(e)
+	}
+	if e = r.ObservePost(ctx, id, s); e != nil {
+		t.Fatal(e)
+	}
+	if _, e = r.Scan(ctx, s); e != ErrGap {
+		t.Fatalf("post hook manufactured exit: %v", e)
+	}
+	if e = r.ObservePost(ctx, id, sampleSnapshot("2")); e != ErrConflict {
+		t.Fatalf("conflicting post event: %v", e)
+	}
+	if e = r.End(ctx, id, s, "complete"); e != nil {
+		t.Fatal(e)
+	}
+	if _, e = r.Scan(ctx, s); e != nil {
+		t.Fatal(e)
+	}
+}
+
+// Claim: renaming away the protected directory cannot redirect durable evidence
+// into a detached inode while a replacement path appears to be current state.
+func TestRecorderDirectoryReplacementRefused(t *testing.T) {
+	r := recorderFixture(t)
+	old := r.path + "-detached"
+	if e := os.Rename(r.path, old); e != nil {
+		t.Fatal(e)
+	}
+	t.Cleanup(func() { os.RemoveAll(old) })
+	if e := os.Mkdir(r.path, 0700); e != nil {
+		t.Fatal(e)
+	}
+	if _, e := r.Begin(context.Background(), "boot-a", "invocation", "replaced", ID{}, sampleSnapshot("1")); e != ErrStore {
+		t.Fatalf("detached evidence accepted: %v", e)
+	}
+}
+
+// Claim: retry deduplication binds complete begin bytes, symlinks cannot be
+// adopted as events, and a saturated recorder cannot claim terminal completion.
+func TestRecorderConflictSymlinkAndSaturation(t *testing.T) {
+	t.Run("begin-conflict", func(t *testing.T) {
+		r := recorderFixture(t)
+		ctx := context.Background()
+		s := sampleSnapshot("1")
+		id, e := r.Begin(ctx, "boot-a", "invocation", "retry", ID{}, s)
+		if e != nil {
+			t.Fatal(e)
+		}
+		again, e := r.Begin(ctx, "boot-a", "invocation", "retry", ID{}, s)
+		if e != nil || again != id {
+			t.Fatal("non-idempotent retry", e)
+		}
+		if _, e = r.Begin(ctx, "boot-a", "invocation", "retry", ID{}, sampleSnapshot("2")); e != ErrConflict {
+			t.Fatal("conflicting begin", e)
+		}
+	})
+	t.Run("symlink", func(t *testing.T) {
+		r := recorderFixture(t)
+		victim := filepath.Join(t.TempDir(), "untouched")
+		if e := os.WriteFile(victim, []byte("keep"), 0600); e != nil {
+			t.Fatal(e)
+		}
+		if e := os.Symlink(victim, filepath.Join(r.path, "00000000000000000001.json")); e != nil {
+			t.Fatal(e)
+		}
+		if _, e := r.Scan(context.Background(), sampleSnapshot("1")); e != ErrStore {
+			t.Fatal("symlink evidence adopted", e)
+		}
+		if b, _ := os.ReadFile(victim); string(b) != "keep" {
+			t.Fatal("victim changed")
+		}
+	})
+	t.Run("saturation", func(t *testing.T) {
+		r := recorderFixture(t)
+		r.limits.Entries = 1
+		ctx := context.Background()
+		s := sampleSnapshot("1")
+		id, e := r.Begin(ctx, "boot-a", "invocation", "saturated", ID{}, s)
+		if e != nil {
+			t.Fatal(e)
+		}
+		if e = r.End(ctx, id, s, "complete"); e != ErrStore {
+			t.Fatal("saturation completed", e)
+		}
+		if _, e = r.Scan(ctx, s); e != ErrGap {
+			t.Fatal("incomplete accepted", e)
+		}
+	})
+}
+
+// Claim: separate recorder handles serialize on the same installed lock; a
+// timed-out contender writes nothing and can succeed after the owner releases.
+func TestRecorderCrossHandleExclusion(t *testing.T) {
+	r := recorderFixture(t)
+	other, e := openRecorder(r.path, uint32(os.Getuid()), r.path, r.limits)
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer other.Close()
+	unlock, e := r.lock(context.Background())
+	if e != nil {
+		t.Fatal(e)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	result := make(chan error, 1)
+	go func() {
+		_, e := other.Begin(ctx, "boot-a", "invocation", "contender", ID{}, sampleSnapshot("1"))
+		result <- e
+	}()
+	err := <-result
+	unlock()
+	if err != ErrStore {
+		t.Fatal("contender did not refuse", err)
+	}
+	id, e := other.Begin(context.Background(), "boot-a", "invocation", "contender", ID{}, sampleSnapshot("1"))
+	if e != nil || id.Sequence != 1 {
+		t.Fatal("failed contender wrote/blocked state", id, e)
 	}
 }

@@ -1,0 +1,5 @@
+// EXAMPLE ONLY. Not installed or qualified. The admission/containment owner
+// must establish the maintenance interlock before apt begins. Missing proof
+// refuses; this configuration grants no update or automatic-pin authority.
+DPkg::Pre-Invoke { "exec /opt/swarma/libexec/swarma-user-manager update-hook apt-pre"; };
+DPkg::Post-Invoke { "exec /opt/swarma/libexec/swarma-user-manager update-hook apt-post"; };

@@ -100,11 +100,11 @@ func newSignedFixture(t *testing.T) *signedFixture {
 	deb := makeDeb(t, "fixture", "2", "amd64", data)
 	idx := fmt.Sprintf("Package: fixture\nVersion: 2\nArchitecture: amd64\nFilename: pool/main/f/fixture.deb\nSize: %d\nSHA256: %s\n\n", len(deb), Digest(deb))
 	ip := "main/binary-amd64/Packages"
-	p := Profile{Origin: "Fixture", Suite: "fixture-updates", Codename: "fixture", Architecture: "amd64", Component: "main", IndexPath: ip, Keyring: FilePin{keypath, Digest(key)}, GPGV: toolFixture(t, "/usr/bin/gpgv"), MaxAge: 24 * time.Hour, FutureSkew: 5 * time.Minute, Limits: Limits{Bytes: 8 << 20, Entries: 100, Members: 100}, Signers: []Signer{{Fingerprint: fpr, NotBefore: now.Add(-24 * time.Hour), NotAfter: now.Add(24 * time.Hour)}}, Mappings: []Mapping{{Path: "/usr/lib/fixture", Package: "fixture", Architecture: "amd64", Mode: 0644}}, fileOwner: uint32(os.Getuid())}
+	p := Profile{FutureSkewConfirmed: true, Origin: "Fixture", Suite: "fixture-updates", Codename: "fixture", Architecture: "amd64", Component: "main", IndexPath: ip, Keyring: FilePin{keypath, Digest(key)}, GPGV: toolFixture(t, "/usr/bin/gpgv"), MaxAge: 24 * time.Hour, FutureSkew: 5 * time.Minute, Limits: Limits{Bytes: 8 << 20, Entries: 100, Members: 100}, Signers: []Signer{{Fingerprint: fpr, NotBefore: now.Add(-24 * time.Hour), NotAfter: now.Add(24 * time.Hour)}}, Mappings: []Mapping{{Path: "/usr/lib/fixture", Package: "fixture", Architecture: "amd64", Mode: 0644}}, fileOwner: uint32(os.Getuid())}
 	before, after := sampleSnapshot("1"), sampleSnapshot("2")
 	after.Packages[0].ArchiveSHA256 = Digest(deb)
 	after.Leaves[0].SHA256 = Digest(data)
-	base := Baseline{Leaves: before.Leaves, Packages: before.Packages, ReleaseDate: now.Add(-2 * time.Hour), ReleaseSHA256: Digest([]byte("previous release")), LastTime: now.Add(-time.Minute)}
+	base := Baseline{Leaves: append([]Leaf(nil), before.Leaves...), Packages: append([]Package(nil), before.Packages...), ReleaseDate: now.Add(-2 * time.Hour), ReleaseSHA256: Digest([]byte("previous release")), LastTime: now.Add(-time.Minute)}
 	f := &signedFixture{t: t, dir: d, profile: p, baseline: base, inv: Invocation{ID: ID{"fixture-boot", 1, "invocation"}, Before: before, After: after, Status: "complete"}, bundle: Bundle{Index: []byte(idx), Archives: map[string][]byte{"fixture:amd64": deb}, Installed: map[string]Installed{"/usr/lib/fixture": {Bytes: data, Mode: 0644, MD5: fmt.Sprintf("%x", md5.Sum(data))}}}, clock: Clock{Now: now, Source: "platform-time-policy", Trusted: true}}
 	f.release = fmt.Sprintf("Origin: Fixture\nSuite: fixture-updates\nCodename: fixture\nArchitectures: amd64\nComponents: main\nDate: %s\nValid-Until: %s\nSHA256:\n %s %d %s\n", now.Add(-time.Hour).Format(time.RFC1123Z), now.Add(time.Hour).Format(time.RFC1123Z), Digest([]byte(idx)), len(idx), ip)
 	f.sign(false)
@@ -184,7 +184,7 @@ func TestVerifierRefusals(t *testing.T) {
 		}},
 		{"UpdateArchiveChainBreakRefused_deb", ErrChain, func() {
 			f.bundle.Archives["fixture:amd64"] = makeDeb(t, "fixture", "2", "amd64", f.bundle.Installed["/usr/lib/fixture"].Bytes)
-			f.bundle.Archives["fixture:amd64"][20] = '9'
+			f.bundle.Archives["fixture:amd64"][24] = '9'
 		}},
 		{"UpdateUnpackagedLeafRefused", ErrOwnership, func() { f.inv.After.Leaves[0].Package = "foreign" }},
 		{"UpdateUnknownPackageRefused", ErrScope, func() { f.profile.Mappings = nil }},
@@ -205,7 +205,7 @@ func TestVerifierRefusals(t *testing.T) {
 		{"UpdateUnsignedOrExpiredRefused_rollback_clock", ErrTime, func() { f.clock.Now = f.baseline.LastTime.Add(-time.Second) }},
 		{"UpdateUnsignedOrExpiredRefused_expired", ErrTime, func() { f.clock.Now = f.clock.Now.Add(2 * time.Hour) }},
 		{"UpdateUnsignedOrExpiredRefused_future", ErrTime, func() {
-			f.release = strings.Replace(f.release, "Date: "+f.clock.Now.Add(-time.Hour).Format(time.RFC1123Z), "Date: "+f.clock.Now.Add(time.Hour).Format(time.RFC1123Z), 1)
+			f.release = strings.Replace(f.release, "Date: "+f.clock.Now.Add(-time.Hour).Format(time.RFC1123Z), "Date: "+f.clock.Now.Add(10*time.Minute).Format(time.RFC1123Z), 1)
 			f.sign(false)
 		}},
 		{"UpdateUnsignedOrExpiredRefused_unsigned", ErrTrust, func() { f.bundle.Signature = nil }},
@@ -377,5 +377,57 @@ func TestUpdateBatchUnpackConfigure(t *testing.T) {
 	}
 	if PlatformTime().Trusted || PlatformTime().Source != "unknown" {
 		t.Fatal("fabricated platform time")
+	}
+}
+
+// Claim: the native profile accepts only the named Ubuntu/official-archive
+// subset. Generic fixture verification itself grants no native deployment.
+func TestUpdateSupportedNativeProfile(t *testing.T) {
+	p := Profile{MaxAge: UbuntuReleaseMaxAge, P7Deadline: RevocationResponseDeadline, Distribution: "ubuntu", Release: "26.04", Architecture: "amd64", Origin: "Ubuntu", Component: "main", Codename: "approved", Suite: "approved-security"}
+	if !supportedNativeProfile(p) {
+		t.Fatal("approved control refused")
+	}
+	for _, edit := range []func(*Profile){func(p *Profile) { p.Origin = "PPA" }, func(p *Profile) { p.Suite = "other" }, func(p *Profile) { p.Component = "universe" }, func(p *Profile) { p.Architecture = "arm64" }, func(p *Profile) { p.Release = "24.04" }, func(p *Profile) { p.MaxAge = 8 * 24 * time.Hour }, func(p *Profile) { p.P7Deadline = 6 * time.Minute }} {
+		q := p
+		edit(&q)
+		if supportedNativeProfile(q) {
+			t.Fatal("unsupported native profile admitted")
+		}
+	}
+	for _, v := range []string{"1-", "1a:2", "-1", "1 space", ""} {
+		if validVersion(v) {
+			t.Fatal("malformed Debian version", v)
+		}
+	}
+}
+
+// Claim: identical-archive reinstall and bounded absent-Valid-Until offline
+// chains pass, but same-version replacement and release replay do not.
+func TestUpdateReinstallAndFreshnessControls(t *testing.T) {
+	f := newSignedFixture(t)
+	ctx := context.Background()
+	f.inv.Before = Snapshot{Packages: append([]Package(nil), f.inv.After.Packages...), Leaves: append([]Leaf(nil), f.inv.After.Leaves...)}
+	f.baseline.Packages = append([]Package(nil), f.inv.Before.Packages...)
+	f.baseline.Leaves = append([]Leaf(nil), f.inv.Before.Leaves...)
+	if _, e := Verify(ctx, f.profile, f.baseline, f.inv, f.bundle, f.clock); e != nil {
+		t.Fatal("identical reinstall", e)
+	}
+	original := f.baseline.Packages[0].ArchiveSHA256
+	other := Digest([]byte("previous accepted archive"))
+	f.baseline.Packages[0].ArchiveSHA256 = other
+	f.inv.Before.Packages[0].ArchiveSHA256 = other
+	if _, e := Verify(ctx, f.profile, f.baseline, f.inv, f.bundle, f.clock); e != ErrRollback {
+		t.Fatal("same-version archive change", e)
+	}
+	f.baseline.Packages[0].ArchiveSHA256 = original
+	f.inv.Before.Packages[0].ArchiveSHA256 = original
+	f.release = strings.Replace(f.release, "Valid-Until: "+f.clock.Now.Add(time.Hour).Format(time.RFC1123Z)+"\n", "", 1)
+	f.sign(false)
+	if _, e := Verify(ctx, f.profile, f.baseline, f.inv, f.bundle, f.clock); e != nil {
+		t.Fatal("bounded absent expiry", e)
+	}
+	f.baseline.ReleaseDate = f.clock.Now
+	if _, e := Verify(ctx, f.profile, f.baseline, f.inv, f.bundle, f.clock); e != ErrTime {
+		t.Fatal("older release replay", e)
 	}
 }

@@ -7,7 +7,25 @@ import (
 
 var versionRE = regexp.MustCompile(`^([0-9]+:)?[0-9][A-Za-z0-9.+:~\-]*$`)
 
-func validVersion(v string) bool { return len(v) <= 256 && versionRE.MatchString(v) }
+func validVersion(v string) bool {
+	if len(v) > 256 || !versionRE.MatchString(v) {
+		return false
+	}
+	if i := strings.IndexByte(v, ':'); i >= 0 {
+		for _, c := range v[:i] {
+			if c < '0' || c > '9' {
+				return false
+			}
+		}
+	}
+	if i := strings.LastIndexByte(v, '-'); i >= 0 {
+		r := v[i+1:]
+		if r == "" || strings.ContainsAny(r, ":-") {
+			return false
+		}
+	}
+	return true
+}
 func trimNum(s string) string {
 	s = strings.TrimLeft(s, "0")
 	if s == "" {

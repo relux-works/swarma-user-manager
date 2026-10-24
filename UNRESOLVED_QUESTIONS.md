@@ -158,3 +158,29 @@ previous root failure had no stage trace; a corrected delivery with regenerated
 pins still requires the owner to run initial qualification and successful boot
 renewal, preserving diagnostics on refusal. Nonroot preflight is no privileged
 acceptance evidence.
+
+## A3 evidence implementation gates
+
+The [evidence implementation](docs/update-evidence.md) adds a recorder, local
+archive-chain verifier and uninstalled hook examples. It supplies neither an
+automatic pin protocol nor host qualification. Before deployment:
+
+- Choose and qualify the independent dpkg terminal observer. An in-process post
+  hook cannot observe its still-running parent's exit; `post-observed` cannot
+  become terminal success without an authenticated independent observation.
+  Supervisor and external process/audit observer options and their requirements
+  are recorded in the implementation document. This blocks end-to-end recorder
+  acceptance with the sample hooks alone.
+- Wire the pinned public timeconf collector entry/policy into the service and
+  qualify durable time continuity. Unknown/untrusted time refuses. Release age
+  seven days and P7 response five minutes are owner-confirmed; the proposed
+  five-minute future-Date skew remains unconfirmed and cannot yet admit proof.
+- Qualify the complete independently held verifier/decoder closure, pinned key
+  validity/revocation policy, exact Ubuntu/archive/package mapping, and native
+  hook/ownership/exclusion behavior. A mixed-repository invocation also needs
+  the reviewed composition adapter; the current bundle verifies one index.
+- Implement the A3 §4 maintenance journal and qualifier lock handoffs, candidate
+  diff checks, accepted frontier, original evidence retention and boot binding.
+- Integrate authenticated admission/containment and owner/curator pending-delivery
+  receipts before any admission claim. A maintenance assertion alone is not P7
+  containment evidence.

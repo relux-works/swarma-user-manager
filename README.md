@@ -229,5 +229,7 @@ owner's trusted root shell. Keep the clean-launch prefix for `verify` and
 privileged qualification.
 
 The [A3 evidence implementation](docs/update-evidence.md) documents the protected
-transaction recorder and its separate format; automatic pinning and deployment
-remain closed.
+transaction recorder, archive-chain verifier, fixed hook forms and separate
+formats. Hook terminal observation and the other listed deployment gates remain
+open; automatic pinning and deployment remain closed. The document includes exact
+narrow test/tool commands and fixture/artifact locations.

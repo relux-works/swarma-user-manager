@@ -1,0 +1,4 @@
+# EXAMPLE ONLY: not installed or qualified. Post hook evidence is not terminal
+# exit evidence. A separately qualified independent recorder remains required.
+pre-invoke=exec /opt/swarma/libexec/swarma-user-manager update-hook dpkg-pre
+post-invoke=exec /opt/swarma/libexec/swarma-user-manager update-hook dpkg-post

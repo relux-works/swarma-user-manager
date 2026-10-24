@@ -132,7 +132,8 @@ func tarFiles(ctx context.Context, b []byte, l Limits) (map[string]payloadFile, 
 	if int64(len(b)) > l.Bytes {
 		return nil, ErrChain
 	}
-	tr := tar.NewReader(bytes.NewReader(b))
+	reader := bytes.NewReader(b)
+	tr := tar.NewReader(reader)
 	out := map[string]payloadFile{}
 	seen := map[string]bool{}
 	count := 0
@@ -179,6 +180,12 @@ func tarFiles(ctx context.Context, b []byte, l Limits) (map[string]payloadFile, 
 		total += int64(len(data))
 		out[name] = payloadFile{data, uint32(h.Mode), uint32(h.Uid), uint32(h.Gid)}
 	}
+	remaining, _ := io.ReadAll(reader)
+	for _, v := range remaining {
+		if v != 0 {
+			return nil, ErrChain
+		}
+	}
 	return out, nil
 }
 func readDeb(ctx context.Context, p Profile, b []byte) (debPayload, error) {
@@ -216,7 +223,7 @@ func readDeb(ctx context.Context, p Profile, b []byte) (debPayload, error) {
 	}
 	conffiles := map[string]bool{}
 	for _, line := range strings.Split(string(control["conffiles"].data), "\n") {
-		if line != "" {
+		if line = strings.TrimSpace(line); line != "" {
 			conffiles[strings.TrimPrefix(strings.Fields(line)[0], "/")] = true
 		}
 	}
