@@ -264,6 +264,17 @@ after callback return; it cannot undo callback effects or recall released bytes.
 check. Both are lock primitives, not qualified Keymaker adapters. `Checkpoint`
 runs bounded local persistence and **never admits a release**.
 
+The optional `genjournal_testseam` build tag exports
+`NewTestHandle(ownerUID, anchor)` for isolated, unprivileged consumer fixtures.
+Its `WithEvidence`, `WithActive`, `Checkpoint`, `Append` and `Inspect` methods
+reuse the real filesystem, flock, verifier and deadline primitives with that
+handle's policy; they do not alter package-level production policy. The symbols
+are absent without the tag. Production MUST exclude it. Audit `go version -m`
+on the exact consumer binary: any `build -tags=...` setting must exclude
+`genjournal_testseam` (default builds may omit the setting). Retain metadata and
+the binary hash with trusted build evidence; missing metadata does not pass the
+audit. See the README's fixture setup and commands.
+
 Refusal codes are stable; a checker emits `{"Code":"...","Line":N}` on stderr
 and exits 1, with no view on stdout. `Line` is one-based for a record refusal,
 zero for file, floor, path, admission and usage errors. Usage errors exit 2.

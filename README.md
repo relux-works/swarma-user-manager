@@ -66,6 +66,8 @@ repository. These tools manage public generation metadata, never accounts.
 | Go checker | Validate bytes, protected paths, checkpoints; emit per-UID view | `go build -o .temp/gen-journal ./tools/cmd/gen-journal`; `.temp/gen-journal bytes vectors/gen-journal/active.jsonl 0 "$ZERO_HASH"` | Binary in `.temp/`; view on stdout or typed refusal on stderr |
 | Go narrow tests | Vectors, negative control, manual runbook, Linux lock ordering | `go test ./tools/...` | Test verdicts on stdout |
 | Go vector runner | Stable vectors and corrupt-link plant | `go test ./tools/genjournal -run '^(TestVectors|TestBrokenChainPlant)$' -count=1` | Named verdicts; fixture files in Go temporary directories |
+| Go consumer fixture seam | Real journal primitives with a fixture owner/anchor, test builds only | `go test -tags=genjournal_testseam ./tools/genjournal -run '^TestTestSeam' -count=1` | Named verdicts; unprivileged files and real flock in Go temporary directories |
+| Go build metadata | Audit production build tags on the exact consumer binary | `go version -m /absolute/path/to/consumer` | Build settings on stdout; retain with the binary hash in qualification evidence |
 | POSIX sh, coreutils, util-linux flock | Reviewed manual writer and genesis/reconciliation | `sh tools/manual-journal.sh /protected/libexec/gen-journal init "$DIR"`; append/reconcile arguments in [the runbook](spec/generation-journal.md#7-reviewed-root-run-manual-procedure) | Root-owned generation directory; per-UID diagnostic view |
 
 `ZERO_HASH` is exactly 64 zeroes and is only an explicitly approved initial
@@ -78,6 +80,23 @@ multi-pair release. Its callback must check every pair with `View.Active`, persi
 the durable floor, commit and hand off its bounded response within `ReaderHold`.
 It checks expiry before and after the callback; it cannot undo callback effects.
 `WithActive` adds the single-pair check; `Checkpoint` never admits a release.
+
+Consumer tests may build with `-tags=genjournal_testseam` and call
+`genjournal.NewTestHandle(ownerUID, anchor)`. Its `WithEvidence`, `WithActive`,
+`Checkpoint`, `Append` and `Inspect` methods use the real primitives with that
+isolated fixture policy; package-level production functions still require root.
+Create the fixture directory mode 0755 and its `gate.lock`, `data.lock` and
+`journal` regular files mode 0644 under a protected absolute anchor. The
+constructor does not initialize files. Neither `NewTestHandle` nor `TestHandle`
+exists in a default build.
+
+Never enable `genjournal_testseam` in production. Build with the normal production
+tags, check `GOFLAGS` as well as explicit `-tags`, then run `go version -m` on the
+exact resulting binary. Its `build -tags=...` setting, if present, must exclude
+`genjournal_testseam`; default builds normally omit that setting. Missing or
+unreadable Go build metadata leaves this audit unverified. Keep the output and
+binary SHA-256 with trusted build evidence; metadata alone does not establish
+binary provenance. This test tag is not a runtime owner override.
 
 The normal journal writer enforces one 1000 ms fence budget with a 1 MiB journal
 ceiling and a lifecycle retirement reserve (529 bytes per creating/active
