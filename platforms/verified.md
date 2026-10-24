@@ -6,9 +6,9 @@ specifies collection, owner review, root steps, signing and submission. This pat
 is the proposed permanent location beside the future generic kit documentation.
 
 The identifiers and four guarantee statuses are those of the
-[platform-parity draft at revision 2c69849](https://github.com/relux-works/swarma-user-manager/blob/2c69849bf5da766d9c3cfd1c4ee8fd47de2d71a4/spec/platform-parity.md).
-It is under review. A published row MUST pin its accepted registry revision;
-this file cannot ratify that draft or reinterpret its meanings. In particular,
+[landed platform-parity specification](../spec/platform-parity.md).
+A published row MUST pin its immutable registry revision and cover all 42
+identifiers; this file cannot reinterpret their meanings. In particular,
 `matrix.login` is a station capability from that registry, not permission to
 write this platform matrix.
 
@@ -34,13 +34,17 @@ Every row contains:
 - The canonical class descriptor and SHA-256, exact immutable profile, test
   catalog and accepted parity-registry revisions; links resolve immutable bytes.
 - A complete readable mapping `identifier: status` covering **every** identifier
-  in that registry exactly once, with per-identifier scope/bounds, mechanism,
+  in that registry exactly once: all 42, including `execution.descriptors`,
+  `credential.issuance`, `messaging.placement`, `budget.principal` and
+  `isolation.shared-state`, with per-identifier scope/bounds, mechanism,
   proving test names and evidence digest/link. Use line breaks within the cell
   if needed. A linked raw digest cannot replace readable status/compensation.
   No blank, unknown or omitted identifier means `present`.
 - Only these unchanged guarantee statuses: `present`,
   `weaker-with-compensation`, `absent`, `PENDING-VERIFY`. The parity contract owns
-  their meanings. Each weaker row exposes its exact weaker dimension,
+  their meanings. The separate annotation **implemented, deployment qualification
+  pending** is never a matrix status, never promotes a cell and cannot admit.
+  Each weaker row exposes its exact weaker dimension,
   compensation, finite bounds, failure behavior and proving evidence. It is
   never implicit permission for a task or a hard-bound waiver.
 - Immutable links/digests to signed accepted records and sanitized proving

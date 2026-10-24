@@ -13,10 +13,12 @@ The [station contract](stations-v0.md), [closed local qualification record](stat
 [Linux owner procedure](../docs/linux-backend.md#owner-qualification-procedure)
 and [update requalification](upgrade-requalification.md) retain their authority.
 Guarantee identifiers, meanings, dependencies and the four statuses come only
-from the [platform-parity draft at revision 2c69849](https://github.com/relux-works/swarma-user-manager/blob/2c69849bf5da766d9c3cfd1c4ee8fd47de2d71a4/spec/platform-parity.md).
-That vocabulary is under review; implementation and public submissions MUST bind
-an accepted immutable revision, not follow a moving draft. This document neither
-redefines those guarantees nor copies their source-level statuses onto hosts.
+from the [landed platform-parity specification](platform-parity.md).
+Implementation and public submissions MUST bind an immutable revision of that
+landed registry, covering all 42 identifiers. This document neither redefines
+those guarantees nor copies their source-level statuses onto hosts. The separate
+annotation **implemented, deployment qualification pending** is not a matrix
+status and never substitutes for qualification or permits admission.
 
 ## 1. Negative cases first
 
@@ -421,7 +423,7 @@ until those decisions, reviewed encodings and positive/negative vectors exist.
 | Q5 — Exact class descriptor and compatibility? | Version exact dimensions in §5; default new class on changes; test-maintainer-reviewed compatibility only with dependency evidence | OS-family/model-name matches cannot inherit results |
 | Q6 — Public evidence and retention? | Minimized signed export with reproducible sanitized evidence, explicit owner preview/consent, content-addressed retention through expiry plus a published audit window | Withhold a claim lacking publishable proof; no private logs or identity leakage |
 | Q7 — Matrix review and routine publication? | Independent review for class/test/trust/status changes; preauthorized checked automation for routine same-class record attachments, with scoped publisher key and normal protected-branch delivery | No automatic publication until policy/tooling is approved; pending submissions remain unverified |
-| Q8 — Catalog, finite bounds and extension policy? | Platform-test maintainers version the complete identifier/test/dependency map, root/destructive-test authorization, evidence/schema bounds and later pool additions; ratify the parity revision | No unknown required identifier, skipped live proof or unreviewed extension may admit |
+| Q8 — Catalog, finite bounds and extension policy? | Platform-test maintainers version the complete identifier/test/dependency map, root/destructive-test authorization, evidence/schema bounds and later pool additions; pin the landed parity revision | No unknown required identifier, skipped live proof or unreviewed extension may admit |
 
 This specification adds no runtime feature. Implementation acceptance requires
 §1's named positive/negative cases and checker omission controls; qualified root
