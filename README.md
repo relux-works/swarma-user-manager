@@ -90,6 +90,13 @@ Create the fixture directory mode 0755 and its `gate.lock`, `data.lock` and
 constructor does not initialize files. Neither `NewTestHandle` nor `TestHandle`
 exists in a default build.
 
+For a deterministic pending-marker race test, anchor the handle directly at the
+journal directory and call `WithEvidenceAtBoundary(ctx, floor, afterFirstCheck,
+commit)`. This tagged-only method has no path argument. Its hook runs after the
+first pending-marker check and before shared gate acquisition, so it can publish
+`writer.pending` and exercise the post-lock recheck. A nil/no-op hook preserves
+the normal evidence window and callback deadline contract.
+
 Never enable `genjournal_testseam` in production. Build with the normal production
 tags, check `GOFLAGS` as well as explicit `-tags`, then run `go version -m` on the
 exact resulting binary. Its `build -tags=...` setting, if present, must exclude

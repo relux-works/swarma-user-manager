@@ -268,8 +268,12 @@ The optional `genjournal_testseam` build tag exports
 `NewTestHandle(ownerUID, anchor)` for isolated, unprivileged consumer fixtures.
 Its `WithEvidence`, `WithActive`, `Checkpoint`, `Append` and `Inspect` methods
 reuse the real filesystem, flock, verifier and deadline primitives with that
-handle's policy; they do not alter package-level production policy. The symbols
-are absent without the tag. Production MUST exclude it. Audit `go version -m`
+handle's policy; they do not alter package-level production policy. The tagged-only
+`WithEvidenceAtBoundary(ctx, floor, hook, commit)` method exposes a test hook:
+anchor its handle at the journal directory, then publish a marker from the hook
+after the first pending check and before shared gate acquisition to exercise
+the post-lock recheck deterministically. It retains the evidence/deadline contract.
+All fixture symbols are absent without the tag. Production MUST exclude it. Audit `go version -m`
 on the exact consumer binary: any `build -tags=...` setting must exclude
 `genjournal_testseam` (default builds may omit the setting). Retain metadata and
 the binary hash with trusted build evidence; missing metadata does not pass the

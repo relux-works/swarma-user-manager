@@ -4,6 +4,7 @@ package genjournal
 
 import (
 	"context"
+	"os"
 	"time"
 )
 
@@ -23,6 +24,21 @@ func NewTestHandle(ownerUID uint32, anchor string) *TestHandle {
 // WithEvidence uses WithEvidence's consumer contract under the fixture policy.
 func (h *TestHandle) WithEvidence(ctx context.Context, path string, floor Floor, commit func(View, time.Time) error) error {
 	return withEvidence(ctx, path, floor, h.policy, commit)
+}
+
+// WithEvidenceAtBoundary observes the journal directly at the handle's anchor.
+// The fixture must place its journal and lock files there. afterFirstCheck runs
+// after the first pending-marker check and before shared gate acquisition; it
+// may publish a marker to test the post-lock recheck. All verification, locking,
+// deadline and consumer commit obligations remain those of WithEvidence.
+func (h *TestHandle) WithEvidenceAtBoundary(ctx context.Context, floor Floor, afterFirstCheck func(), commit func(View, time.Time) error) error {
+	return readWindowAtBoundary(ctx, h.policy.anchor, h.policy, afterFirstCheck, func(_ *directory, j *os.File, deadline time.Time) error {
+		v, e := verifyUntil(j, floor, deadline)
+		if e != nil {
+			return e
+		}
+		return commitEvidence(v, deadline, commit)
+	})
 }
 
 // WithActive checks the exact pair under the fixture policy.
