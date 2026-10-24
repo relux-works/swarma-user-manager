@@ -34,6 +34,10 @@ control that fails at the named invariant. No live destructive test is implied.
 | `HostForgedRecordRefused` | Alter a guarantee, evidence digest, class, subject, signer or signature; unknown/revoked signing key refuses even with syntactically valid bytes | Authorized signature over the exact complete payload verifies |
 | `HostReplayRefused` | Old boot, sequence, challenge, validity interval or predecessor cannot pass a current-host check; replayed submission is idempotent and cannot refresh time/status | Fresh challenge-bound proof with current local boot/inputs and an advancing protected sequence |
 | `HostForeignRecordRefused` | A valid record for another enrolled subject cannot qualify this host; class equality is insufficient | Same enrolled key/subject plus fresh local proof; physical hardware binding needs §6's separate evidence |
+| `HostExportKeyScopeRefused` | A host export key cannot sign another host's accepted record or act as a platform/publisher authority; compromise cannot extend its scope | Own-host records only; key revocation withdraws that host's affected records without revoking another host's records |
+| `HostProfileDimensionMismatchRefused` | Hosts differing in any profile-defined class dimension cannot share a class, including an extension dimension | Equal complete descriptors under the same versioned profile/catalogue produce the same class ID |
+| `HostCatalogueInputRefused` | Catalogue tests cannot query the host or accept an unsupported report format/version to fill an evidence gap | A compatible immutable report/evidence bundle supports offline catalogue evaluation |
+| `HostUndefinedStatusProofRefused` | Missing per-identifier catalogue proof criteria cannot justify `present` or `weaker-with-compensation` | Defined criteria and matching report/evidence support the exact status; otherwise only `PENDING-VERIFY` or justified `absent` is permitted |
 | `HostStaleMatrixRefused` | Expired/revoked/missing evidence, missing current revocation state or changed class/profile cannot remain a current verified claim | Still-valid authenticated record, matching class/profile and fresh publisher index |
 | `HostIncompleteChangeSetRefused` | Drop an added/changed input or removed reference entry: complete-set verification refuses even if every listed checksum passes | Independently enumerated union delta with all before/after identities |
 | `HostProtectedUnknownRefused` | Unprivileged access denial, skipped test or missing provider completion cannot become absence, passing evidence or a guessed pin | Protected root-phase observation discharges an explicitly declared check without changing reviewed inputs |
@@ -55,7 +59,8 @@ under an approved trust/review policy. These roles need not be online per host.
 
 Every run binds an unpredictable run ID, predecessor/reference identity, source
 commit, trusted release/recipe identity, all tool and dependency digests, test
-catalog revision, parity revision, deployment profile and content-addressed
+catalog revision, independent kit release and report format/version, parity
+revision, deployment profile and content-addressed
 artifact/evidence manifest. A reference is an explicitly selected previously
 accepted kit/record, not whatever files happen to be installed. First installation
 uses a declared empty reference and reports every intended addition; it cannot
@@ -199,7 +204,8 @@ check names, phase completion and limits without secrets or raw account data.
 For a host matching an approved class/profile, released tooling MUST perform
 survey collection, exact profile selection, bounded inventory/closure discovery,
 source/build verification, all pins and delta generation, consistency checks,
-fixture/live-test selection, evidence capture, one-line owner-step rendering,
+host probe and catalogue test selection, evidence capture, one-line owner-step
+rendering,
 root-copy verification, interruption accounting, final verification, signing/
 verification, sanitization preview and submission preparation without a maintainer
 editing paths or running commands on that host. Reports MUST explain refusal and
@@ -213,6 +219,24 @@ public disclosure; and explicit recovery when continuity/ownership is unknown.
 A classified expected refusal is never converted into a pass. A privileged check
 must actually run before it discharges a root-only obligation. New platform
 mechanisms/test coverage require platform-test maintenance, not a per-host patch.
+
+### 4.1 Catalogue and kit report boundary
+
+The kit MUST emit a machine-readable report whose format and version this
+repository fixes and publishes, including its closed encoding, finite bounds
+and compatibility rules before release. The kit and its qualified adapters own
+host observation, privileged checks and evidence collection. Catalogue tests
+MUST read only that report and its referenced evidence; they MUST NOT access
+the host directly, query its providers or run host commands. Missing evidence
+requires a new kit collection/report, never a catalogue-side host probe.
+
+The catalogue version (Q8) and kit/report version MUST change independently.
+Each catalogue MUST declare the report formats/versions it accepts; unsupported
+versions refuse evaluation. Every run, signed record and matrix row MUST name
+both the catalogue version and the independent kit release/report format/version.
+A catalogue change need not change the report format, nor may a kit change
+silently change catalogue proof criteria. This is a required interface boundary,
+not an implemented report codec or catalogue runner.
 
 ## 5. Platform class and new tests
 
@@ -232,16 +256,25 @@ network address, owner identity, machine ID, enrollment key or timestamps.
 | Enforcement | Security-module/policy versions, process/IPC identity and stop mechanisms, network controls, resource limits and revocation response/clock profile |
 | Qualification profile | Policy/adapter and test catalog revisions, guarantee registry revision, required scopes/bounds and toolchain/qualifier release identities |
 
+A profile MAY add class-defining dimensions through the versioned catalogue
+(Q8). Its canonical descriptor MUST include those dimensions and their exact
+values. For example, a pool profile may define the VMM and its version, jailer,
+guest kernel and runner image by digest, KVM and nested virtualization, CPU
+microcode and firmware. This extension does not change the station profile's
+current dimensions or create any pool matrix rows. Two hosts that differ in
+**any** class-defining dimension of their profile MUST NOT share a class.
+
 Two hosts share a class only if every descriptor dimension and relevant version
 matches, including conditional dependencies declared by tests. Equality permits
 reuse of test selection, not reuse of another host's results. Every host still
-runs the applicable local survey/root/live tests. Unique paths, ownership and
-subject evidence remain in private host inputs and their digests; they do not
+runs the kit's applicable local survey/root/live checks. Unique paths, ownership
+and subject evidence remain in private host inputs and their digests; they do not
 turn a platform-class summary into local authorization.
 
-Conservatively, a kernel/libc/provider/filesystem/security-profile version change
-creates a new class until the test maintainers approve an explicit versioned
-compatibility rule. Tests must declare which dimensions affect their claims.
+A kernel/libc/provider/filesystem/security-profile version change creates a new
+class. Test maintainers may approve an explicit versioned compatibility rule for
+reusing test definitions/selection, never for merging unequal class-defining
+dimensions. Tests must declare which dimensions affect their claims.
 A new class reruns all applicable catalog obligations. A changed mechanism,
 previously uncovered interaction, translated ABI, mount/visibility assumption or
 new capability needs new/extended positive, negative and narrowing tests before
@@ -275,7 +308,7 @@ logical content is:
 | Format and purpose | New attestation format/version and qualification-only signature domain; no cross-use as an operator act or station registration signature |
 | Subject and run | Pseudonymous enrolled host subject, dedicated signing-key fingerprint, run ID, protected monotone sequence, predecessor record digest and enrollment epoch; no claim that class ID identifies a host |
 | Class | Class descriptor and digest, exact OS/kernel/init/libc/provider/filesystem/architecture and relevant dependency versions from §5 |
-| Kit and source | Source commit, recipe/release provenance, complete kit/payload/evidence manifest digests, selected reference identity and complete change-set digest |
+| Kit and source | Source commit, recipe/release provenance, kit release and report format/version independent of the catalogue version, complete kit/payload/evidence manifest digests, selected reference identity and complete change-set digest |
 | Contract and profile | Accepted parity/catalog revisions, exact profile/input digest, all scope/quantitative bounds and required dependencies |
 | Guarantees | Every registered identifier exactly once, with the unchanged parity status, mechanism, scope, evidence SHA-256 and test identifiers; expose each weaker dimension, compensation, bounds and proof directly |
 | Evidence | Content-addressed sanitized evidence manifest, exact tool/test versions, real exits, observation times, root/fixture/live scope, unknown/unrun rows and qualification limits |
@@ -293,6 +326,15 @@ published claim or withhold acceptance. Owner disclosure refusal does not change
 local qualification, and never authorizes publishing private evidence instead.
 
 ### 6.2 Signer, key and host binding
+
+A host export key MUST have authority only over its own enrolled host's records.
+It MUST NOT attest another host or carry platform, catalogue or matrix-publisher
+authority. A key MUST NOT be enrolled for multiple hosts or reused as a platform
+signing key. Verifiers MUST enforce that subject/purpose scope independently of
+the submitted payload. Compromise of that key alone MUST affect only that host's
+record authority; revocation MUST withdraw its affected records, without granting
+control over or revoking other hosts' records. Enrollment and custody choices
+remain open in Q1 within this mandatory scope.
 
 Recommendation Q1: the owner authorizes a dedicated per-host attestation key,
 held outside station accounts and used by the root qualification exporter only
@@ -420,7 +462,7 @@ until those decisions, reviewed encodings and positive/negative vectors exist.
 | Q2 — Exact signed format and key lifecycle? | New closed versioned envelope, domain-separated Ed25519 over pinned CCJ-1 bytes; publish bounds/vectors, custody, rotation and recovery policy; preserve all existing codecs | No interoperable signing/submission API claimed |
 | Q3 — Public freshness and time? | At most 30-day attestation validity, earlier dependency expiry and immediate drift invalidation; approved time/skew and offline policy before deployment | Missing/uncertain freshness cannot produce a current claim |
 | Q4 — Revocation authority and distribution? | Scoped owner/publisher revocation, signed sequenced index, explicit bounded refresh/clock policy and anti-rollback custody; retain history | Unknown revocation status blocks current verification; no numeric refresh default invented |
-| Q5 — Exact class descriptor and compatibility? | Version exact dimensions in §5; default new class on changes; test-maintainer-reviewed compatibility only with dependency evidence | OS-family/model-name matches cannot inherit results |
+| Q5 — Exact class descriptor and compatibility? | Version exact dimensions in §5; default new class on changes; test-maintainer-reviewed compatibility for test reuse only, with dependency evidence | OS-family/model-name matches cannot inherit results |
 | Q6 — Public evidence and retention? | Minimized signed export with reproducible sanitized evidence, explicit owner preview/consent, content-addressed retention through expiry plus a published audit window | Withhold a claim lacking publishable proof; no private logs or identity leakage |
 | Q7 — Matrix review and routine publication? | Independent review for class/test/trust/status changes; preauthorized checked automation for routine same-class record attachments, with scoped publisher key and normal protected-branch delivery | No automatic publication until policy/tooling is approved; pending submissions remain unverified |
 | Q8 — Catalog, finite bounds and extension policy? | Platform-test maintainers version the complete identifier/test/dependency map, root/destructive-test authorization, evidence/schema bounds and later pool additions; pin the landed parity revision | No unknown required identifier, skipped live proof or unreviewed extension may admit |

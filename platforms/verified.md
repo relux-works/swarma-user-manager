@@ -14,7 +14,7 @@ write this platform matrix.
 
 ## Matrix
 
-| Platform class ID / descriptor | Exact profile / catalog / registry revisions | Guarantees by identifier: status, scope and proof | Signed qualification records | Evidence manifests | Observed at / valid until | Revocation index / publication revision |
+| Platform class ID / descriptor | Exact profile / catalog / kit/report / registry revisions | Guarantees by identifier: status, scope and proof | Signed qualification records | Evidence manifests | Observed at / valid until | Revocation index / publication revision |
 |---|---|---|---|---|---|---|
 
 The empty table is intentional. Do not add a sample success or a row inferred
@@ -31,8 +31,10 @@ Unique subject keys, hostnames, addresses and private paths do not belong in it.
 
 Every row contains:
 
-- The canonical class descriptor and SHA-256, exact immutable profile, test
-  catalog and accepted parity-registry revisions; links resolve immutable bytes.
+- The canonical class descriptor and SHA-256, exact immutable profile, catalogue
+  version and independent kit release/report format/version, and accepted
+  parity-registry revision; links resolve immutable bytes. Catalogue and kit/report
+  versions evolve independently; every row MUST name both, not one shared version.
 - A complete readable mapping `identifier: status` covering **every** identifier
   in that registry exactly once: all 42, including `execution.descriptors`,
   `credential.issuance`, `messaging.placement`, `budget.principal` and
@@ -54,6 +56,15 @@ Every row contains:
 - Actual observation times, explicit expiry and the earliest governing
   dependency validity bound; authenticated publication and fresh revocation
   index identities. A submission date cannot refresh an older observation.
+
+For every identifier, the versioned catalogue MUST define what counts as proof
+of each status, what does not, and how `weaker-with-compensation` differs from
+`absent`. Catalogue tests MUST evaluate only the kit's versioned machine-readable
+report and referenced evidence, never the host directly. Until the catalogue
+defines those criteria for an identifier, no row may claim anything other than
+`PENDING-VERIFY` or `absent` for it. An `absent` claim must still be justified as
+unsupported; missing proof alone is `PENDING-VERIFY`. No undeclared criterion,
+implementation annotation or host-key signature can upgrade either status.
 
 A current row means that at least one unrevoked, unexpired accepted record for
 this exact class/profile supports its **whole** stated guarantee map. It does
