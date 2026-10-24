@@ -451,6 +451,17 @@ qualifies real root account/provider behavior.
 
 ## Production qualification
 
+[A3: automatic requalification after verified package updates](../spec/upgrade-requalification.md)
+is a specification, not an implemented maintenance command or hook. It requires
+apt/direct-dpkg transaction triggers and boot reconciliation, the complete
+signed release → index → archive → installed-payload proof, a pinned unchanged
+trust base, and the same initial → pin → boot-unit checks below. It is the sole
+bounded automatic re-pin exception; ordinary boot mode remains read-only for
+policy/pins. It never changes generations or reopens admission. Station admission
+stays closed until A3 is landed and qualified. P7 running-work containment and
+the owner/curator failure-signal interface also need executable qualification.
+The administrator `requalify` command (A1p) remains separate work.
+
 `qualify` and `qualify --boot` are exact root-only maintenance forms, selected
 before stdin intake. Both require real/effective UID 0 and reject sudo-derived
 invocation or any inherited `SUDO_*` variable. The entrypoint captures its own
@@ -510,7 +521,9 @@ noncanonical and oversized inputs refuse. All members below are mandatory except
 `files systemd` deployment. An explicit null is not an omitted member.
 Its SHA-256 equals policy `backend_digest`, also carried by every local-v0 source
 version and inputs `backend_digest`. No extra inputs member or authority flag is
-introduced. Changes require initial qualification and a new pin.
+introduced. Changes require initial qualification and a new pin. A3 may automate
+only its explicitly eligible content/derived-digest changes after full evidence
+verification; all other manifest/configuration changes require operator review.
 
 | Member | Exact meaning |
 |---|---|

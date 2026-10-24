@@ -23,6 +23,16 @@ lock. The [accepted local-v0 sources](station-effect-receipts.md#6-accepted-loca
 select root-approved skeleton content for this no-launcher slice; the later
 Curator composition provider uses the same authority-source interface.
 
+[A3: automatic package-update requalification](upgrade-requalification.md)
+specifies the sole signed-apt-chain exception to automatic re-pin refusal.
+Station admission MUST stay closed until that slice is landed, implemented and
+qualified; A1p's administrator `requalify` command is separate work. The update
+reconciler never opens admission or changes generations. On qualification
+revocation, new starts close immediately; running work is narrowed only where
+verified, otherwise stopped within a published finite deadline (P7). The owner
+and curator receive the required failure signal; its transport is a separate
+interface, not an installed capability claimed by this draft.
+
 | In v0 | Explicitly outside this slice |
 |---|---|
 | `user.create` with `kind=agent`; `user.retire`; same-account `user.bump` | Service/workplace/donor provisioning; pooling; arbitrary UID/GID/path input |

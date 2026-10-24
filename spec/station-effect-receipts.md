@@ -654,8 +654,17 @@ selected input format binds normalized policy, executable, backend, approved ske
 complete station ranges, exact recorded NSS lines and module dependency/
 configuration closure including proven dynamic UID/GID ranges. Boot ID, issuer
 mode/invocation, audit time and fresh check outcomes are outside I and must never be omitted from the per-boot record.
-Changing any input requires operator re-qualification and a new pin; automation
+Changing any input requires operator re-qualification and a new pin, except for
+the sole bounded automatic exception specified in
+[A3: verified package-update requalification](upgrade-requalification.md).
+That exception requires the complete signed apt evidence chain, unchanged
+pinned trust base, stopped admission and the full initial → pin → boot-unit
+protocol. It permits only eligible closure content/derived-digest replacement;
+it never opens admission or changes a generation. Ordinary boot renewal still
 cannot choose a replacement pin or trust freshly discovered changed inputs.
+The A3 implementation and root qualification are PENDING; station admission
+stays closed until that slice is landed and qualified. Its P7 revocation
+response and owner/curator notification interface are mandatory deployment gates.
 The full policy digest in §4/§6.1 authority evidence still binds the actual
 complete current policy, including the pin/flag. Installing a new pin invalidates
 already prepared authority evidence. The source's fresh evidence also binds the
@@ -706,7 +715,8 @@ An input mismatch, failed/unknown check, unsupported dependency or interrupted
 run leaves no admissible new record and exits nonzero; the failed unit and
 bounded reason are visible in systemd status/journal. Do not expose credentials
 or raw account material. Keep manager readiness closed as `qualification_required`; only an
-operator can reconcile changed inputs and install a new pin. A retry requires
+operator, or the separately verified A3 package-update exception, can reconcile
+changed inputs and install a new pin. Boot mode itself never does so. A retry requires
 admission stopped and withdrawal of any prior issuer-owned current-boot record
 before checking, so failure cannot leave a previous run's success admissible.
 

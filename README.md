@@ -9,6 +9,8 @@ Two minimal privileged components for agent systems. Each runs as root for one o
 
 ## Principles
 
+- [A3 package-update requalification](spec/upgrade-requalification.md) specifies the sole signed-apt-chain automatic re-pin exception. Its hooks, proof verifier, containment/notification interfaces and root qualification are pending; station admission stays closed until that slice is landed and qualified. It does not implement A1p's separate administrator command.
+
 - Closed operation schemas read from stdin (`swarma-user-manager helper-op/1`, `swarma-user-manager launch-op/1`), never free-form arguments, commands or environment.
 - Per-caller policy: installers manage configured service accounts, dispatchers manage only the agents and qualified workplaces they created. The helper's `operator` UID is the protected service account `swarma-operator`; it and the mandatory read-only `swarma-observer` never host a harness session.
 - Operator signing authority belongs to `swarma-operator`. Phone-first acts use a biometric-gated operator device key over tailnet SSH, with a forced operator command and no shell; the terminal fallback uses password-authenticated sudo with `timestamp_timeout=0`. Operator helper sudo is authenticated and non-cached; `NOPASSWD` stays only for dispatcher helper/launcher rules. Widening acts require exact-content confirmation; narrowing acts need authentication only except the node-wide R-ALLSTOP act requires one confirmation. All operator acts are refused inside agent sessions. Reads of status, grants, accounts and bindings use `swarma-observer` without confirmation. Unpublished entry/signing/read interfaces remain publication gates ([§11](spec/helper.md#11-installation), [§14](spec/helper.md#14-open-questions)).

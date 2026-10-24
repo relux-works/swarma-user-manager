@@ -16,6 +16,14 @@ later-phase questions; this register does not resolve or renumber them.
 | Station v0 authority sources: selected | The [six local-v0 providers and shared interface](spec/station-effect-receipts.md#6-accepted-local-v0-authority-sources) select root policy qualification, operator-only per-act retirement/export waiver, approved skeleton, cron/at deny plus no linger, no-launcher process fence/full inventory and local locked activation guard. Root can bypass the process restriction; v0 retirement has no export confirmation. Implementation and qualification are still required. |
 | Qualification issuer and account directory: specified for review | [Receipts §§6.3–6.5](spec/station-effect-receipts.md#63-root-issuer-and-closed-qualification-record) select root-only `qualify`, a stable policy/binary/backend/skeleton/range/NSS input pin with fresh protected boot-bound records and a networkless root boot oneshot, exact NSS lines, the files/systemd-only matrix with protected empty/absent userdb roots, exact Varlink closure and source-backed inclusive module ranges, authoritative protected local databases with full NSS agreement, and the existing fresh no-launcher inventory fence. This settles issuer/configuration selection; the files-only issuer/reader implementation still requires review and root/boot-unit qualification. |
 
+The [A3 automatic update specification](spec/upgrade-requalification.md) selects
+the sole bounded automatic re-pin exception: complete signed apt chain,
+unchanged trust root, transaction attribution, no downgrade and full initial →
+pin → boot-unit checks. It never opens admission or changes generations. P7
+closes new starts immediately and requires verified narrowing or stop within a
+published finite deadline. Owner/curator failure notification is mandatory;
+transport remains a separate interface. A1p's administrator command is separate.
+
 Architecture Q3 above is distinct from station publication gate Q3 below;
 closing the authority decision does not close cleanup authority. The effect
 encoding proposal is now published separately; remaining gates follow.
@@ -29,6 +37,18 @@ encoding proposal is now published separately; remaining gates follow.
 | Q3 authority-source implementation | Implement the [common interface and selected local-v0 providers](spec/station-effect-receipts.md#6-accepted-local-v0-authority-sources), versioned source-label policy with operator pins, fresh evidence binding and both-lock activation guard. Implement the [root-only issuer, canonical record reader and qualified account directory](spec/station-effect-receipts.md#63-root-issuer-and-closed-qualification-record), reviewed policy maintenance selection/`no_launcher` update and module support/range provenance. Root qualification verifies policy/record protection, cron/at denial, no linger and every recorded binding; a flag alone never admits. Provider replacement is configuration only for the backend; later providers require publication/qualification. | Unknown/stale evidence or missing policy/deny entry/linger control refuses qualification. No backend wiring or operator entry is claimed by the source decision. |
 | Q4 — composition and physical start | Local v0 uses the root-approved digest-pinned skeleton provider with no launcher. Curator must later publish control mapping, trust-pin encoding and composition/start interlock for each runtime through the same interface; launcher must qualify complete effective-control discovery, approved updates and exact checked-object use on every start/resume. | Account `active` is not station usable; no launcher activation is claimed. |
 | Q5 — Linux qualification window | Owner review/execution of the single fixed root fixture script in stations-v0.md §10; later disposable root backend qualification for account tools, process absence, complete outside-home UID-object inventory, persistence denial and temp hygiene. Fixture setup cannot prove the unimplemented backend. | Exact root ownership/group tests and all backend tests remain PENDING; unprivileged permission surrogates have explicit limits. |
+
+### A3 update publication gates
+
+Publish the supported repository/package/closure profile and stable verifier
+custody; protected transaction/exclusion and maintenance-journal encoding;
+finite resource/freshness bounds and clock policy; P7 deadline/containment owner;
+and owner/curator notification adapters and qualified root recovery. Integrate
+the A2 macOS §7.1 companion reference when it lands. The
+[A3 qualification plan](spec/upgrade-requalification.md#7-qualification-plan--negative-cases-first)
+and root outline are PENDING. Station admission stays closed until A3 is landed,
+implemented and qualified; no timer, missing-evidence fallback, automatic keyring
+rotation, admission reopening or generation changes are authorized.
 
 There is no open choice about account pooling, station-readable private keys
 or station ownership of managed-home ancestors: public CIP-0024 decisions
