@@ -33,7 +33,7 @@ Two minimal privileged components for agent systems. Each runs as root for one o
 ## How it fits
 
 - [swarma-dispatcher](https://github.com/relux-works/swarma-dispatcher), under its own service account, creates a trusted agent's account with the helper, binds that account's generation in swarma-credential-broker, and starts the agent's executor through the launcher; the executor then obtains its credential lease from the broker itself.
-- swarma-credential-broker runs under a service account the helper creates, and reads the helper's ledger to check generations.
+- swarma-credential-broker runs under a service account the helper creates, and must verify generations through the authoritative journal adapter, never the derived ledger.
 - The dispatcher is a Unix-socket service from its first slice and calls the helper and launcher through sudo. It is the only launcher caller. In the gated SH2+ design, the host requests `host_start`/`host_stop` from the dispatcher under a session-scoped host admission permit. Successors require session lifecycle authorisation and confirmed absence of the previous claim; each physical start keeps its claim/fence/receipt interlock. Joint publication remains required ([§7](spec/helper.md#7-the-launcher-swarma-user-launcher)).
 
 ## Diagrams
@@ -56,7 +56,8 @@ Apache License 2.0 — see [LICENSE](LICENSE) and [NOTICE](NOTICE).
 ## Generation journal tools
 
 Linux and Go 1.26 or later are required. The Go module pins the format owner's
-CCJ-1 implementation and the Linux `x/sys/unix` boot-clock/atomic-rename APIs;
+CCJ-1 implementation and the Linux `x/sys/unix` boot-clock, descriptor metadata,
+access-attribute and atomic-rename APIs;
 consumers should pin a reviewed landed commit of this
 repository. These tools manage public generation metadata, never accounts.
 
