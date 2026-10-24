@@ -9,7 +9,7 @@ Two minimal privileged components for agent systems. Each runs as root for one o
 
 ## Principles
 
-- [A3 package-update requalification](spec/upgrade-requalification.md) specifies the sole signed-apt-chain automatic re-pin exception. Its hooks, proof verifier, containment/notification interfaces and root qualification are pending; station admission stays closed until that slice is landed and qualified. It does not implement A1p's separate administrator command.
+- [A3 package-update requalification](spec/upgrade-requalification.md) specifies the sole signed-apt-chain automatic re-pin exception. Its evidence recorder, chain verifier and state reconciler are implemented for review; time/deployment integration, automatic pinning, containment/notification and root qualification remain pending; station admission stays closed until that slice is landed and qualified. It does not implement A1p's separate administrator command.
 
 - Closed operation schemas read from stdin (`swarma-user-manager helper-op/1`, `swarma-user-manager launch-op/1`), never free-form arguments, commands or environment.
 - Per-caller policy: installers manage configured service accounts, dispatchers manage only the agents and qualified workplaces they created. The helper's `operator` UID is the protected service account `swarma-operator`; it and the mandatory read-only `swarma-observer` never host a harness session.
@@ -235,3 +235,18 @@ the last accepted database snapshot and authentic payloads. Native root/time
 qualification, accepted-frontier publication and other listed deployment gates remain
 open; automatic pinning and deployment remain closed. The document includes exact
 narrow test/tool commands and fixture/artifact locations.
+
+
+### A3 evidence tools
+
+| Tool | Purpose / exact entry point | Output |
+|---|---|---|
+| Go through `heavy-slot` | `env GOMAXPROCS=2 heavy-slot --label architect -- go test -p 1 ./internal/updateproof ./cmd/swarma-user-manager -count=1` | Narrow verdicts and owned fixtures; task-local untracked logs |
+| `dpkg` | Native held pinned descriptor with fixed `--audit`; owned lock/audit fixture: `go test ./internal/updateproof -run '^TestReconcileOwnedDpkgAuditExclusion$' -count=1` | Clean means exit zero and empty stdout/stderr; fixture uses only an owned empty database |
+| `systemctl` | Native held pinned descriptor with fixed `--no-block start swarma-user-manager-update-reconcile.service` | Bounded enqueue acknowledgement; root deployment remains pending |
+| `systemd-analyze` | `systemd-analyze verify --man=no --generators=no deploy/systemd/swarma-user-manager-update-reconcile.service deploy/systemd/swarma-user-manager-update-reconcile.path` | Unit parser diagnostics; uninstalled executable paths require owned copies pointing to a built fixture binary |
+
+The [evidence tool contract](docs/update-evidence.md#tools-and-narrow-checks)
+also documents the synthetic `gpg`/`gpgconf` signer, pinned `gpgv` and `dpkg-deb`
+entry points and their retained artifacts. `TestReviewNativeXZDecoder` uses
+`/usr/bin/xz --compress --stdout` only to create its owned package fixture.
