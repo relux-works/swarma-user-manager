@@ -5,6 +5,7 @@ package linuxos
 import (
 	"context"
 	"errors"
+	"os"
 
 	"golang.org/x/sys/unix"
 )
@@ -45,18 +46,104 @@ func (s QualificationFile) Withdraw(ctx context.Context) error {
 	if e := s.check(); e != nil {
 		return e
 	}
-	_, e := s.Read(ctx, 8<<20)
+	probe, e := child(s.Directory.f, "record.json", unix.O_PATH, 0)
 	if errors.Is(e, unix.ENOENT) {
 		return nil
 	}
 	if e != nil {
 		return e
 	}
-	if e = unix.Unlinkat(int(s.Directory.f.Fd()), "record.json", 0); e != nil {
+	defer probe.Close()
+	initial, e := descriptorStat(probe)
+	if e != nil {
+		return e
+	}
+	if initial.Mode&unix.S_IFMT != unix.S_IFREG || initial.Nlink != 1 || initial.Mode&07777 != 0600 || initial.Uid != s.Directory.owner || initial.Gid != s.Directory.group {
+		return refusal("qualification_failed", "file_protection", nil)
+	}
+	f, e := child(s.Directory.f, "record.json", unix.O_RDONLY, 0)
+	if e != nil {
+		return e
+	}
+	defer f.Close()
+	if e = metadata(f, s.Directory.owner, s.Directory.group, 0600, unix.S_IFREG); e != nil {
+		return e
+	}
+	before, e := descriptorStat(f)
+	if e != nil {
+		return e
+	}
+	if !stableStat(initial, before) {
+		return refusal("path_changed", "withdraw", nil)
+	}
+	if _, e = readBounded(f, 8<<20); e != nil {
+		return e
+	}
+	after, e := descriptorStat(f)
+	if e != nil {
+		return e
+	}
+	if !stableStat(before, after) {
+		return refusal("path_changed", "withdraw", nil)
+	}
+	if e = s.phase("withdraw"); e != nil {
+		return e
+	}
+	if e = ctx.Err(); e != nil {
+		return e
+	}
+	if e = s.unlinkOwned("record.json", f); e != nil {
 		return e
 	}
 	return s.Directory.f.Sync()
 }
+
+// namedOwned checks the live namespace against an inode kept alive by held.
+// Check/unlink is protected by the deployment exclusion contract; this detects
+// observed replacement, rather than claiming atomic exclusion of arbitrary root.
+func (s QualificationFile) namedOwned(name string, held *os.File) error {
+	if e := s.check(); e != nil {
+		return e
+	}
+	owned, e := descriptorStat(held)
+	if e != nil {
+		return e
+	}
+	probe, e := child(s.Directory.f, name, unix.O_PATH, 0)
+	if e != nil {
+		return e
+	}
+	defer probe.Close()
+	now, e := descriptorStat(probe)
+	if e != nil {
+		return e
+	}
+	if !same(now, owned) {
+		return refusal("qualification_failed", "record_replaced", nil)
+	}
+	return nil
+}
+func (s QualificationFile) unlinkOwned(name string, held *os.File) error {
+	if e := s.namedOwned(name, held); e != nil {
+		return e
+	}
+	return unix.Unlinkat(int(s.Directory.f.Fd()), name, 0)
+}
+
+// A legacy fixed staging entry is never ours in the anonymous publisher. Its
+// observed presence refuses, and no publication/failure path removes it.
+func (s QualificationFile) stagingAbsent() error {
+	f, e := child(s.Directory.f, ".record.json.tmp", unix.O_PATH, 0)
+	if e == nil {
+		f.Close()
+		return unix.EEXIST
+	}
+	if !errors.Is(e, unix.ENOENT) {
+		return e
+	}
+	return nil
+}
+
 func (s QualificationFile) phase(name string) error {
 	if s.fault != nil {
 		return s.fault(name)
@@ -74,36 +161,38 @@ func (s QualificationFile) Publish(ctx context.Context, b []byte) (err error) {
 		return refusal("qualification_failed", "record_limit", nil)
 	}
 	d := s.Directory
-	f, e := child(d.f, ".record.json.tmp", unix.O_CREAT|unix.O_EXCL|unix.O_WRONLY, 0600)
-	if e != nil {
-		return e
-	} // A colliding temporary is never ours to remove.
-	tmp := true
-	published := false
-	stat, e := descriptorStat(f)
-	if e != nil {
-		f.Close()
+	if e := s.stagingAbsent(); e != nil {
 		return e
 	}
+	fd, e := unix.Openat2(int(d.f.Fd()), ".", &unix.OpenHow{Flags: unix.O_TMPFILE | unix.O_RDWR | unix.O_CLOEXEC, Mode: 0600, Resolve: unix.RESOLVE_BENEATH | unix.RESOLVE_NO_SYMLINKS | unix.RESOLVE_NO_XDEV})
+	if e != nil {
+		return e
+	} // Unsupported anonymous storage refuses; no named fallback.
+	f := os.NewFile(uintptr(fd), "qualification-candidate")
+	// A separate retained reference keeps identity alive even when closing the
+	// writer reports an error. Neither descriptor is recovered from a pathname.
+	ownedFD, e := unix.FcntlInt(f.Fd(), unix.F_DUPFD_CLOEXEC, 0)
+	if e != nil {
+		return errors.Join(e, f.Close())
+	}
+	owned := os.NewFile(uintptr(ownedFD), "qualification-owned")
+	published := false
 	defer func() {
-		err = errors.Join(err, f.Close())
-		if tmp {
-			err = errors.Join(err, unix.Unlinkat(int(d.f.Fd()), ".record.json.tmp", 0), d.f.Sync())
-		}
+		err = errors.Join(err, f.Close(), s.phase("close"))
 		if err != nil && published {
-			// Withdraw only the object we published, never a foreign replacement.
-			probe, x := child(d.f, "record.json", unix.O_PATH, 0)
-			if x == nil {
-				now, z := descriptorStat(probe)
-				x = errors.Join(z, probe.Close())
-				if x == nil && same(now, stat) {
-					x = unix.Unlinkat(int(d.f.Fd()), "record.json", 0)
-				}
-			}
-			err = errors.Join(err, x, d.f.Sync())
+			// Keep owned open through identity comparison/removal, preventing reuse.
+			err = errors.Join(err, s.unlinkOwned("record.json", owned), d.f.Sync())
 		}
+		owned.Close() // Lifetime-only reference; all writes were synced above.
 	}()
-	if e = metadata(f, d.owner, d.group, 0600, unix.S_IFREG); e != nil {
+	stat, e := descriptorStat(f)
+	if e != nil {
+		return e
+	}
+	if stat.Mode&unix.S_IFMT != unix.S_IFREG || stat.Mode&07777 != 0600 || stat.Uid != d.owner || stat.Gid != d.group || stat.Nlink != 0 {
+		return refusal("qualification_failed", "anonymous_metadata", nil)
+	}
+	if e = access(f); e != nil {
 		return e
 	}
 	if _, e = f.Write(b); e != nil {
@@ -121,14 +210,26 @@ func (s QualificationFile) Publish(ctx context.Context, b []byte) (err error) {
 	if e = s.check(); e != nil {
 		return e
 	}
+	// Preserve the existing fault checkpoint name for the publication boundary.
 	if e = s.phase("rename"); e != nil {
 		return e
 	}
-	if e = unix.Renameat2(int(d.f.Fd()), ".record.json.tmp", int(d.f.Fd()), "record.json", unix.RENAME_NOREPLACE); e != nil {
+	if e = s.stagingAbsent(); e != nil {
 		return e
 	}
-	tmp = false
+	if e = s.phase("link"); e != nil {
+		return e
+	}
+	if e = unix.Linkat(int(f.Fd()), "", int(d.f.Fd()), "record.json", unix.AT_EMPTY_PATH); e != nil {
+		return e
+	}
 	published = true
+	if e = s.stagingAbsent(); e != nil {
+		return e
+	}
+	if e = metadata(f, d.owner, d.group, 0600, unix.S_IFREG); e != nil {
+		return e
+	}
 	if e = s.phase("parent-sync"); e != nil {
 		return e
 	}
@@ -138,5 +239,5 @@ func (s QualificationFile) Publish(ctx context.Context, b []byte) (err error) {
 	if e = ctx.Err(); e != nil {
 		return e
 	}
-	return nil
+	return s.namedOwned("record.json", f)
 }

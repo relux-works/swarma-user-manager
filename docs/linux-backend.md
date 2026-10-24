@@ -467,9 +467,16 @@ not require repinning, and fresh per-target checks still apply.
 The fixed record directory `<root>/lib/user-manager/qualification` is root:root
 0700. `record.json` is root:root 0600, single-link and opened without following
 links through protected ancestors. Issuing withdraws and syncs the prior record
-before checks. Publication exclusively creates `.record.json.tmp`, writes and
-syncs it, renames without replacement, and syncs the parent. Failure removes the
-issuer's candidate; a foreign temporary collision is preserved. A failed retry
+before checks. Publication writes and syncs an anonymous `O_TMPFILE`, links the
+held descriptor as `record.json` using `linkat(AT_EMPTY_PATH)` without replacement,
+and syncs the parent. Unsupported anonymous publication refuses without a named
+fallback. An observed legacy `.record.json.tmp` collision is preserved and refuses.
+The publisher handles failed-candidate rollback itself, retaining an inode reference
+through writer close and checking the final name against that reference before
+unlinking. The protocol never withdraws after an arbitrary publish error. Prior
+withdrawal also retains and checks the opened record identity. Check/unlink relies
+on deployment exclusion; it does not atomically exclude arbitrary root writers.
+Foreign final collisions and observed replacements are preserved. A failed retry
 cannot retain an earlier admissible record. A guard rechecks exact record bytes
 locally and exposes the full record digest in prepared authority evidence.
 

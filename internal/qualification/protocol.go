@@ -22,6 +22,9 @@ type Deployment interface {
 	Capture(context.Context, manager.Policy) (Inputs, []string, error)
 	CheckAll(context.Context, manager.Policy, Inputs, []string) (Checks, error)
 }
+
+// Storage.Publish owns failed-candidate rollback. It must preserve foreign
+// namespace collisions; Withdraw is only the explicit prior-record withdrawal.
 type Storage interface {
 	Read(context.Context, int64) ([]byte, error)
 	Withdraw(context.Context) error
@@ -107,7 +110,6 @@ func (s Protocol) Issue(ctx context.Context, p manager.Policy, bootMode bool) (R
 		return Record{}, ErrRequired
 	}
 	if s.Storage.Publish(ctx, raw) != nil {
-		_ = s.Storage.Withdraw(context.WithoutCancel(ctx))
 		return Record{}, ErrRequired
 	}
 	return q, nil

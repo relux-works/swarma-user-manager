@@ -48,6 +48,9 @@ func (s *memStorage) Publish(_ context.Context, b []byte) error {
 	s.publishes++
 	s.b = append([]byte(nil), b...)
 	if s.publishErr {
+		// Storage retracts its own partial candidate; callers cannot delete a name
+		// after an arbitrary Publish error. Real storage faults are covered separately.
+		s.b = nil
 		return ErrRequired
 	}
 	return nil
