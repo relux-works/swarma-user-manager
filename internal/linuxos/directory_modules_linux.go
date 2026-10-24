@@ -113,6 +113,7 @@ func CaptureImplementationClosure(ctx context.Context, roots []ProtectedArtifact
 		return nil, "", refusal("directory_unknown", "implementation_closure", nil)
 	}
 	type namespace struct {
+		root   ProtectedArtifact
 		loaded map[string]ProtectedArtifact
 		seen   map[string]bool
 	}
@@ -123,7 +124,7 @@ func CaptureImplementationClosure(ctx context.Context, roots []ProtectedArtifact
 	}
 	queue := []item{}
 	for _, root := range roots {
-		queue = append(queue, item{root, 1, &namespace{map[string]ProtectedArtifact{}, map[string]bool{}}})
+		queue = append(queue, item{root, 1, &namespace{root, map[string]ProtectedArtifact{}, map[string]bool{}}})
 	}
 	out := []ClosureFile{}
 	remaining := ImplementationTotalBytes
@@ -141,12 +142,14 @@ func CaptureImplementationClosure(ctx context.Context, roots []ProtectedArtifact
 			return nil, "", refusal("directory_unknown", "closure_limit", nil)
 		}
 		next.ns.seen[next.a.Path] = true
-		// Canonical root/object names also participate in the loaded-name set.
+		// Canonical paths participate in conservative cross-file alias checks.
 		if prior, ok := resolvedNames[next.a.Path]; ok && prior != next.a.Path {
 			return nil, "", refusal("directory_unknown", "closure_name_collision", nil)
 		}
 		resolvedNames[next.a.Path] = next.a.Path
-		next.ns.loaded[next.a.Path] = next.a
+		if next.depth > 1 {
+			next.ns.loaded[next.a.Path] = next.a
+		}
 		maximum := ImplementationFileBytes
 		if remaining < maximum {
 			maximum = remaining
@@ -220,6 +223,13 @@ func CaptureImplementationClosure(ctx context.Context, roots []ProtectedArtifact
 			if dep.name == "" || strings.ContainsAny(dep.name, "$\x00\n\r") || strings.Contains(dep.name, "/") && (!filepath.IsAbs(dep.name) || filepath.Clean(dep.name) != dep.name) {
 				return nil, "", refusal("directory_unknown", "closure_dependency", nil)
 			}
+			// glibc gives a main executable an empty name (2.42 rtld.c:
+			// 1593-1607; 2.43:1646-1660), unlike a dlopen root. This API
+			// does not specify load kind, so decline root-self names for
+			// every root rather than infer its role from ELF headers.
+			if dep.name == next.ns.root.Path || dep.name == next.ns.root.Name {
+				return nil, "", refusal("directory_unknown", "closure_root_name", nil)
+			}
 			scope := dep.runpath
 			if filepath.IsAbs(dep.name) {
 				scope = []string{}
@@ -234,6 +244,11 @@ func CaptureImplementationClosure(ctx context.Context, roots []ProtectedArtifact
 					return nil, "", refusal("directory_unknown", "closure_unresolved", e)
 				}
 				next.ns.loaded[dep.name] = a
+			}
+			// A different spelling (e.g. a protected link) can resolve back
+			// to the root too; it must not bypass the same boundary.
+			if a.Path == next.ns.root.Path {
+				return nil, "", refusal("directory_unknown", "closure_root_name", nil)
 			}
 			// Independent namespaces must still agree on each requested name.
 			if prior, ok := resolvedNames[dep.name]; ok && prior != a.Path {

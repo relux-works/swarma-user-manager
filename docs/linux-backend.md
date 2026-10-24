@@ -549,10 +549,25 @@ remain in the implementation closure. `path` is the selected canonical path.
 Conflicting canonical selections for one needed name within a closure refuse.
 The runtime `DT_SONAME` of every closure member is checked as well. Duplicate
 SONAMEs on distinct canonical files, or a SONAME matching another file's requested
-or canonical root/member name, refuse in either traversal order. This is a
-conservative alias refusal: the model does not emulate glibc's loaded-object
-namespace or its breadth-first dependency load order. Distinct SONAMEs and
-multiple names selecting the same canonical object remain supported.
+or canonical root/member name, refuse in either traversal order. Within each
+root's bounded requested-name namespace, dependencies are processed in FIFO
+(breadth-first) order, retaining each object's DT_NEEDED order. A requested name
+is registered when resolved and reused before a later filesystem search in that
+root's traversal. Each root gets an independent namespace; objects loaded for
+another root cannot supply missing dependencies. Cross-file SONAME conflicts
+still conservatively refuse; this is not a full SONAME/load-history simulation.
+Distinct SONAMEs and multiple names selecting the same canonical object remain
+supported.
+
+Initial root canonical paths are not seeded as loaded names. glibc gives the
+main executable an empty loader name, whereas a shared object opened by dlopen
+has a path/name. The capture API does not specify the root's load kind, so it
+conservatively refuses any dependency naming that root's canonical path or
+basename, or resolving back to that root under another spelling. This boundary
+applies to every root, including shared-object roots; ordinary requested-library
+reuse within a shared-object root remains supported. See glibc
+[2.42 rtld.c:1593](https://github.com/bminor/glibc/blob/glibc-2.42/elf/rtld.c#L1593)
+and [2.43 rtld.c:1646](https://android.googlesource.com/toolchain/glibc/+/refs/tags/upstream/glibc-2.43/elf/rtld.c#1646).
 
 Each ordered `locations` entry is the closed object
 `{kind,path,state,resolved,links,digest}`:
