@@ -47,36 +47,49 @@ not an automatic exception.
 
 ## 2. Transaction trigger and exclusion
 
-`DPkg::Post-Invoke` MUST durably enqueue reconciliation after **each** apt-driven
-dpkg invocation, including unattended upgrades. It is a trigger, not proof of
-successful installation. APT documents this hook around dpkg calls, and direct
-dpkg uses separate invoke hooks; one front-end can invoke dpkg repeatedly.
-See [apt.conf(5)](https://manpages.debian.org/trixie/apt/apt.conf.5.en.html)
+`DPkg::Post-Invoke` MUST durably enqueue reconciliation for its apt transaction
+aggregate, including unattended upgrades; it is not a per-dpkg-invocation hook
+or proof of successful installation. In APT 3.0.3, one batch can execute several
+dpkg invocations in the [operation loop](https://github.com/Debian/apt/blob/3.0.3/apt-pkg/deb/dpkgpm.cc#L1685),
+then dispatches [Post-Invoke once after that loop](https://github.com/Debian/apt/blob/3.0.3/apt-pkg/deb/dpkgpm.cc#L2116).
+Per-invocation evidence therefore MUST come from the independent recorder and
+dpkg invoke hooks, not a presumed callback for each subprocess. The qualified
+profile MUST also cover standalone direct-dpkg transactions with their own
+post-invoke trigger. See [apt.conf(5)](https://manpages.debian.org/trixie/apt/apt.conf.5.en.html)
 and [dpkg(1)](https://manpages.debian.org/trixie/dpkg/dpkg.1.en.html).
-The qualified profile MUST also cover direct dpkg transactions with its own
-post-invoke trigger. No periodic timer is the trigger or recovery mechanism.
+No periodic timer is the trigger or recovery mechanism.
 
-Before the first package mutation, a protected recorder MUST durably allocate a
-transaction ID, record the last accepted package/version/closure baseline and
-archive identities, and make the admission owner close new starts. Apply §6 to
-running work before replacing their required controls. If that interlock cannot
+Before the first package mutation, a protected recorder MUST durably allocate
+the aggregate ID for an apt batch and, before each dpkg invocation mutates
+state, a distinct invocation ID. Record the last accepted package/version/closure
+baseline and archive identities, and make the admission owner close new starts.
+Apply §6 to running work before replacing their required controls. If that interlock cannot
 be established, the qualified update path MUST refuse to begin. A post-hook
 alone cannot protect the interval before changed inputs are detected.
 
-The ID is a protected monotonically allocated sequence plus its boot identifier,
-not a timestamp, apt history line or package name. Repeated hooks refer to the
-same recorded invocation; distinct invocations remain distinct. Retain complete
-before/after package/version/architecture states, affected archive digests,
-completion/failure status and their association with changed closure files.
-The recorder MUST observe intervening versions as well as endpoints; a downgrade
-followed by an upgrade cannot disappear from the evidence. Missing attribution
-refuses; package logs alone cannot manufacture a transaction receipt.
+Each ID is a protected monotonically allocated sequence plus its boot identifier,
+with an explicit aggregate/invocation kind, not a timestamp, history line, PID or
+package name. The aggregate retains its ordered complete invocation-ID list;
+a standalone direct-dpkg invocation has its own ID without a fabricated apt
+aggregate. Record each invocation's complete before/after package/version/
+architecture states, archive digests, completion/failure status and association
+with changed closure files, including intervening versions. A downgrade followed
+by an upgrade MUST NOT disappear.
+The once-per-batch apt hook references the aggregate; dpkg hooks reference their
+recorded invocation and any parent aggregate. Repeated notifications deduplicate
+by recorded ID and event phase: identical retained event bytes enqueue no second
+effect; conflicting reuse refuses. Never merge distinct invocation IDs or infer
+one from a hook count. Reconciliation accounts for every listed invocation
+before advancing the aggregate/frontier; unknown membership or missing attribution
+refuses. Package logs alone cannot manufacture transaction receipts.
 
 Hooks MUST only record/fence/enqueue bounded work while package locks may be
 held. They MUST NOT synchronously call apt again or wait for a worker needing
 those locks. Reconciliation waits for package configuration and triggers to
 finish, then acquires qualified package-writer exclusion and the existing
-deployment exclusion. It MUST exclude a new package/root configuration writer
+deployment exclusion. Deployment-lock ownership transfers to each qualifier
+run as §4 specifies; maintenance and package/root-writer exclusion remain
+continuous. It MUST exclude a new package/root configuration writer
 through capture, checks and publication, with one documented lock order; no
 external calls occur under manager state locks. Partial transactions, pending
 triggers, unavailable exclusion or another transaction arriving during capture
@@ -182,24 +195,39 @@ nor creates, retires, bumps or activates a generation.
 
 After **all** changed leaves pass §3 and all other pins remain unchanged:
 
-1. Hold both exclusions, stopped admission and the protected maintenance marker.
-   Persist a write-ahead update intent bound to the transaction and evidence.
-   Prepare a candidate configuration by replacing only §1's eligible leaf
-   digests and their deterministic derived digests. Any other diff refuses.
-2. Run the same initial-mode protocol with candidate `qualified:false` and zero
-   qualification digest. Execute every existing check, with no cached pass,
-   against the authenticated installed artifacts. Its initial record cannot
-   admit. Verify the resulting inputs and recheck files/package state/evidence
-   expiry under exclusion.
-3. Atomically install and sync the candidate policy's input pin and
-   `qualified:true` attestation using the existing pin protocol. This is the
-   sole automatic re-pin exception: it cannot widen policy or certify unknown
-   inputs. Record the old and candidate inputs digests. Keep admission stopped.
-4. Restart the installed qualification unit and require a fresh complete
-   networkless boot-mode run. Require latest current-boot terminal success,
-   exact matching invocation ID, all checks `ok`, matching installed inputs and
-   candidate pin, and a final stable package/closure snapshot. An initial record
-   or older same-boot success is insufficient.
+1. With package/root-writer exclusion and the deployment lock held, preserve
+   stopped admission and the protected maintenance marker. Persist a write-ahead
+   update intent bound to the transaction and evidence. Prepare the candidate
+   P0 policy (`qualified:false`, zero qualification digest) and matching deployment
+   manifest; atomically install and sync each at its protected fixed path, replacing
+   only §1's eligible leaf/derived digests. Any other diff refuses. Installation
+   MUST precede the fixed-path initial command; that command does not read an
+   uninstalled in-memory candidate or install the manifest itself.
+2. Release the reconciler's deployment lock before launching or waiting for the
+   fixed-path initial command (`/opt/swarma/libexec/swarma-user-manager qualify`
+   for the documented root). The qualifier acquires and releases its own exclusive
+   deployment lease. Do not retain or pass an inherited held deployment lease to
+   it. Throughout this handoff retain stopped admission, the maintenance marker
+   and package/root-writer exclusion. Rerun every initial-mode check against the
+   authenticated installed artifacts, with no cached pass; the initial record
+   cannot admit. After the run releases its lease, reacquire the deployment lock
+   and revalidate the marker/exclusion continuity, exact candidate policy/manifest,
+   resulting inputs, files/package state and evidence expiry **before pinning**.
+   Failed reacquisition or any mismatch refuses with admission still stopped.
+3. Under the reacquired deployment lock and continuous package/root-writer
+   exclusion, atomically install and sync the candidate policy's input pin and
+   `qualified:true` attestation using the existing pin protocol. This is the sole
+   automatic re-pin exception: it cannot widen policy or certify unknown inputs.
+   Record old/candidate inputs digests; keep admission stopped and marker intact.
+4. Release the reconciler's deployment lock again before restarting or waiting
+   for the installed qualification unit; boot mode likewise acquires/releases
+   that lock itself. Retain the same maintenance/admission and package/root-writer
+   exclusion throughout. Require a fresh complete networkless boot-mode run,
+   latest current-boot terminal success, exact matching invocation ID, all checks
+   `ok` and matching installed inputs/pin. After its lease is released, reacquire
+   and revalidate deployment exclusion, maintenance/admission continuity and the
+   final stable package/closure snapshot before accepting the outcome. Neither
+   an initial record nor an older same-boot success is sufficient.
 5. Durably record the accepted outcome and advance the reconciled transaction,
    package-version and release high-water frontiers. Only then report evidence
    to the admission owner. The reconciler MUST NOT clear the maintenance fence,
@@ -211,8 +239,9 @@ The intent/outcome MUST be in a protected append-only qualification-maintenance
 journal, separate from `gen-journal/1` and the existing closed OS-effect store.
 Do not add an invented lifecycle event or silently extend either codec. Before
 implementation, publish/review its closed versioned encoding and crash protocol.
-Each entry MUST bind sequence/predecessor, transaction ID, phase
-(intent/accepted/refused/interrupted), old/candidate inputs digests, complete
+Each entry MUST bind sequence/predecessor, aggregate/per-invocation IDs and
+their complete association, phase (intent/accepted/refused/interrupted),
+old/candidate inputs digests, complete
 transaction/evidence-manifest SHA-256, per-link evidence references/digests,
 boot/unit invocation identity, bounded reason and notification receipt. Include
 all covered transactions when one stable snapshot reconciles several; none may
@@ -269,7 +298,8 @@ Owner decision P7 is normative: on qualification revocation new starts/resumes
 MUST close immediately. Running work MUST be narrowed only where the exact
 narrowing control and resulting effective scope have been verified; otherwise
 it MUST be stopped and absence verified within a **published finite deadline**
-from revocation detection. The profile MUST publish that deadline, detection
+from revocation detection. Verified narrowing MUST also complete within that
+same published deadline. The profile MUST publish that deadline, detection
 coverage and complete execution/descendant/respawn inventory before deployment;
 this spec invents no numeric default. Partial/unknown narrowing means stop,
 not continued work while evidence is collected. The admission/containment owner
@@ -294,11 +324,11 @@ Use disposable owned fixtures; no live-package mutation is authorized here.
 | `UpdateDowngradeRefused`: epoch/revision downgrade, intervening downgrade or same-version different archive | Debian-ordered upgrade; identical-archive reinstall | Lexical comparison, endpoint-only history or omitted archive identity |
 | `UpdateOfflineMissingEvidenceRefused`: missing cache link and no permitted exact re-fetch | Complete offline bundle; exact approved re-fetch online | Accept apt success/cached verdict or substitute current candidate |
 | `UpdateScopeExpansionRefused`: changed config, NSS range/path set, station policy or skeleton beside eligible leaf | Only eligible leaf/derived-digest replacements | Automatically discover and approve new closure topology |
-| `UpdateHookGapRefused`: absent transaction attribution, partial dpkg/triggers or capture race | Missed post-hook with complete independent recorder is reconciled at boot | Treat post-hook success/logs or current versions as receipt |
+| `UpdateHookGapRefused`: absent transaction attribution, lost invocation within an aggregate, partial dpkg/triggers or capture race | One apt aggregate with multiple recorded dpkg invocations and one final Post-Invoke reconciles every invocation once, even with duplicate notifications; missed post-hook with complete recorder reconciles at boot | Infer one invocation per apt hook, merge invocation IDs, or treat logs/current versions as receipts |
 | `UpdateCrashCannotAdmit`: crash before/after intent, pin, Q and accepted-outcome durability boundaries | Full run records matching accepted outcome and latest unit invocation | Admit from pin/Q alone or skip post-lock final snapshot |
-| `UpdateQualificationFailureRefused`: one failed/unknown check or stale unit success | Every check rerun; fresh authenticated boot invocation | Reuse initial/old record or suppress a failed check |
+| `UpdateQualificationFailureRefused`: failed/unknown check, stale unit success, uninstalled candidate P0/manifest or parent holding the deployment lock during either qualifier | Both qualifier modes own their deployment leases; parent retains maintenance/package exclusion and reacquires/revalidates before pin/outcome; fresh authenticated boot invocation | Retain the parent deployment lease, skip candidate installation/revalidation or reuse initial/old success |
 | `UpdateCannotOpenAdmission`: success tries to clear fence, activate/resume or mutate a generation | Success only publishes qualification/evidence to separate admission owner | Couple pin success to admission reopening |
-| `UpdateP7ResponseRequired`: unknown narrowing, incomplete affected set or missed stop deadline | Verified narrower scope or complete timely stop; immediate new-start closure | Treat unknown narrowing as pass or delay fencing for notification |
+| `UpdateP7ResponseRequired`: unknown narrowing, incomplete affected set or missed narrowing/stop deadline | Verified narrower scope or complete stop, each within the same published deadline from detection; immediate new-start closure | Treat unknown/late narrowing as pass or delay fencing for notification |
 | `UpdateNotificationFailureHeld`: either recipient unavailable, queue/journal full or delivery receipt missing | Both receipts retained without secret payloads | Drop incident, advance frontier or postpone P7 on delivery failure |
 
 Record exact commands, versions, fixtures, verdicts and exit codes. Demonstrate
@@ -324,7 +354,8 @@ procedure. Their implementations and real root evidence remain PENDING.
 3. Run §7's failures first, then authentic package upgrades/reinstalls, offline
    proof and permitted exact re-fetch. Exercise repeated hooks, missed hooks,
    failed transactions, reboot recovery and every journal/pin/Q crash boundary.
-4. Run initial → pin → unit boot-mode checks and verify durable transaction
+4. Run initial → pin → unit boot-mode checks with §4’s deployment-lock handoffs
+   and continuous maintenance/package exclusion, and verify durable transaction
    evidence, unchanged generations and still-closed admission. Independently
    exercise P7 narrowing/stop and both notification receipts, including failure.
 5. Only the separate admission owner may authorize reopening after all shared
