@@ -190,3 +190,20 @@ Before adding any future sudoers drop-in, validate it with the host's sudo-rs
 `visudo -cf`; no drop-in is proposed here. All-process open-inode coverage,
 namespace/bind-mount refusal and actual scheduler/systemd backend qualification
 remain separate pending host checks, even if this disposable root test passes.
+
+
+## Qualified directory
+
+`QualifiedDirectory` and the read-only NSS capture helpers implement the
+[qualified account-directory boundary](../../docs/linux-backend.md#qualified-account-directory-implementation).
+They require authenticated recorded inputs and a complete reviewed runtime and
+external change exclusion. `FilesNSSRuntime` uses the cgo-built isolated collector;
+`systemd` is recognized but unknown pending its userdb/Varlink closure contract.
+No production host qualification is enabled. Shadow now requires protected 0600
+metadata in `ObserveAccounts` too; missing/unreadable/unsafe shadow is unknown.
+
+Narrow checks: `go test -p 1 ./internal/linuxos -run '^TestDirectory' -count=1`
+and `go test -p 1 ./internal/nssprobe -count=1`. ELF/NSS ABI tests use `/usr/bin/cc`
+in test-owned temporary directories. The collector build is
+`go build -o .temp/swarma-nss-probe ./cmd/swarma-nss-probe`; see the project README
+for tools and the deployment limits. The root qualification script is unchanged.

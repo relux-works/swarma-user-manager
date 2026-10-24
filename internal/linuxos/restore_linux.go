@@ -180,7 +180,7 @@ func ObserveAccounts(ctx context.Context, etc *Dir, id ReservedIdentity, nss Acc
 	}
 	files := map[string][]byte{}
 	for _, name := range []string{"passwd", "group", "shadow"} {
-		b, e := protectedRead(c, etc, name, 8<<20, false)
+		b, e := protectedRead(c, etc, name, 8<<20, name == "shadow")
 		if e != nil {
 			return zero, refusal("directory_unknown", name, e)
 		}

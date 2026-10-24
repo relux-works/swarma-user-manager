@@ -52,8 +52,8 @@ qualified sudo/service-identity adapter, authoritative cleanup admission,
 authenticated exact-pair Keymaker re-admission/binding receipts with a pinned
 activation guard, and external restore/migration custody. Production bump is
 closed as `bump_key_admission_unconfirmed` until the joint Keymaker contract
-is accepted; policy cannot enable it. The binary has no OS
-backend and refuses new work; fake tests do not close these deployment gates.
+is accepted; policy cannot enable it. The binary links the Linux
+backend but has no qualified host Environment and refuses new work; fake tests do not close these deployment gates.
 A writer crash retaining `writer.pending` requires the generation format's
 explicit root reconciliation before same-effect recovery can proceed.
 
@@ -73,7 +73,10 @@ and logind/no-running-manager checks remain pending host qualification. These
 checks do not enable bump, policy installation or account activation.
 
 The Linux adapter is linked but its retained root qualification-record provider
-and complete qualified NSS provider remain unavailable. The production adapter
+remains unavailable. The qualified directory boundary and files-only status-aware
+collector are implemented with explicit reviewed loader/configuration and exclusion
+capabilities; their deployment remains pending. Systemd is recognized but unknown
+until its complete userdb/Varlink closure provider is published. The production adapter
 refuses without them; `qualified: true` alone never admits. Approved skeleton
 reading, full inventory-scope configuration and maintained local guards must be
 published with those providers. Lost live stage/publication handles require

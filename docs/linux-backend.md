@@ -7,8 +7,9 @@ constructor supplies no host authority. Operations requiring a host refuse
 The entrypoint checks host qualification before handling even a terminal-result
 replay. Production `user.bump` remains closed by the core and by the adapter.
 
-The retained root qualification record issuer/reader and qualified complete NSS
-provider are not published yet. `Environment` is their explicit integration
+The retained root qualification record issuer/reader is not implemented yet.
+The account-directory implementation below requires reviewed runtime/exclusion
+capabilities before deployment. `Environment` is their explicit integration
 boundary, together with the root-approved manifest and qualified inventory
 scope. Its `Pin` must authenticate retained root-run evidence against the exact
 policy/backend/boot and maintain the no-launcher deployment restriction. Its
@@ -102,3 +103,76 @@ go build -o <scratch>/swarma-user-manager ./cmd/swarma-user-manager
 Logs and the binary belong in task-local untracked scratch. Root qualification
 uses the existing owner-reviewed `internal/linuxos/root-qualification.sh` flow;
 that disposable primitive harness is not a qualification-record issuer.
+
+## Qualified account-directory implementation
+
+`linuxos.QualifiedDirectory` implements the account boundary in
+[receipts §6.4](../spec/station-effect-receipts.md#64-qualified-local-account-directory-and-nss-configuration).
+The later Environment must supply authenticated `DirectoryInputs`, the complete
+policy UID/GID ranges and reserved-name set, a reviewed `NSSRuntime` and a
+`DirectoryFence` that excludes external account-database and module/configuration
+changes for the entire observation. An ordinary in-process mutex is insufficient.
+The qualification-record reader and this exclusion's deployment integration remain
+pending; the production constructor still supplies no admitting Environment.
+
+Each call captures protected `nsswitch.conf` again, requires the exact recorded
+physical passwd/group/shadow lines, captures current module implementation and
+configuration digests and ranges, then compares a bounded complete independent
+NSS enumeration with protected local databases. It checks the requested identity,
+every reserved name and every enumerated entry in either complete station range.
+Comparison includes name/number collisions, primary and supplementary groups,
+home, shell and password-lock state. Local `ObserveAccounts` remains the final
+per-target comparison. Missing databases/providers, duplicate identities,
+incomplete enumeration and drift return `directory_unknown` with no partial
+account observation. This profile requires shadow-backed (`x`) passwd entries;
+an inline passwd credential cannot be hidden by a locked shadow entry. Complete agreed absence returns an empty observation; it
+does not confer a creation receipt. Shadow is required to be root:root 0600 by
+this initial qualified profile, with protected ancestors and no ACLs/capabilities.
+
+| Module | Reviewed implementation boundary | Qualification state |
+|---|---|---|
+| `files` | Direct `_nss_files_*` enumeration in the isolated `swarma-nss-probe` helper; complete passwd/group/shadow status and membership checks. On modern glibc the exporting implementation is libc, not the legacy stub library. | Usable with a reviewed protected collector/library/loader configuration closure and authenticated inputs/exclusion. No implicit host resolver is supplied. |
+| `systemd` | Requires the full userdb drop-in and Varlink service closure, its implementation/configuration provenance and proved dynamic ranges through `NSSRuntime`. | Recognized but unknown until that separate closure contract/provider is published. Default allocation ranges alone cannot qualify it. |
+| Any other module | No bounded complete implementation is published. | Refuse. |
+
+Capture understands module names and closed NSS status/action syntax and records
+every reachable module, even one following a return action. This runtime admits
+only plain `files` or `files systemd` lines; action clauses are captured but
+refused until their effective lookup/enumeration equivalence is reviewed. Bytes,
+whitespace, comments and final LF remain part of the pin. Missing/duplicate lines,
+continuations, NUL/CR, invalid UTF-8 and unsupported syntax refuse.
+
+`CaptureImplementationClosure` reads every ELF `DT_NEEDED` and `PT_INTERP`
+transitively, hashes both resolved paths and bytes, and refuses unresolved,
+unsafe, non-ELF or over-budget objects. RPATH/RUNPATH and alternative dependency
+or audit tags are unsupported. `ELFResolver` must implement the actual reviewed
+loader resolution and include its cache/search/hwcaps/preload configuration in
+the configuration closure. These requirements are explicit capabilities for the
+later Environment; a caller-selected SONAME map or short artifact list is not
+production closure evidence. `CaptureConfigurationClosure` hashes a reviewed
+closed artifact set without inspecting account material. Capture functions only
+read; they neither issue records nor install policy.
+
+Ranges are sorted, nonoverlapping inclusive intervals. Nil means unknown;
+explicit empty arrays are permitted only with reviewed semantics (`files` has
+no dynamic IDs). A shared endpoint in either UID or GID range refuses. The
+upstream [systemd UID/GID allocation table](https://systemd.io/UIDS-GIDS/)
+is retained in `DocumentedSystemdRanges`, including root `[0,0]`; it is a review
+input, never proof of complete userdb coverage. In particular,
+[systemd's NSS documentation](https://www.freedesktop.org/software/systemd/man/257/nss-systemd.html)
+also permits arbitrary JSON records and Varlink providers. Their configuration
+and behavior require the separate closure provider. The qualification record's
+range encoding must accommodate synthetic root as specified by that contract.
+
+The helper uses a small cgo NSS ABI shim because Go's `os/user` and
+[glibc `getent`](https://sourceware.org/git/?p=glibc.git;a=blob;f=nss/getent.c;hb=HEAD)
+do not expose the complete terminal-status contract. It checks direct module
+SUCCESS/NOTFOUND/UNAVAIL/TRYAGAIN results and rejects partial enumeration. It runs
+under a parent deadline with empty environment, bounded output and held executable
+and library descriptors. It emits sanitized database projections: password fields
+are removed and shadow contains only a lock marker. It never emits password hashes,
+executes account tools, installs anything or grants authority on its own.
+
+The helper and its dynamic-loader closure still need reviewed root deployment;
+fixture tests do not qualify root account behavior. Production host admission,
+`qualify`, policy/record installation and `user.bump` remain closed.
