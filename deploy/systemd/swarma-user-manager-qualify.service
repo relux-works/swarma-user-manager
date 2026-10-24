@@ -28,7 +28,8 @@ IPAddressDeny=any
 SystemCallFilter=~io_uring_setup io_uring_enter io_uring_register
 SystemCallArchitectures=native
 NoNewPrivileges=yes
-RestrictSUIDSGID=yes
+# Required openat2 reads must remain available (systemd 259 blocks them with yes).
+RestrictSUIDSGID=no
 RestrictRealtime=yes
 LockPersonality=yes
 RestrictNamespaces=yes

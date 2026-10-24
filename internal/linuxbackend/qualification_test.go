@@ -156,6 +156,7 @@ func TestQualificationUnitProfile(t *testing.T) {
 	raw := string(b)
 	bin := "/opt/swarma/libexec/swarma-user-manager"
 	for name, bad := range map[string]string{
+		"openat2-blocked":   strings.Replace(raw, "RestrictSUIDSGID=no", "RestrictSUIDSGID=yes", 1),
 		"argv":              strings.Replace(raw, " --boot", "", 1),
 		"root":              strings.Replace(raw, "User=root", "User=daemon", 1),
 		"network-namespace": strings.Replace(raw, "[Service]", "[Service]\nPrivateNetwork=yes", 1),

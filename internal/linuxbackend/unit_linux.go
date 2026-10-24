@@ -52,7 +52,7 @@ func validateQualificationUnit(raw, binary string) error {
 		"RestrictAddressFamilies": "AF_UNIX", "IPAddressDeny": "any",
 		"SystemCallFilter":        "~io_uring_setup io_uring_enter io_uring_register",
 		"SystemCallArchitectures": "native", "NoNewPrivileges": "yes",
-		"RestrictSUIDSGID": "yes", "RestrictRealtime": "yes",
+		"RestrictSUIDSGID": "no", "RestrictRealtime": "yes",
 		"LockPersonality": "yes", "RestrictNamespaces": "yes",
 	}
 	// Match the landed service profile without hiding host inventory behind
