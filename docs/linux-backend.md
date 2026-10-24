@@ -176,3 +176,20 @@ executes account tools, installs anything or grants authority on its own.
 The helper and its dynamic-loader closure still need reviewed root deployment;
 fixture tests do not qualify root account behavior. Production host admission,
 `qualify`, policy/record installation and `user.bump` remain closed.
+
+### Directory review corrections
+
+Implementation closure uses ELF `PT_DYNAMIC` and file-backed `PT_LOAD` ranges
+for the loader's string table. Removing optional section headers cannot hide
+`DT_NEEDED`; retained dynamic sections must agree with the program view.
+Unsupported loader tags and malformed or ambiguous mappings refuse.
+
+The NSS grammar uses ASCII space, tab, vertical tab and form feed consistently
+for capture and admission. Non-ASCII whitespace never normalizes into a module
+name. Physical CR and continuations remain unsupported; comments and the exact
+recorded physical bytes remain intact.
+
+Range-wide account comparisons use each observed account's coherent name/UID/GID
+tuple. Relevant groups and shadow-only reserved names are compared independently;
+they are never combined with an unrelated requested account's numbers. True
+name/number collisions, second-account disagreement and memberships still refuse.

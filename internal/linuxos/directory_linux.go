@@ -108,7 +108,7 @@ func supportedNSSLines(c NSSConfiguration) bool {
 		if i := strings.IndexByte(body, '#'); i >= 0 {
 			body = body[:i]
 		}
-		words := strings.Fields(body)
+		words := nssFields(strings.TrimSuffix(body, "\n"))
 		if len(words) < 1 || words[0] != "files" || len(words) > 2 || len(words) == 2 && words[1] != "systemd" {
 			return false
 		}
@@ -199,24 +199,30 @@ func (d *QualifiedDirectory) Identity(ctx context.Context, uid, gid uint32, name
 			f := strings.Split(line, ":")
 			g, _ := numeric(f[2])
 			if relevant[f[0]] || g >= d.inputs.GIDRange.Min && g <= d.inputs.GIDRange.Max {
-				ids = append(ids, ReservedIdentity{UID: uid, GID: g, Name: f[0]})
+				relevant[f[0]] = true
 			}
 		}
 	}
-	// Every reserved name is checked even if absent in both enumerations.
-	for _, n := range d.inputs.ReservedNames {
-		ids = append(ids, ReservedIdentity{UID: uid, GID: gid, Name: n})
+	// Reserved names without passwd rows still require shadow/group agreement;
+	// they must not be combined with the requested identity's unrelated numbers.
+	for _, id := range ids {
+		relevant[id.Name] = true
+	}
+	if !reflect.DeepEqual(relevantGroups(local, relevant, d.inputs.GIDRange), relevantGroups(remote, relevant, d.inputs.GIDRange)) {
+		return zero, refusal("directory_unknown", "group_agreement", nil)
 	}
 	if len(ids) > d.limits.Entries {
 		return zero, refusal("directory_unknown", "comparison_limit", nil)
 	}
 	localLocks, remoteLocks := directoryLocks(local), directoryLocks(remote)
-	for _, id := range ids {
-		localLock, localPresent := localLocks[id.Name]
-		remoteLock, remotePresent := remoteLocks[id.Name]
+	for name := range relevant {
+		localLock, localPresent := localLocks[name]
+		remoteLock, remotePresent := remoteLocks[name]
 		if localPresent != remotePresent || localLock != remoteLock {
 			return zero, refusal("directory_unknown", "shadow_agreement", nil)
 		}
+	}
+	for _, id := range ids {
 		if e = c.Err(); e != nil {
 			return zero, e
 		}
@@ -334,6 +340,30 @@ func directoryLocks(data NSSDatabases) map[string]bool {
 		}
 		f := strings.Split(line, ":")
 		out[f[0]] = strings.HasPrefix(f[1], "!") || strings.HasPrefix(f[1], "*")
+	}
+	return out
+}
+
+func relevantGroups(data NSSDatabases, names map[string]bool, interval IDInterval) map[string]GroupIdentity {
+	out := map[string]GroupIdentity{}
+	for _, line := range strings.Split(string(data["group"]), "\n") {
+		if line == "" {
+			continue
+		}
+		f := strings.Split(line, ":")
+		gid, _ := numeric(f[2])
+		members := []string{}
+		if f[3] != "" {
+			members = strings.Split(f[3], ",")
+			sort.Strings(members)
+		}
+		relevant := names[f[0]] || gid >= interval.Min && gid <= interval.Max
+		for _, m := range members {
+			relevant = relevant || names[m]
+		}
+		if relevant {
+			out[f[0]] = GroupIdentity{Name: f[0], GID: gid, Members: members}
+		}
 	}
 	return out
 }

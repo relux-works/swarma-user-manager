@@ -137,15 +137,9 @@ func CaptureImplementationClosure(ctx context.Context, roots []ProtectedArtifact
 		if e != nil {
 			return nil, "", refusal("directory_unknown", "closure_elf", nil)
 		}
-		deps, e := object.ImportedLibraries()
+		deps, e := loaderDependencies(object, b)
 		if e != nil {
-			return nil, "", refusal("directory_unknown", "closure_dependencies", nil)
-		}
-		for _, tag := range []elf.DynTag{elf.DT_RPATH, elf.DT_RUNPATH, elf.DT_FILTER, elf.DT_AUXILIARY, elf.DT_AUDIT, elf.DT_DEPAUDIT} {
-			s, e := object.DynValue(tag)
-			if e != nil || len(s) > 0 {
-				return nil, "", refusal("directory_unknown", "closure_loader_syntax", nil)
-			}
+			return nil, "", e
 		}
 		for _, p := range object.Progs {
 			if p.Type == elf.PT_INTERP {

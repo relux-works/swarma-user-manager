@@ -53,7 +53,7 @@ func ParseNSSConfiguration(b []byte, limit int) (NSSConfiguration, []string, err
 			text = text[:at]
 		}
 		key, body, ok := strings.Cut(text, ":")
-		key = strings.TrimSpace(key)
+		key = trimNSSSpace(key)
 		if key != "passwd" && key != "group" && key != "shadow" {
 			continue
 		}
@@ -96,7 +96,7 @@ func nssLineModules(body string) ([]string, error) {
 	names := []string{}
 	actionAllowed := false
 	fail := func() ([]string, error) { return nil, refusal("directory_unknown", "nss_syntax", nil) }
-	for body = strings.TrimSpace(body); body != ""; body = strings.TrimSpace(body) {
+	for body = trimNSSSpace(body); body != ""; body = trimNSSSpace(body) {
 		if body[0] == '[' {
 			if !actionAllowed {
 				return fail()
@@ -119,13 +119,13 @@ func nssLineModules(body string) ([]string, error) {
 				statuses[status] = true
 			}
 			body = body[end+1:]
-			if body != "" && body[0] != ' ' && body[0] != '\t' {
+			if body != "" && !nssSpace(rune(body[0])) {
 				return fail()
 			}
 			actionAllowed = false
 			continue
 		}
-		end := strings.IndexAny(body, " \t")
+		end := strings.IndexAny(body, " \t\v\f")
 		if end < 0 {
 			end = len(body)
 		}
@@ -142,3 +142,9 @@ func nssLineModules(body string) ([]string, error) {
 	}
 	return names, nil
 }
+
+// This closed libc-compatible separator set includes vertical tab/form feed.
+// CR and continuations are rejected by the physical-line parser above.
+func nssSpace(r rune) bool         { return r == ' ' || r == '\t' || r == '\v' || r == '\f' }
+func trimNSSSpace(s string) string { return strings.TrimFunc(s, nssSpace) }
+func nssFields(s string) []string  { return strings.FieldsFunc(s, nssSpace) }
