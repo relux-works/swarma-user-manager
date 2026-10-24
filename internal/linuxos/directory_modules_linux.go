@@ -100,7 +100,9 @@ type ELFResolver interface {
 // CaptureImplementationClosure traverses every ELF DT_NEEDED and PT_INTERP from
 // the module roots (and collector). Unresolvable dependencies, non-ELF objects or
 // unsupported search syntax refuses. Only each requesting object supplies its
-// own absolute RUNPATH. It never dlopens/executes inspected content.
+// own absolute RUNPATH. Within each root's independent namespace, an already
+// requested name reuses its loaded object before any search, as glibc does.
+// Cross-file SONAME aliases remain unsupported. It never executes inspected code.
 func CaptureImplementationClosure(ctx context.Context, roots []ProtectedArtifact, resolver ELFResolver, l Limits) ([]ClosureFile, string, error) {
 	c, cancel, e := budget(ctx, l)
 	if e != nil {
@@ -110,34 +112,41 @@ func CaptureImplementationClosure(ctx context.Context, roots []ProtectedArtifact
 	if len(roots) == 0 || len(roots) > l.Entries || resolver == nil {
 		return nil, "", refusal("directory_unknown", "implementation_closure", nil)
 	}
+	type namespace struct {
+		loaded map[string]ProtectedArtifact
+		seen   map[string]bool
+	}
 	type item struct {
 		a     ProtectedArtifact
 		depth int
+		ns    *namespace
 	}
 	queue := []item{}
 	for _, root := range roots {
-		queue = append(queue, item{root, 1})
+		queue = append(queue, item{root, 1, &namespace{map[string]ProtectedArtifact{}, map[string]bool{}}})
 	}
 	out := []ClosureFile{}
 	remaining := ImplementationTotalBytes
 	resolvedNames := map[string]string{}
 	sonames := map[string]string{}
-	seen := map[string]bool{}
+	seen := map[string]ClosureFile{}
 	for len(queue) > 0 {
 		next := queue[0]
 		queue = queue[1:]
-		if seen[next.a.Path] {
+		if next.ns.seen[next.a.Path] {
 			continue
 		}
-		if next.depth > l.Depth || len(seen) >= l.Entries {
+		priorFile, captured := seen[next.a.Path]
+		if next.depth > l.Depth || !captured && len(seen) >= l.Entries {
 			return nil, "", refusal("directory_unknown", "closure_limit", nil)
 		}
-		seen[next.a.Path] = true
+		next.ns.seen[next.a.Path] = true
 		// Canonical root/object names also participate in the loaded-name set.
 		if prior, ok := resolvedNames[next.a.Path]; ok && prior != next.a.Path {
 			return nil, "", refusal("directory_unknown", "closure_name_collision", nil)
 		}
 		resolvedNames[next.a.Path] = next.a.Path
+		next.ns.loaded[next.a.Path] = next.a
 		maximum := ImplementationFileBytes
 		if remaining < maximum {
 			maximum = remaining
@@ -147,6 +156,10 @@ func CaptureImplementationClosure(ctx context.Context, roots []ProtectedArtifact
 			return nil, "", refusal("directory_unknown", "implementation_closure", e)
 		}
 		remaining -= size
+		if captured && priorFile != file {
+			held.Close()
+			return nil, "", refusal("path_changed", "closure_member", nil)
+		}
 		before, e := descriptorStat(held)
 		object, e2 := elf.NewFile(held)
 		if e != nil || e2 != nil {
@@ -211,12 +224,18 @@ func CaptureImplementationClosure(ctx context.Context, roots []ProtectedArtifact
 			if filepath.IsAbs(dep.name) {
 				scope = []string{}
 			}
-			a, e := resolver.ResolveELF(c, dep.name, scope)
-			if e != nil {
-				return nil, "", refusal("directory_unknown", "closure_unresolved", e)
+			// glibc 2.42 dl-load.c:1897-1917 and 2.43:1921-1941
+			// consult loaded names before the requester's filesystem search.
+			// Do not share this map between independently executable roots.
+			a, loaded := next.ns.loaded[dep.name]
+			if !loaded {
+				a, e = resolver.ResolveELF(c, dep.name, scope)
+				if e != nil {
+					return nil, "", refusal("directory_unknown", "closure_unresolved", e)
+				}
+				next.ns.loaded[dep.name] = a
 			}
-			// A loaded SONAME cannot select different files in separate requester
-			// scopes. Refuse that ambiguous namespace instead of inventing load order.
+			// Independent namespaces must still agree on each requested name.
 			if prior, ok := resolvedNames[dep.name]; ok && prior != a.Path {
 				return nil, "", refusal("directory_unknown", "closure_name_collision", nil)
 			}
@@ -224,9 +243,12 @@ func CaptureImplementationClosure(ctx context.Context, roots []ProtectedArtifact
 			if len(queue) >= l.Entries {
 				return nil, "", refusal("directory_unknown", "closure_limit", nil)
 			}
-			queue = append(queue, item{a, next.depth + 1})
+			queue = append(queue, item{a, next.depth + 1, next.ns})
 		}
-		out = append(out, file)
+		if !captured {
+			seen[next.a.Path] = file
+			out = append(out, file)
+		}
 	}
 	// glibc may reuse any previously loaded requested name or SONAME before
 	// searching the filesystem. Refuse cross-file aliases in either traversal

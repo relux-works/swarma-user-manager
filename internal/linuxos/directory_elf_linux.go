@@ -78,15 +78,11 @@ func loaderDependencies(object *elf.File, reader io.ReaderAt, fileSize uint64) (
 			tag = elf.DynTag(object.ByteOrder.Uint32(dyn[off : off+4]))
 			value = uint64(object.ByteOrder.Uint32(dyn[off+4 : off+8]))
 		}
-		if ended {
-			if tag != elf.DT_NULL || value != 0 {
-				return fail()
-			}
-			continue
-		}
 		if tag == elf.DT_NULL {
 			ended = true
-			continue
+			// glibc 2.42 and 2.43 elf/get-dynamic-info.h:45 stop here;
+			// neither the terminator's value nor later entries are tags.
+			break
 		}
 		vals[tag] = append(vals[tag], value)
 	}
