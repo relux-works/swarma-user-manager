@@ -105,6 +105,8 @@ on Keymaker's accepted §6 commitments. It is not an existing API capability.
 3. Acquire F with bounded nonblocking attempts using the remaining original
    budgets; no queue/RPC to Keymaker. Under F, read bounded protected authoritative
    committed state, including transaction completion and recovery barriers.
+   Use K1/A1's bounded openat/fstat/read and closed decoding only: no C,
+   implicit storage locks or RPC may be acquired under F.
    Require known-current admission **and** the same provisioned binding for T,
    matching owner/provision-effect, permitted current policy and authority epoch/
    incarnation. Compare the complete current facts, not just a historical pin
@@ -158,11 +160,23 @@ through that interval. This can delay completion of a withdrawal transaction;
 it must not permit issuance while the transaction is unresolved. Keymaker must
 state how it provides these guarantees in §6, including storage ordering.
 
+The manager MUST retain K4/A2's exact activation attempt and derived hold
+identity across errors, owner death and partial cleanup. **Marker absence alone
+never discharges the joint recovery hold**, including after marker unlink but
+before final directory sync. An uncertain hold transfers only to K4/A2's
+authorized root recovery coordinator. Follow its durable `open` -> exact
+resolution -> `release-prepared` -> owning-protocol cleanup and parent sync ->
+`released` and final ledger-directory sync order. Partial clearing or recovery
+owner death keeps that same hold closed until the qualified consumption barrier
+proves the linked release durable; a new process cannot invent a replacement
+identity or infer release from absent files.
+
 | Boundary | Required user-manager action |
 |---|---|
 | Failure before any append, including busy/untrusted F or denied currency | No active append; preserve reservation, intent and normal writer incident rules. Re-prepare outside locks or take verified rollback; do not clear a marker automatically |
 | Crash after durable attempt, before proven write | Attempt/marker are not proof of commit or abort. Reconcile full chain, exact original identity and both stores before any dependent action |
-| Write/fsync/finish error or deadline after write starts | Outcome unknown even if caller saw failure. Preserve evidence/holds; do not retry append, remove the account or report a proven nonactivation |
+| Write/fsync error or deadline after write starts, without proven journal durability | Outcome unknown even if caller saw failure. Preserve evidence/holds and resolve the exact attempt under K4/A2; do not retry append, remove the account or report a proven nonactivation |
+| Append verified durable; marker-removal sync/check or later finish/acknowledgement fails | Known append, cleanup uncertain ([journal §6.2](generation-journal.md#62-writer-and-one-normal-path-fence-budget), [§8](generation-journal.md#8-crashes-restore-and-explicit-reconciliation)). Route to retained-active reconciliation below; retain any joint hold and complete K4/A2 clearing barriers. Never append twice, even if the marker is absent |
 | Active durable, effect receipt/acknowledgement missing | Reconcile exact retained active transition once under the qualified ordering, then resolve the same effect. No duplicate active append or second token/binding; a later revoke does not erase the historical append |
 | Proven no active transition and verified rollback | Only existing creating-to-removed cleanup is available; Keymaker reconciles its same provisioned reservation under its contract. Old removed stays dead |
 | Restart/boot/incarnation change or coherent restore | Old query is unusable; no implicit repinning or PID/liveness inference. Before renewed authority, reconcile unknown transactions and preserved floors under external restore custody; if still creating, obtain a fresh query outside locks |
@@ -172,8 +186,10 @@ Pre-append Keymaker correlation/currency/fence failures map to the existing
 keep their existing typed refusals (`journal_stale_preparation`, `journal_lock`,
 `journal_lock_timeout`, `journal_clock`, `journal_writer_deadline`,
 `journal_append`, `journal_sync`, etc.). No new public code is selected.
-After a possible write, preserve the real journal error **and unknown outcome**;
-never reinterpret it as a harmless pre-append refusal. No failure releases the
+After a possible write, preserve the real journal error and its exact outcome
+classification: unknown without proven durability, or known append with
+uncertain cleanup after durability. Keep any joint hold in either case; never
+reinterpret failure as a harmless pre-append refusal. No failure releases the
 UID reservation, resurrects the predecessor or authorizes automatic retry.
 
 ## 6. Keymaker sections — PENDING-KEYMAKER
@@ -731,10 +747,10 @@ replaces, actual filesystem/order evidence on the admitted platform.
 | `PC2WithdrawalWins` — stale confirmation still permits active after pin withdrawal/revoke/epoch commit | Commit each invalidation in a second process first: no active line, reservation retained. Unchanged exact T then admits once |
 | `PC2AppendWins` — invalidation changes either fact inside final F window or later promotion ignores it | Pause manager under F before fsync; second process cannot commit invalidation there. Finish append, release, then commit withdrawal; subsequent issuance refuses, without deleting historical active |
 | `PC2AuthorityNotProjection` — lagging/partial transaction state, wrong T/owner/predecessor/effect or one true fact passes | Exact complete authoritative transaction admits. Plant each mismatch, each missing fact and a stale readable mirror separately: intended pre-append refusal, no active |
-| `PC2FenceDeathUnknown` — killing the manager releases F and allows invalidation before a possibly written active record is resolved | Kill at before-write, after-write/before-fsync and after-fsync/before-receipt barriers; new process finds the recovery hold. Proven absent/stopped writer permits fresh preparation; durable active resolves once, never a duplicate |
+| `PC2FenceDeathUnknown` — killing the manager releases F and allows invalidation before a possibly written active record is resolved | Kill at before-write, after-write/before-fsync, after-fsync/before-receipt, **after marker unlink** and **before final directory sync** barriers; marker absence never clears K4/A2's exact hold. Kill the recovery owner during partial clearing and before proven final release durability: the same hold remains closed. Proven absent/stopped writer permits fresh preparation; durable active resolves once, never a duplicate |
 | `PC2IncarnationRestore` — old observation survives restart, fence-inode replacement, boot/epoch change or restored authority history | Same incarnation and preserved floors pass. Fresh restart correlation after qualified recovery may pass; old receipt and untrusted replacement do not |
-| `PC2NoRPCOrReverseOrder` — fence holder calls RPC or waits for effects/gate/data; consumer deadlocks writer | Instrument forbidden call/edge rejection; separate reader/manager/invalidation processes demonstrate admitted compatible order and bounded busy refusal |
-| `PC2BudgetsNotRenewed` — F contention resets the 250 ms reader, 1000 ms writer or send-start+2000 ms observation budget | Valid path completes within original budgets; contention before write refuses with no active. Expiry/error after possible write retains an unknown outcome/hold, never a clean abort or success |
+| `PC2NoRPCOrReverseOrder` — fence holder calls RPC or waits for effects/gate/data; consumer deadlocks writer | Instrument forbidden call/edge rejection, including K1/A1's C/F edge: Keymaker holds C while waiting for F; manager under F reads via openat/fstat/read without C or implicit locks. Separate reader/manager/invalidation processes demonstrate admitted compatible order and bounded busy refusal |
+| `PC2BudgetsNotRenewed` — F contention resets the 250 ms reader, 1000 ms writer or send-start+2000 ms observation budget | Valid path completes within original budgets; contention before write refuses with no active. Expiry/error after possible write retains the exact outcome/hold (unknown write versus known durable append with uncertain cleanup), never a clean abort or success |
 | `PC2CorrelationNotReplay` — retry/restart imports an old challenge, changes expected T or allocates another successor | Fresh query outside locks plus unchanged effect admits once. Same-ID receipt never refreshes time; stale preparation requires fresh observation, not another OS mutation |
 
 All cases remain **PENDING**. Acceptance requires both owners' sections, exact
