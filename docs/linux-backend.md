@@ -108,9 +108,9 @@ The production Environment supplies authenticated `DirectoryInputs`, the complet
 policy UID/GID ranges and reserved-name set, a reviewed `NSSRuntime` and a
 `DirectoryFence` that excludes external account-database and module/configuration
 changes for the entire observation. An ordinary in-process mutex is insufficient.
-The issuer and qualification-record reader are implemented for the reviewed
-files-only profile; root installation, complete host scope and maintained
-exclusion remain deployment qualification gates.
+The issuer and qualification-record reader are implemented for reviewed `files`
+and bounded `files systemd` profiles; root installation, complete host scope and
+maintained exclusion remain deployment qualification gates.
 
 Each call captures protected `nsswitch.conf` again, requires the exact recorded
 physical passwd/group/shadow lines, captures current module implementation and
@@ -134,9 +134,9 @@ this initial qualified profile, with protected ancestors and no ACLs/capabilitie
 
 Capture understands module names and closed NSS status/action syntax and records
 every reachable module, even one following a return action. Line validation
-recognizes plain `files` and `files systemd`; only `files` currently has a public
-complete runtime. Systemd capture/enumeration refuse independently of recognized
-syntax. Action clauses are captured but refused until their effective
+recognizes plain `files` and `files systemd`. The latter requires the landed
+closure validator, clean direct provider completion and independent NSS agreement.
+Action clauses are captured but refused until their effective
 lookup/enumeration equivalence is reviewed. Bytes,
 whitespace, comments and final LF remain part of the pin. Missing/duplicate lines,
 continuations, NUL/CR, invalid UTF-8 and unsupported syntax refuse.
@@ -484,7 +484,9 @@ locally and exposes the full record digest in prepared authority evidence.
 
 `<root>/etc/user-manager-deployment.json` is root:root 0600, single-link, protected
 and no-follow. It is a closed CCJ-1 object; unknown, missing, duplicate, null,
-noncanonical and oversized inputs refuse. All members below are mandatory.
+noncanonical and oversized inputs refuse. All members below are mandatory except
+`systemd`, which is omitted for a files-only deployment and required for a
+`files systemd` deployment. An explicit null is not an omitted member.
 Its SHA-256 equals policy `backend_digest`, also carried by every local-v0 source
 version and inputs `backend_digest`. No extra inputs member or authority flag is
 introduced. Changes require initial qualification and a new pin.
@@ -498,10 +500,26 @@ introduced. Changes require initial qualification and a new pin.
 | `maintenance_path` | Exactly `<root>/lib/user-manager/maintenance.json`; protected current-boot stopped-admission marker described below. |
 | `nss_helper` | Exactly `<root>/libexec/swarma-nss-probe`; the reviewed protected native collector. |
 | `nss_library` | Canonical absolute path to the actual reviewed NSS files exporter, including libc on platforms where it exports these functions. A compatibility stub is insufficient. |
+| `systemd` | Optional closed reviewed capabilities `{library,providers,sources}` described below; mandatory when NSS selects systemd. |
 | `loader` | Closed object `{format,cache,search_roots,resolutions,configuration}` detailed below. |
 | `skeleton` | Protected absolute path to the closed skeleton document below. |
 | `no_launcher` | Closed object `{absent_entries,service_roots,configuration}` detailed below. |
 | `inventory` | Closed complete host-scope profile detailed below. |
+
+`systemd.library` is the protected canonical absolute path to the actual
+`libnss_systemd` implementation. `providers` is a nonempty name-sorted unique
+array of `{name,implementation,configuration}`. Each implementation is a nonempty
+sorted unique array of protected absolute ELF paths; configuration is an explicit
+sorted unique array of protected absolute configuration paths (empty only when
+reviewed as complete). `sources` is a nonempty URL-sorted unique array of
+`{url,path}` mapping each exact reviewed provenance URL to its retained protected
+document. These are artifact capabilities, not provider verdicts or additional
+range claims. The landed runtime alone matches the exact provider set and
+implementation/configuration/source digests against the separate closure manifest,
+validates ranges, and establishes direct completion. Missing capabilities refuse;
+there is no host-path inference, network source download or second closure parser.
+The same reviewed loader resolves every provider's ELF dependencies. Changes to
+these mappings change the existing `backend_digest`; no Q/I member is added.
 
 Paths are clean absolute paths. Arrays are explicit, sorted and unique by path
 (or resolution name). File pins contain SHA-256 of exact protected file bytes.
@@ -572,12 +590,17 @@ They revalidate record bytes, deployed policy, manifest, binary and immutable
 configuration/implementation fingerprints. Mutable account databases are checked
 around each directory observation, allowing legitimate account-tool mutations.
 
-The concrete production runtime currently implements the reviewed `files` NSS
-closure through the landed `SystemdNSSRuntime` interface. `files systemd`
-remains `directory_unknown: systemd_provider_completion_unavailable` until a
-direct per-provider completion collector is implemented. No separate systemd
-closure parser is installed by the Environment. Unsupported loader/platform profiles, incomplete inventory, missing
-journal genesis, missing root protection and unreviewed module behavior refuse.
+The concrete production runtime delegates both entry points to one retained
+landed `SystemdNSSRuntime`, supplying the files closure and, for systemd, the
+fixed protected closure manifest, actual `/etc`, `/run`, `/usr/lib` anchors,
+reviewed systemd library, providers and retained sources. A matching closure and
+clean direct completion can admit `files systemd`; every unknown stays unknown.
+The Environment installs no second parser or collector. The local guard hashes
+immutable manifest, library/provider closures and source bytes without contacting
+providers. Qualification capture and directory observation perform the full
+runtime checks outside the core lock. Unsupported loader/platform profiles,
+incomplete inventory, missing journal genesis, missing root protection and
+unreviewed module behavior refuse.
 Fixture tests exercise protocol, failure paths and local primitives; they do not
 qualify a production host or establish privileged behavior.
 
@@ -585,11 +608,29 @@ qualify a production host or establish privileged behavior.
 
 This is a proposed owner-run root step, pending execution. Use a trusted root
 shell with a clean environment and admission stopped throughout steps 1–6.
-This procedure currently applies only to the reviewed `files` profile. The fixed
-systemd metadata closure file `/opt/swarma/etc/user-manager-systemd-closure.json`
-(root:root 0600) is documented above for that separate provider contract; installing
-it does not enable qualification of a `files systemd` host while direct provider
-completion is unavailable.
+Both reviewed `files` and bounded `files systemd` hosts use this flow. For a
+`files systemd` host, install the protected root:root 0600 single-link canonical
+closure at `/opt/swarma/etc/user-manager-systemd-closure.json` before step 4, and
+include the `systemd` capability mappings above in the deployment manifest.
+Review its exact contents against the [landed closure contract](#systemd-userdb-closure-and-runtime):
+
+- Record all four roots in lexical order: `/etc/userdb`, `/run/host/userdb`,
+  `/run/userdb`, `/usr/lib/userdb`, each actually `absent` or `empty`.
+- Match the complete protected `/run/systemd/userdb` endpoint set. Require
+  `io.systemd.DynamicUser`; only `io.systemd.Multiplexer`,
+  `io.systemd.NameServiceSwitch`, `io.systemd.Home`, `io.systemd.Machine` are
+  optional. DropIn, custom, missing and extra endpoints refuse. Record each
+  provider's actual implementation/configuration digests and exact forwarding
+  contributors, and retain all reviewed HTTPS range-source documents locally.
+- Record DynamicUser UID/GID ranges exactly `[61184,65519]`, synthesis exactly
+  `[0,0]` and `[65534,65534]`, and complete reviewed Home/Machine UID/GID ranges
+  including explicit/migrated identities and container mappings. Bridges have
+  empty own ranges and their exact recorded forwarding sets. Both station ranges
+  must be disjoint from every contributor and synthesis range.
+
+Installation alone is insufficient: every recorded allocator must complete
+GetUserRecord, GetGroupRecord and GetMemberships cleanly and agree with NSS.
+Provider failures, unknown records, closure mismatch and missing files refuse.
 
 1. Install the reviewed binary and collector at
    `/opt/swarma/libexec/swarma-user-manager` and

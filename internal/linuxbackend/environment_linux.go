@@ -268,16 +268,27 @@ func (h *ProductionEnvironment) localFingerprint(ctx context.Context, p manager.
 			return "", e
 		}
 	}
-	modules, e := runtime.CaptureModules(ctx, moduleNames, l)
+	// CaptureModules for files+systemd now performs provider RPCs. Guard.Check
+	// runs under the core lock, so it binds immutable local artifacts only;
+	// full provider completion remains in Capture and the directory observation.
+	modules, e := runtime.CaptureModules(ctx, []string{"files"}, l)
 	if e != nil {
 		return "", e
+	}
+	systemd := ""
+	if len(moduleNames) == 2 && moduleNames[1] == "systemd" {
+		systemd, e = reviewed.localSystemdFingerprint(ctx, l)
+		if e != nil {
+			return "", e
+		}
 	}
 	b, e := qualification.Canonical(struct {
 		Deployment string
 		Binary     string
 		NSS        linuxos.NSSConfiguration
 		Modules    []linuxos.NSSModule
-	}{qualification.Hash(raw), digest, cfg, modules})
+		Systemd    string
+	}{qualification.Hash(raw), digest, cfg, modules, systemd})
 	if e != nil {
 		return "", e
 	}
@@ -334,9 +345,74 @@ func (h *ProductionEnvironment) runtime(ctx context.Context, m DeploymentManifes
 		r.Close()
 		return nil, nil, e
 	}
-	// The adapter delegates to the landed SystemdNSSRuntime gate: files works,
-	// while systemd stays unknown until direct provider completion is available.
-	return reviewedFilesRuntime{files: linuxos.FilesNSSRuntime{Collector: helper, Library: lib, Resolver: r, Configuration: []linuxos.ProtectedArtifact{}}, manifest: raw}, r.Close, nil
+	files := linuxos.FilesNSSRuntime{Collector: helper, Library: lib, Resolver: r, Configuration: []linuxos.ProtectedArtifact{}}
+	systemd := &linuxos.SystemdNSSRuntime{Files: files}
+	if m.Systemd != nil {
+		if e = h.systemdRuntime(ctx, m.Systemd, r, systemd); e != nil {
+			r.Close()
+			return nil, nil, e
+		}
+	}
+	// Retain one runtime, including its endpoint-continuity observations. The
+	// landed validator and direct collector alone decide systemd admission.
+	return reviewedFilesRuntime{files: files, systemd: systemd, manifest: raw}, r.Close, nil
+}
+
+func (h *ProductionEnvironment) systemdRuntime(ctx context.Context, p *SystemdProfile, r *deploymentResolver, out *linuxos.SystemdNSSRuntime) (err error) {
+	if p == nil || !p.validate() {
+		return qualification.ErrRequired
+	}
+	out.Library, err = r.artifact(ctx, p.Library)
+	if err != nil {
+		return err
+	}
+	out.Manifest, err = r.artifact(ctx, filepath.Join(h.policy.Root, "etc/user-manager-systemd-closure.json"))
+	if err != nil {
+		return err
+	}
+	for _, anchor := range []struct {
+		path string
+		dest **linuxos.Dir
+	}{{"/etc", &out.Etc}, {"/run", &out.Run}, {"/usr/lib", &out.UsrLib}} {
+		d, e := linuxos.OpenRoot(anchor.path)
+		if e != nil {
+			return e
+		}
+		r.dirs = append(r.dirs, d)
+		*anchor.dest = d
+	}
+	artifacts := func(paths []string) ([]linuxos.ProtectedArtifact, error) {
+		out := make([]linuxos.ProtectedArtifact, 0, len(paths))
+		for _, path := range paths {
+			a, e := r.artifact(ctx, path)
+			if e != nil {
+				return nil, e
+			}
+			out = append(out, a)
+		}
+		return out, nil
+	}
+	out.Providers = make(map[string]linuxos.UserDBProviderClosure, len(p.Providers))
+	for _, provider := range p.Providers {
+		implementation, e := artifacts(provider.Implementation)
+		if e != nil {
+			return e
+		}
+		configuration, e := artifacts(provider.Configuration)
+		if e != nil {
+			return e
+		}
+		out.Providers[provider.Name] = linuxos.UserDBProviderClosure{Implementation: implementation, Configuration: configuration, Resolver: r}
+	}
+	out.Sources = make(map[string]linuxos.ProtectedArtifact, len(p.Sources))
+	for _, source := range p.Sources {
+		a, e := r.artifact(ctx, source.Path)
+		if e != nil {
+			return e
+		}
+		out.Sources[source.URL] = a
+	}
+	return nil
 }
 
 // reservedNames reads the complete durable core reservations while callers are

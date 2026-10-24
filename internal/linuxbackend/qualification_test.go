@@ -5,12 +5,10 @@ package linuxbackend
 import (
 	"context"
 	"encoding/binary"
-	"errors"
 	"os"
 	"strings"
 	"testing"
 
-	"github.com/relux-works/swarma-user-manager/internal/linuxos"
 	"github.com/relux-works/swarma-user-manager/internal/manager"
 	"github.com/relux-works/swarma-user-manager/internal/qualification"
 	"github.com/relux-works/swarma-user-manager/tools/genjournal"
@@ -29,13 +27,24 @@ func manifestFixture() DeploymentManifest {
 // full hash. Missing dependencies, unsafe paths, unknown scope and drift refuse;
 // the valid control establishes encoding/schema only, not root host completeness.
 func TestQualificationDeploymentSchema(t *testing.T) {
-	for _, mode := range []string{"unknown", "omitted", "backend-drift", "backend-file-missing", "lock-path", "loader-unknown", "scope-unknown", "launcher-unknown", "valid"} {
+	for _, mode := range []string{"unknown", "omitted", "backend-drift", "backend-file-missing", "lock-path", "loader-unknown", "scope-unknown", "launcher-unknown", "systemd-valid", "systemd-no-implementation", "systemd-duplicate-provider", "systemd-source-path", "systemd-drift", "valid"} {
 		t.Run(mode, func(t *testing.T) {
 			m := manifestFixture()
 			p, _ := fixture()
+			if strings.HasPrefix(mode, "systemd-") {
+				m.Systemd = &SystemdProfile{Library: "/usr/lib/libnss_systemd.so.2", Providers: []SystemdProviderProfile{{Name: "io.systemd.DynamicUser", Implementation: []string{"/usr/lib/systemd/systemd"}, Configuration: []string{}}}, Sources: []SystemdSourceProfile{{URL: "https://systemd.io/UIDS-GIDS/", Path: "/opt/swarma/etc/range-source.txt"}}}
+			}
 			raw, _ := qualification.Canonical(m)
 			p.BackendDigest = qualification.Hash(raw)
 			switch mode {
+			case "systemd-no-implementation":
+				m.Systemd.Providers[0].Implementation = nil
+			case "systemd-duplicate-provider":
+				m.Systemd.Providers = append(m.Systemd.Providers, m.Systemd.Providers[0])
+			case "systemd-source-path":
+				m.Systemd.Sources[0].Path = "relative"
+			case "systemd-drift":
+				m.Systemd.Library = "/usr/lib/changed.so"
 			case "unknown":
 				raw = append([]byte(`{"extra":0,`), raw[1:]...)
 			case "omitted":
@@ -55,7 +64,7 @@ func TestQualificationDeploymentSchema(t *testing.T) {
 			}
 			if mode != "unknown" && mode != "omitted" {
 				raw, _ = qualification.Canonical(m)
-				if mode != "backend-drift" {
+				if mode != "backend-drift" && mode != "systemd-drift" {
 					p.BackendDigest = qualification.Hash(raw)
 				}
 			}
@@ -64,7 +73,7 @@ func TestQualificationDeploymentSchema(t *testing.T) {
 			if e == nil {
 				e = parsed.validate(p)
 			}
-			if mode == "valid" {
+			if mode == "valid" || mode == "systemd-valid" {
 				if e != nil {
 					t.Fatal("valid schema", e)
 				}
@@ -166,39 +175,6 @@ func TestQualificationUnitProfile(t *testing.T) {
 	t.Run("control", func(t *testing.T) {
 		if e := validateQualificationUnit(raw, bin); e != nil {
 			t.Fatal("landed unit refused", e)
-		}
-	})
-}
-
-// The production wrapper delegates to the landed unavailable systemd gate before
-// filesystem/provider access and never returns partial modules or data. The
-// files-only positive collector control is TestSystemdDirectoryAndCollector.
-func TestQualificationSystemdUnavailable(t *testing.T) {
-	p, _ := fixture()
-	l, e := limits(p.Limits)
-	if e != nil {
-		t.Fatal(e)
-	}
-	r := reviewedFilesRuntime{manifest: []byte("reviewed manifest")}
-	check := func(t *testing.T, e error) {
-		t.Helper()
-		var typed *linuxos.Error
-		if !errors.As(e, &typed) || typed.Code != "directory_unknown" || typed.Operation != "systemd_provider_completion_unavailable" {
-			t.Fatal("wrong systemd refusal", e)
-		}
-	}
-	t.Run("capture", func(t *testing.T) {
-		out, e := r.CaptureModules(context.Background(), []string{"files", "systemd"}, l)
-		check(t, e)
-		if out != nil {
-			t.Fatal("unavailable capture returned modules")
-		}
-	})
-	t.Run("enumerate", func(t *testing.T) {
-		out, e := r.Enumerate(context.Background(), []string{"files", "systemd"}, l)
-		check(t, e)
-		if out != nil {
-			t.Fatal("unavailable enumeration returned data")
 		}
 	})
 }

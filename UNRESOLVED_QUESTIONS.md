@@ -95,7 +95,10 @@ The issuer, protected record reader and reviewed production environment
 are implemented. Privileged installation, real root account behavior and live
 unit renewal remain pending the owner procedure in `docs/linux-backend.md`.
 The systemd closure and direct collector are implemented; a `files systemd` host
-requires protected provider capabilities and clean completion from each allocator. The actual loader ABI/search closure, full inventory roots, effective
+requires protected provider capabilities and clean completion from each allocator.
+The production adapter supplies those capabilities through the reviewed deployment
+profile; owned fixtures establish runtime integration, not privileged host acceptance.
+The actual loader ABI/search closure, full inventory roots, effective
 unit/drop-in load scope and exclusion of other root writers require owner review;
 missing facts refuse. Unsupported cron-owner resolution also remains refusal.
 These gates do not resolve Keymaker bump admission or cleanup authority.

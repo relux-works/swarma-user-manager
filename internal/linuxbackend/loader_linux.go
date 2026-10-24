@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 
 	"github.com/relux-works/swarma-user-manager/internal/linuxos"
@@ -155,11 +156,12 @@ func newResolver(ctx context.Context, m DeploymentManifest, l linuxos.Limits) (*
 
 type reviewedFilesRuntime struct {
 	files    linuxos.FilesNSSRuntime
+	systemd  *linuxos.SystemdNSSRuntime
 	manifest []byte
 }
 
 func (r reviewedFilesRuntime) CaptureModules(ctx context.Context, names []string, l linuxos.Limits) ([]linuxos.NSSModule, error) {
-	out, e := (&linuxos.SystemdNSSRuntime{Files: r.files}).CaptureModules(ctx, names, l)
+	out, e := r.systemd.CaptureModules(ctx, names, l)
 	if e != nil {
 		return nil, e
 	}
@@ -167,5 +169,57 @@ func (r reviewedFilesRuntime) CaptureModules(ctx context.Context, names []string
 	return out, nil
 }
 func (r reviewedFilesRuntime) Enumerate(ctx context.Context, names []string, l linuxos.Limits) (linuxos.NSSDatabases, error) {
-	return (&linuxos.SystemdNSSRuntime{Files: r.files}).Enumerate(ctx, names, l)
+	return r.systemd.Enumerate(ctx, names, l)
+}
+
+// This is an immutable-file fingerprint, never an admission verdict. It does
+// not parse the closure, query NSS, connect sockets or enumerate providers.
+func (r reviewedFilesRuntime) localSystemdFingerprint(ctx context.Context, l linuxos.Limits) (string, error) {
+	s := r.systemd
+	if s == nil {
+		return "", qualification.ErrRequired
+	}
+	manifest, e := linuxos.ReadProtected(ctx, s.Manifest.Directory, s.Manifest.Name, 1<<20, true)
+	if e != nil {
+		return "", e
+	}
+	_, library, e := linuxos.CaptureImplementationClosure(ctx, []linuxos.ProtectedArtifact{s.Library}, r.files.Resolver, l)
+	if e != nil {
+		return "", e
+	}
+	parts := []string{qualification.Hash(manifest), library}
+	providers := make([]string, 0, len(s.Providers))
+	for name := range s.Providers {
+		providers = append(providers, name)
+	}
+	sort.Strings(providers)
+	for _, name := range providers {
+		p := s.Providers[name]
+		_, implementation, e := linuxos.CaptureImplementationClosure(ctx, p.Implementation, p.Resolver, l)
+		if e != nil {
+			return "", e
+		}
+		_, configuration, e := linuxos.CaptureConfigurationClosure(ctx, p.Configuration, l)
+		if e != nil {
+			return "", e
+		}
+		parts = append(parts, name, implementation, configuration)
+	}
+	sources := make([]string, 0, len(s.Sources))
+	for url := range s.Sources {
+		sources = append(sources, url)
+	}
+	sort.Strings(sources)
+	for _, url := range sources {
+		_, content, e := linuxos.CaptureConfigurationClosure(ctx, []linuxos.ProtectedArtifact{s.Sources[url]}, l)
+		if e != nil {
+			return "", e
+		}
+		parts = append(parts, url, content)
+	}
+	b, e := qualification.Canonical(parts)
+	if e != nil {
+		return "", e
+	}
+	return qualification.Hash(b), nil
 }

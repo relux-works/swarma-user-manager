@@ -25,6 +25,7 @@ type DeploymentManifest struct {
 	MaintenancePath string            `json:"maintenance_path"`
 	NSSHelper       string            `json:"nss_helper"`
 	NSSLibrary      string            `json:"nss_library"`
+	Systemd         *SystemdProfile   `json:"systemd,omitempty"`
 	Loader          LoaderProfile     `json:"loader"`
 	Skeleton        string            `json:"skeleton"`
 	NoLauncher      NoLauncherProfile `json:"no_launcher"`
@@ -32,6 +33,43 @@ type DeploymentManifest struct {
 }
 
 const deploymentVersion = "local-v0-linux-qualification/1"
+
+// Paths grant protected artifact capabilities; range and completion verdicts
+// belong exclusively to the landed linuxos closure validator and collector.
+type SystemdProfile struct {
+	Library   string                   `json:"library"`
+	Providers []SystemdProviderProfile `json:"providers"`
+	Sources   []SystemdSourceProfile   `json:"sources"`
+}
+type SystemdProviderProfile struct {
+	Name           string   `json:"name"`
+	Implementation []string `json:"implementation"`
+	Configuration  []string `json:"configuration"`
+}
+type SystemdSourceProfile struct {
+	URL  string `json:"url"`
+	Path string `json:"path"`
+}
+
+func (s *SystemdProfile) validate() bool {
+	if s == nil {
+		return true // The files-only deployment needs no systemd capability.
+	}
+	if !absolute(s.Library) || len(s.Providers) == 0 || len(s.Providers) > 5 || len(s.Sources) == 0 || len(s.Sources) > 6 {
+		return false
+	}
+	for j, p := range s.Providers {
+		if p.Name == "" || j > 0 && s.Providers[j-1].Name >= p.Name || !paths(p.Implementation, true) || !paths(p.Configuration, false) {
+			return false
+		}
+	}
+	for j, p := range s.Sources {
+		if p.URL == "" || !absolute(p.Path) || j > 0 && s.Sources[j-1].URL >= p.URL {
+			return false
+		}
+	}
+	return true
+}
 
 type TreePin struct {
 	State  string `json:"state"`
@@ -119,6 +157,9 @@ func treePins(p []TreePin) bool {
 	return true
 }
 func (m DeploymentManifest) validate(p manager.Policy) error {
+	if !m.Systemd.validate() {
+		return qualification.ErrRequired
+	}
 	if m.Format != "station-deployment/1" || m.BackendVersion != deploymentVersion || m.LockPath != filepath.Join(p.Root, "lib/user-manager/deployment.lock") || m.MaintenancePath != filepath.Join(p.Root, "lib/user-manager/maintenance.json") || m.NSSHelper != filepath.Join(p.Root, "libexec/swarma-nss-probe") || !absolute(m.NSSLibrary) || !absolute(m.Skeleton) {
 		return qualification.ErrRequired
 	}
