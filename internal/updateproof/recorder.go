@@ -206,7 +206,7 @@ func (r *Recorder) Scan(ctx context.Context, current Snapshot) (ScanResult, erro
 			}
 			out.Pending = append(out.Pending, batch)
 		} else {
-			if rec.end == nil || rec.end.Status != "complete" || rec.end.Snapshot.PendingTriggers {
+			if rec.end == nil || rec.end.Status != "complete" || (v.Parent == (ID{}) && rec.end.Snapshot.PendingTriggers) {
 				return ScanResult{}, ErrGap
 			}
 			if v.Parent == (ID{}) {

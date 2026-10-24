@@ -494,6 +494,14 @@ func retainArtifact(b []byte, l Limits) error {
 		return e
 	}
 	defer d.Close()
+	return retainArtifactAt(d, 0, b, l, (*os.File).Sync)
+}
+
+// The supplied directory/owner and sync seam are private owned-fixture inputs.
+func retainArtifactAt(d *os.File, owner uint32, b []byte, l Limits, syncFile func(*os.File) error) error {
+	if !l.valid() || int64(len(b)) > l.Bytes || protected(d, owner, true) != nil {
+		return ErrStore
+	}
 	// The global package-writer exclusion serializes native hook producers. There
 	// is no acquisition component or arbitrary concurrent evidence writer here.
 	fd, e := unix.Openat(int(d.Fd()), ".", unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
@@ -517,7 +525,7 @@ func retainArtifact(b []byte, l Limits) error {
 			return ErrStore
 		}
 		f := os.NewFile(uintptr(fd), n)
-		if protected(f, 0, false) != nil {
+		if protected(f, owner, false) != nil {
 			f.Close()
 			return ErrStore
 		}
@@ -529,8 +537,13 @@ func retainArtifact(b []byte, l Limits) error {
 		total += st.Size()
 		if n == name {
 			old, e := io.ReadAll(io.LimitReader(f, l.Bytes+1))
-			f.Close()
 			if e != nil || Digest(old) != name {
+				f.Close()
+				return ErrStore
+			}
+			// A prior write may be visible despite a failed sync. Re-establish
+			// both durability obligations before acknowledging an identical retry.
+			if syncFile(f) != nil || f.Close() != nil || syncFile(d) != nil {
 				return ErrStore
 			}
 			return nil
@@ -546,13 +559,13 @@ func retainArtifact(b []byte, l Limits) error {
 	}
 	f := os.NewFile(uintptr(fd), name)
 	defer f.Close()
-	if protected(f, 0, false) != nil {
+	if protected(f, owner, false) != nil {
 		return ErrStore
 	}
 	if n, e := f.Write(b); e != nil || n != len(b) {
 		return ErrStore
 	}
-	if f.Sync() != nil || f.Close() != nil || d.Sync() != nil {
+	if syncFile(f) != nil || f.Close() != nil || syncFile(d) != nil {
 		return ErrStore
 	}
 	return nil
