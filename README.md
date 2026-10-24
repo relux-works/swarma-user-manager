@@ -115,6 +115,21 @@ Create the fixture directory mode 0755 and its `gate.lock`, `data.lock` and
 constructor does not initialize files. Neither `NewTestHandle` nor `TestHandle`
 exists in a default build.
 
+For slower tests, including consumers running under the race detector, use
+`genjournal.NewTestHandle(ownerUID, anchor, genjournal.WithReaderHold(5*time.Second))`.
+The option changes only that handle's reader window, measured by the real clock
+from shared data-lock acquisition. The two-argument call still uses the 250 ms
+`ReaderHold`. Positive options use the last duration; any nonpositive duration
+or nil option makes every handle method return the typed `journal_reader_hold`
+refusal before hooks, callbacks or filesystem effects, even if followed by a
+positive option. `WithReaderHold` and `TestOption` are also absent without the
+test tag. Default builds always use the protocol constant; there is no runtime
+duration override. Writer fence budgets remain unchanged, and a longer fixture
+window does not qualify production timing or relax the commit deadline contract.
+Run the focused controls with
+`go test -tags=genjournal_testseam ./tools/genjournal -run '^TestTestSeamReaderHold' -count=1`;
+verdicts go to stdout and fixtures use Go temporary directories.
+
 For a deterministic pending-marker race test, anchor the handle directly at the
 journal directory and call `WithEvidenceAtBoundary(ctx, floor, afterFirstCheck,
 commit)`. This tagged-only method has no path argument. Its hook runs after the

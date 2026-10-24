@@ -69,7 +69,7 @@ func TestTestSeamBuildConstraint(t *testing.T) {
 					}
 				}
 			}
-			for _, symbol := range []string{"NewTestHandle", "TestHandle",
+			for _, symbol := range []string{"NewTestHandle", "TestHandle", "TestOption", "WithReaderHold",
 				"TestHandle.WithEvidence", "TestHandle.WithEvidenceAtBoundary", "TestHandle.WithActive",
 				"TestHandle.Checkpoint", "TestHandle.Append", "TestHandle.Inspect"} {
 				if found[symbol] != tagged {

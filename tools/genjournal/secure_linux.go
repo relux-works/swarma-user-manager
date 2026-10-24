@@ -192,7 +192,7 @@ func readWindowAtBoundary(ctx context.Context, path string, p policy, afterFirst
 		unlock(gate)
 		return refuse("journal_busy")
 	}
-	deadline := time.Now().Add(ReaderHold)
+	deadline := time.Now().Add(readerHold(ctx))
 	unlock(gate)
 	defer unlock(data)
 	if e = ctx.Err(); e != nil {

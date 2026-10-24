@@ -265,7 +265,7 @@ check. Both are lock primitives, not qualified Keymaker adapters. `Checkpoint`
 runs bounded local persistence and **never admits a release**.
 
 The optional `genjournal_testseam` build tag exports
-`NewTestHandle(ownerUID, anchor)` for isolated, unprivileged consumer fixtures.
+`NewTestHandle(ownerUID, anchor, options...)` for isolated, unprivileged consumer fixtures.
 Its `WithEvidence`, `WithActive`, `Checkpoint`, `Append` and `Inspect` methods
 reuse the real filesystem, flock, verifier and deadline primitives with that
 handle's policy; they do not alter package-level production policy. The tagged-only
@@ -273,6 +273,15 @@ handle's policy; they do not alter package-level production policy. The tagged-o
 anchor its handle at the journal directory, then publish a marker from the hook
 after the first pending check and before shared gate acquisition to exercise
 the post-lock recheck deterministically. It retains the evidence/deadline contract.
+The optional tagged-only `WithReaderHold(d)` selects a per-handle reader duration
+using real clocks; the existing two-argument constructor retains `ReaderHold`.
+The reader deadline starts at shared data-lock acquisition as before. Positive
+options use the last duration. Any `d <= 0` or nil option makes all handle methods
+return typed `journal_reader_hold` before callbacks, hooks or filesystem effects;
+a later positive option cannot erase that refusal. Neither the option nor its
+`TestOption` type exists in a default build. Default builds always select the
+250 ms protocol constant and expose no runtime duration override. Writer fence
+budgets are unchanged; longer fixture windows do not qualify production latency.
 All fixture symbols are absent without the tag. Production MUST exclude it. Audit `go version -m`
 on the exact consumer binary: any `build -tags=...` setting must exclude
 `genjournal_testseam` (default builds may omit the setting). Retain metadata and
