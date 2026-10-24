@@ -1,8 +1,9 @@
 # Station user-manager core
 
 The Go core implements the lifecycle, protected effect storage and scheduling
-side of [station effect receipts](../spec/station-effect-receipts.md). It links
-no real Linux account backend. New production provisioning remains closed,
+side of [station effect receipts](../spec/station-effect-receipts.md). The executable
+links the [Linux adapter](linux-backend.md), with host qualification still closed.
+New production provisioning remains closed,
 and production `user.bump` always returns `bump_key_admission_unconfirmed`.
 The deterministic fake backend qualifies core decisions, not Linux account,
 process, inventory, persistence-denial or root installation behavior.

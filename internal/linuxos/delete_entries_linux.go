@@ -139,11 +139,27 @@ func deletionParent(root *os.File, name, path string) (*os.File, string, error) 
 	return p, leaf, nil
 }
 
+// Only the shared outer anchor's directory link count may vary with unrelated
+// admitted roots. Its descriptor/inode/protection stay pinned. Descendant link
+// counts remain exact, adjusted only for this batch's own directory removals.
+func deletionParentMatches(now, want FSIdentity, path string) bool {
+	if path == "" {
+		now.Nlink = want.Nlink
+	}
+	return now == want
+}
+
 // DeleteEntries never recursively discovers additional work. It prevalidates the
 // complete admission before the first unlink, revalidates each entry immediately
 // before unlink and fsyncs that exact parent. Partial failures retain their count;
 // Done additionally requires the quarantine root's fresh conclusive absence.
-func (d *Dir) DeleteEntries(ctx context.Context, name string, root FSIdentity, entries []DeletionEntry, l Limits) (out Deletion, err error) {
+func (d *Dir) DeleteEntries(ctx context.Context, name string, root FSIdentity, entries []DeletionEntry, l Limits) (Deletion, error) {
+	return d.deleteEntries(ctx, name, root, entries, l, nil)
+}
+
+// The private callback permits bounded between-entry fault injection in isolated
+// fixtures. Production exposes no callback and cannot skip any validation.
+func (d *Dir) deleteEntries(ctx context.Context, name string, root FSIdentity, entries []DeletionEntry, l Limits, beforeEntry func(int)) (out Deletion, err error) {
 	if !component(name) || len(entries) == 0 || len(entries) > l.Entries || root.Type != "directory" || root.UID != d.owner {
 		return out, refusal("ownership_invalid", "delete_entries", nil)
 	}
@@ -182,7 +198,7 @@ func (d *Dir) DeleteEntries(ctx context.Context, name string, root FSIdentity, e
 		if e != nil || ce != nil {
 			return out, errors.Join(e, ce)
 		}
-		if fsIdentity(ps) != v.Parent || obj != v.Object {
+		if !deletionParentMatches(fsIdentity(ps), v.Parent, v.Path) || obj != v.Object {
 			return out, refusal("identity_conflict", "delete_admission", nil)
 		}
 	}
@@ -194,7 +210,10 @@ func (d *Dir) DeleteEntries(ctx context.Context, name string, root FSIdentity, e
 		}
 		return v
 	}
-	for _, v := range entries {
+	for n, v := range entries {
+		if beforeEntry != nil {
+			beforeEntry(n)
+		}
 		if e = c.Err(); e != nil {
 			return out, e
 		}
@@ -207,7 +226,7 @@ func (d *Dir) DeleteEntries(ctx context.Context, name string, root FSIdentity, e
 		if e == nil {
 			obj, e = observe(c, p, leaf, 8<<20)
 		}
-		if e == nil && (fsIdentity(ps) != adjusted(v.Parent) || obj != adjusted(v.Object)) {
+		if e == nil && (!deletionParentMatches(fsIdentity(ps), adjusted(v.Parent), v.Path) || obj != adjusted(v.Object)) {
 			e = refusal("identity_conflict", "delete_entry", nil)
 		}
 		flags := 0

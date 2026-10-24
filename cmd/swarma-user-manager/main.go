@@ -20,7 +20,7 @@ func run() int {
 		_ = json.NewEncoder(os.Stdout).Encode(manager.PublicRefusal(nil, "state_unavailable"))
 		return 1
 	}
-	// No subprocess uses this environment; the future backend must use fixed absolute paths.
+	// Backend subprocesses use fixed absolute paths and an empty environment.
 	if os.Setenv("PATH", "/usr/sbin:/usr/bin:/sbin:/bin") != nil {
 		_ = json.NewEncoder(os.Stdout).Encode(manager.PublicRefusal(nil, "state_unavailable"))
 		return 1
@@ -75,9 +75,16 @@ func run() int {
 	}
 	backend := linuxbackend.NewWithEnvironment(p, nil, store)
 	defer backend.Close()
+	qualificationCtx, stopQualification := context.WithTimeout(context.Background(), time.Duration(p.Limits.StepMS)*time.Millisecond)
+	qualificationErr := backend.Qualified(qualificationCtx, p)
+	stopQualification()
+	if qualificationErr != nil {
+		_ = json.NewEncoder(os.Stdout).Encode(manager.PublicRefusal(raw, "qualification_required"))
+		return 1
+	}
 	operator := manager.FileOperatorVerifier{Root: p.Root}
 	source := manager.LocalV0Source{Policies: manager.FilePolicyReader{}, Backend: backend, Operators: operator}
-	engine = manager.Engine{Backend: backend, Sources: map[string]manager.AuthoritySource{"local-v0": source}, BootID: boot, Operator: manager.FileOperatorVerifier{Root: p.Root}, Policy: p, Authority: manager.FileAuthority{Root: p.Root}, Store: store, Journal: manager.NativeJournal{Path: p.Root + "/lib/user-manager/generations"}}
+	engine = manager.Engine{Backend: backend, Sources: map[string]manager.AuthoritySource{"local-v0": source}, BootID: boot, Operator: operator, Policy: p, Authority: manager.FileAuthority{Root: p.Root}, Store: store, Journal: manager.NativeJournal{Path: p.Root + "/lib/user-manager/generations"}}
 	// The Linux adapter is linked. Its host evidence/NSS provider remains unknown
 	// until the qualified provider contract is published; no policy flag admits it.
 	r := engine.Handle(context.Background(), raw, in)

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"path/filepath"
+	"sort"
 	"testing"
 
 	"github.com/relux-works/swarma-user-manager/internal/linuxos"
@@ -58,7 +59,16 @@ func (d *memoryDir) PrepareDeletion(_ context.Context, name string, _ linuxos.Li
 	if !ok {
 		return []linuxos.DeletionEntry{}, nil
 	}
-	return []linuxos.DeletionEntry{{Path: "", Parent: d.id, Object: v.id}}, nil
+	entries := []linuxos.DeletionEntry{}
+	names := []string{}
+	for name := range v.children {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		entries = append(entries, linuxos.DeletionEntry{Path: name, Parent: v.id, Object: v.children[name].id})
+	}
+	return append(entries, linuxos.DeletionEntry{Path: "", Parent: d.id, Object: v.id}), nil
 }
 func (d *memoryDir) DeleteEntries(_ context.Context, name string, r linuxos.FSIdentity, v []linuxos.DeletionEntry, _ linuxos.Limits) (linuxos.Deletion, error) {
 	obj, ok := d.children[name]
@@ -254,5 +264,94 @@ func TestAdapterPublicationErrorPreservesHold(t *testing.T) {
 	current = resolve(current, a, out)
 	if planned, e = b.Plan(context.Background(), current); code(e) != "cleanup_pending" || planned.Complete || *writes != 3 || len(homes.children) != 1 {
 		t.Fatal("moved object retried/adopted", planned, e, *writes)
+	}
+}
+
+// An owned quarantine/stage root does not make an unexplained foreign UID/GID
+// descendant owned. Planning must preserve it and emit no destructive intent;
+// neighboring station-owned entries remain eligible for an exact admitted batch.
+func TestAdapterDeletionPreservesForeignDescendant(t *testing.T) {
+	p, in := fixture()
+	h := newHost()
+	b := NewWithEnvironment(p, h, nil)
+	b.reservations[in.Identity.Generation] = in
+	open, stages, _, writes, _ := memoryFilesystem(h)
+	b.open = open
+	defer b.Close()
+	current := task(in, p)
+	current.Step = "home"
+	planned, e := b.Plan(context.Background(), current)
+	if e != nil {
+		t.Fatal(e)
+	}
+	a := attempt(current, planned.Intent, p)
+	out, e := b.Execute(context.Background(), a)
+	if e != nil {
+		t.Fatal(e)
+	}
+	current = resolve(current, a, out)
+	live := stages.children[planned.Intent.Target.Leaf]
+	live.children["foreign"] = &memoryDir{id: linuxos.FSIdentity{Device: 1, Inode: 999, Type: "directory", UID: 12345, GID: 24000, Mode: 0700, Nlink: 2}}
+	current.Step = "delete"
+	if v, e := b.Plan(context.Background(), current); code(e) != "cleanup_pending" || v.Complete || v.Intent.Key != "" || *writes != 1 || live.children["foreign"].id.UID != 12345 {
+		t.Fatal("foreign entry admitted/deleted", v, e, *writes)
+	}
+	live.children["foreign"].id.UID = 24000
+	v, e := b.Plan(context.Background(), current)
+	if e != nil || v.Intent.Operation != "delete_batch" || len(v.Intent.Target.Entries) != 2 || *writes != 1 {
+		t.Fatal("owned positive control refused", v, e, *writes)
+	}
+}
+
+// Shared protected-parent directory link changes from unrelated admitted work
+// do not rewrite immutable intents or lose live stage continuity. A changed
+// parent inode still refuses before another write; equality is not adoption.
+func TestAdapterSharedParentLinksPreserveIntent(t *testing.T) {
+	p, in := fixture()
+	h := newHost()
+	b := NewWithEnvironment(p, h, nil)
+	b.reservations[in.Identity.Generation] = in
+	open, stages, homes, writes, _ := memoryFilesystem(h)
+	b.open = open
+	defer b.Close()
+	current := task(in, p)
+	current.Step = "home"
+	for n, op := range []string{"stage_create", "managed_install", "home_publish"} {
+		planned, e := b.Plan(context.Background(), current)
+		if e != nil || planned.Intent.Operation != op {
+			t.Fatal(planned, e)
+		}
+		parent := stages
+		if op == "home_publish" {
+			parent = homes
+		}
+		parent.id.Nlink++ // Another qualified identity's directory entry; not target metadata.
+		a := attempt(current, planned.Intent, p)
+		again, e := b.Plan(context.Background(), a.Task)
+		if e != nil || !sameIntent(again.Intent, planned.Intent) {
+			t.Fatal("intent changed with unrelated parent links", again, e)
+		}
+		out, e := b.Execute(context.Background(), a)
+		if e != nil || out.Outcome != "applied" || *writes != n+1 {
+			t.Fatal(out, e, *writes)
+		}
+		current = resolve(current, a, out)
+	}
+	// A fresh effect's stage parent must still have the same held identity.
+	p2, in2 := fixture()
+	b2 := NewWithEnvironment(p2, h, nil)
+	b2.reservations[in2.Identity.Generation] = in2
+	open, stages, _, count, _ := memoryFilesystem(h)
+	b2.open = open
+	t2 := task(in2, p2)
+	t2.Step = "home"
+	planned, e := b2.Plan(context.Background(), t2)
+	if e != nil {
+		t.Fatal(e)
+	}
+	a := attempt(t2, planned.Intent, p2)
+	stages.id.Inode++
+	if out, e := b2.Execute(context.Background(), a); code(e) != "cleanup_pending" || out.Outcome != "no_progress" || *count != 0 {
+		t.Fatal("replaced parent adopted", out, e, *count)
 	}
 }

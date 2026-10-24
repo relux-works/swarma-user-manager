@@ -42,9 +42,10 @@ func openAnchor(ctx context.Context, path string) (*anchor, error) {
 }
 func (a *anchor) check(ctx context.Context) error {
 	v, e := a.parent.Observe(ctx, a.leaf, 1)
-	if e != nil || fileObject(v) != a.identity {
+	if e != nil || !sameParent(fileObject(v), a.identity) {
 		return refuse("qualification_required")
 	}
+	a.identity.Nlink = v.Nlink
 	return nil
 }
 func (a *anchor) refresh(ctx context.Context) error {
@@ -165,9 +166,55 @@ func firstFS(v ownership) (linuxos.FSIdentity, error) {
 	}
 	return fsObject(o)
 }
-func plan(i manager.OSIntent) manager.StepPlan { return manager.StepPlan{Intent: i} }
-func complete() manager.StepPlan               { return manager.StepPlan{Complete: true, Done: true} }
+func plan(i manager.OSIntent) manager.StepPlan {
+	if i.Target.Parent != nil {
+		parent := *i.Target.Parent
+		i.Target.Parent = &parent
+	}
+	i.Target.Entries = append([]manager.DeleteEntry{}, i.Target.Entries...)
+	i.Preconditions.OwnedReceipts = append([]int64{}, i.Preconditions.OwnedReceipts...)
+	return manager.StepPlan{Intent: i}
+}
+func complete() manager.StepPlan { return manager.StepPlan{Complete: true, Done: true} }
+
+// Parent link counts are historical observations: another admitted identity may
+// add/remove a directory in a shared protected parent. Keep the immutable saved
+// observation, while revalidating its live inode/type/owner/mode and ancestors.
+func sameParent(a, b manager.FileObject) bool { a.Nlink = b.Nlink; return a == b }
 func (b *Backend) Plan(ctx context.Context, t manager.Task) (manager.StepPlan, error) {
+	out, err := b.planCurrent(ctx, t)
+	if err != nil || out.Complete {
+		return out, err
+	}
+	for _, r := range t.Records {
+		if r.Kind != "intent" {
+			continue
+		}
+		var old manager.OSIntent
+		if decode(r.Body, &old) != nil {
+			return manager.StepPlan{}, refuse("effect_evidence_unavailable")
+		}
+		if old.Key != out.Intent.Key {
+			continue
+		}
+		fresh := out.Intent
+		if old.Target.Parent != nil && fresh.Target.Parent != nil && sameParent(*old.Target.Parent, *fresh.Target.Parent) {
+			fresh.Target.Parent = old.Target.Parent
+		}
+		for n := range fresh.Target.Entries {
+			if out.Intent.Target.Parent != nil && n < len(old.Target.Entries) && fresh.Target.Entries[n].Leaf == fresh.Target.Leaf && sameParent(fresh.Target.Entries[n].Parent, *out.Intent.Target.Parent) && sameParent(fresh.Target.Entries[n].Parent, old.Target.Entries[n].Parent) {
+				fresh.Target.Entries[n].Parent = old.Target.Entries[n].Parent
+			}
+		}
+		if !sameIntent(fresh, old) {
+			return manager.StepPlan{}, refuse("cleanup_pending")
+		}
+		out.Intent = old
+		break
+	}
+	return out, nil
+}
+func (b *Backend) planCurrent(ctx context.Context, t manager.Task) (manager.StepPlan, error) {
 	var zero manager.StepPlan
 	in, e, err := b.taskRestore(t)
 	if err != nil {
@@ -496,6 +543,9 @@ func (b *Backend) planDelete(ctx context.Context, t manager.Task) (manager.StepP
 	i.Target.Leaf = s.leaf
 	i.Preconditions.OwnedReceipts = []int64{owned.seq}
 	for _, v := range entries {
+		if (v.Object.UID != 0 && int64(v.Object.UID) != t.Account.UID) || (v.Object.GID != 0 && int64(v.Object.GID) != t.Account.GID) || (v.Parent.UID != 0 && int64(v.Parent.UID) != t.Account.UID) || (v.Parent.GID != 0 && int64(v.Parent.GID) != t.Account.GID) {
+			return zero, refuse("cleanup_pending")
+		}
 		leaf := filepath.Base(v.Path)
 		if v.Path == "" {
 			leaf = s.leaf
@@ -662,7 +712,7 @@ func (b *Backend) executeHome(ctx context.Context, t manager.Task, i manager.OSI
 		if e != nil {
 			return nil, e
 		}
-		if i.Target.Parent == nil || a.identity != *i.Target.Parent {
+		if i.Target.Parent == nil || !sameParent(a.identity, *i.Target.Parent) {
 			a.close()
 			return nil, refuse("qualification_required")
 		}
@@ -721,7 +771,7 @@ func (b *Backend) executeHome(ctx context.Context, t manager.Task, i manager.OSI
 		if e != nil {
 			return nil, e
 		}
-		if i.Target.Parent == nil || a.identity != *i.Target.Parent {
+		if i.Target.Parent == nil || !sameParent(a.identity, *i.Target.Parent) {
 			a.close()
 			return nil, refuse("qualification_required")
 		}
@@ -777,7 +827,11 @@ func (b *Backend) executeDelete(ctx context.Context, t manager.Task, i manager.O
 			leaf = s.leaf
 		}
 		expected := manager.DeleteEntry{Parent: fileObject(v.Parent), Leaf: leaf, Object: fileObject(v.Object)}
-		if expected != i.Target.Entries[n] {
+		saved := i.Target.Entries[n]
+		if v.Path == "" && sameParent(expected.Parent, saved.Parent) {
+			expected.Parent = saved.Parent
+		}
+		if expected != saved {
 			return nil, false, refuse("cleanup_pending")
 		}
 	}

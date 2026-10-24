@@ -49,6 +49,7 @@ func TestRestorationProjectionExactLifetime(t *testing.T) {
 		{"generation", func(i *manager.RestoreInput) { i.OriginalReservation.Account.Generation = strings.Repeat("e", 32) }},
 		{"name", func(i *manager.RestoreInput) { i.Identity.Username = "worker-other" }},
 		{"quota-owner", func(i *manager.RestoreInput) { i.AllocationOwner = "foreign" }},
+		{"current-charge", func(i *manager.RestoreInput) { i.Reservation.AllocationOwner = "foreign" }},
 		{"unresolved", func(i *manager.RestoreInput) { i.AttemptResolved = false }},
 		{"cleanup-create", func(i *manager.RestoreInput) { i.Reservation.Phase = "cleanup" }},
 	} {
@@ -200,5 +201,21 @@ func TestCoreHomeDerivation(t *testing.T) {
 	in.OriginalReservation.Account.Home = in.Identity.Home
 	if _, e := restoreEvidence(p, in); code(e) != "effect_evidence_unavailable" {
 		t.Fatal("different home accepted", e)
+	}
+}
+
+// Unsupported primitive budgets refuse at qualification, before admission or
+// writes; the adapter never silently clamps policy into a different contract.
+func TestPrimitiveBudgetLimitsBeforeAnyWrite(t *testing.T) {
+	p, _ := fixture()
+	if _, e := limits(p.Limits); e != nil {
+		t.Fatal(e)
+	}
+	for _, change := range []func(*manager.Limits){func(l *manager.Limits) { l.DeleteEntries = 100001 }, func(l *manager.Limits) { l.DeleteDepth = 257 }, func(l *manager.Limits) { l.DeleteWork = 100001 }, func(l *manager.Limits) { l.StepMS = 0 }} {
+		x := p.Limits
+		change(&x)
+		if _, e := limits(x); code(e) != "qualification_required" {
+			t.Fatal("unsupported budget accepted", x, e)
+		}
 	}
 }

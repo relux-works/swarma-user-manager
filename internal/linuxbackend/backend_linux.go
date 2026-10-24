@@ -137,7 +137,7 @@ func compatible(p manager.Policy) error {
 	return e
 }
 func limits(l manager.Limits) (linuxos.Limits, error) {
-	if l.DeleteEntries < 1 || l.DeleteEntries > 100000 || l.DeleteDepth < 1 || l.DeleteDepth > 256 || l.DeleteWork < 1 || l.StepMS < 1 || l.StepMS > 86400000 {
+	if l.DeleteEntries < 1 || l.DeleteEntries > 100000 || l.DeleteDepth < 1 || l.DeleteDepth > 256 || l.DeleteWork < 1 || l.DeleteWork > 100000 || l.StepMS < 1 || l.StepMS > 86400000 {
 		return linuxos.Limits{}, refuse("qualification_required")
 	}
 	return linuxos.Limits{Entries: int(l.DeleteEntries), Depth: int(l.DeleteDepth), Duration: time.Duration(l.StepMS) * time.Millisecond}, nil

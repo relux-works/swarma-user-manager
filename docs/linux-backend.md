@@ -4,7 +4,8 @@ The executable links `internal/linuxbackend` and the configured `local-v0`
 source through the core's unlocked preparation/flight boundary. The production
 constructor supplies no host authority. Operations requiring a host refuse
 `qualification_required` even if the policy says `qualified: true`.
-Production `user.bump` remains closed by the core and by the adapter.
+The entrypoint checks host qualification before handling even a terminal-result
+replay. Production `user.bump` remains closed by the core and by the adapter.
 
 The retained root qualification record issuer/reader and qualified complete NSS
 provider are not published yet. `Environment` is their explicit integration
@@ -25,11 +26,11 @@ this change introduces no new root script or maintenance command.
 | `Available` | Observe account/name/UID/GID conflicts, require the exact core-derived `<root>/workers/<name>` to be absent, then require every inventory class clean. Only known namespace occupancy is skippable. |
 | `Restore` | Validate the original create owner/request/identity and current operation separately before projecting both numeric holds. Core authenticates the whole quota charge and successor chain. Preserve original receipt generations; never join lifetimes by UID or rerun allocation. |
 | Cleanup restoration | Use `ObserveAccounts` for permitted absence. Present namespaces require independent original creation receipts, matching the linked immutable flight. Never change `MayCreate` to obtain an allocation token. |
-| `Plan` | Read-only observations produce one exact write intent. Group/account writes, stage creation, population, publication, quarantine and deletion are separately planned. Unknown processes refuse; planning never signals. |
+| `Plan` | Read-only observations produce one exact write intent. Group/account writes, stage creation, population, publication, quarantine and deletion are separately planned. Parent snapshots are copied and remain immutable. Shared protected-parent directory link counts may change with unrelated admitted work; inode, type, owner, mode and held ancestry still revalidate. Unknown processes refuse; planning never signals. |
 | `Execute` | Require the exact durable intent, flight and flight hash; repeat planning preconditions, hold the host guard, execute one write and verify exact postconditions. Tool exit alone is not a receipt. Ambiguous failures retain an unknown attempt. |
 | Account removal | `linuxos.RemovalCommands` admits absence without creation permission and emits removal commands only. Observe owned namespaces before and after each fixed tool. |
 | Home writes | Keep the live `OwnedStage` and both pinned parent handles. Deterministic stages/quarantines live under protected root:root 0700 `<root>/lib/user-manager/stages`. Publication targets `<root>/workers`. Errors after rename retain both handles and poison further automatic continuation. |
-| Deletion | `PrepareDeletion` fixes an ordered bounded list of exact parent/leaf/object identities. `DeleteEntries` prevalidates the whole batch before any unlink, revalidates each entry and fsyncs its parent. No recursive work may be discovered during execution. Partial errors remain held; insufficient work is `cleanup_pending`, never success. |
+| Deletion | `PrepareDeletion` fixes an ordered bounded list of exact parent/leaf/object identities. `DeleteEntries` prevalidates the whole batch before any unlink, revalidates each entry and fsyncs its parent. No recursive work may be discovered during execution. Unexplained foreign UID/GID descendants refuse before an intent is emitted. Partial errors remain held; insufficient work is `cleanup_pending`, never success. |
 | `CommitReady` | Reobserve original owned account/group, verify the published scaffold against its receipt/manifest, require persistence denial and complete inventory, and retain the local guard through append. |
 
 A lost `OwnedStage` is a maintenance hold, including a later retirement that
@@ -73,6 +74,8 @@ Only this bounded local persistence takes the effect lock; external observations
 have already returned. A store-capacity failure cannot admit a source.
 
 The Linux entry enumerator bounds visits separately from admitted unlinks.
+Its shared outer anchor link count is historical; descendant identities and link
+counts stay exact, adjusted only for this batch's own directory removals.
 Unsupported limits refuse qualification rather than clamp. Extremely large or
 unobservable regular files can require maintenance because exact observations
 use the primitive's bounded hashing limit. There is no claim of arbitrary-size

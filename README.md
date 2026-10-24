@@ -91,8 +91,9 @@ Its backend contract and recovery/qualification limits are in
 [Linux backend adapter](docs/linux-backend.md); its qualified host-record and
 complete NSS providers remain unavailable, so provisioning still refuses
 `qualification_required` even with a qualified policy flag.
-Production bump always refuses `bump_key_admission_unconfirmed` before journal
-or backend access until the Keymaker provision/confirm contract is accepted.
+The core refuses production bump with `bump_key_admission_unconfirmed` before
+its journal or backend access until the Keymaker provision/confirm contract is
+accepted. The executable can refuse an unqualified host earlier.
 
 The [qualification issuer and account-directory contract](spec/station-effect-receipts.md#63-root-issuer-and-closed-qualification-record)
 specifies a root-only `swarma-user-manager qualify` maintenance entry, canonical
