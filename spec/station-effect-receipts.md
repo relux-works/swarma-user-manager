@@ -553,7 +553,7 @@ I = {format:"station-qualification-inputs/1",policy_digest,binary_digest,
      backend_digest,skeleton_digest,nss_configuration:{passwd,group,shadow},
      nss_modules,station_range:{uid_min,uid_max,gid_min,gid_max}}
 Q = {format:"station-qualification/2",inputs:I,inputs_digest,station_names,
-     checks,boot_id,issued_at_unix_ms}
+     checks,boot_id,issued_at_unix_ms,issuer:{mode,invocation_id}}
 nss_modules entry = {name,implementation_digest,configuration_digest,
                      uid_ranges,gid_ranges}
 uid_ranges / gid_ranges entry = {min,max}
@@ -568,6 +568,27 @@ noncanonical bytes, unknown format, invalid types, overflow and exceeded finite
 bounds from the reviewed policy. Digests are lowercase 64-hex SHA-256 strings.
 The previous `station-qualification/1` record is not accepted under this
 input-pin contract; no silent reinterpretation or boot fallback is allowed.
+
+This amendment retains `station-qualification/2` only as a pre-deployment schema:
+there are no deployed `/2` issuers or `/2` records yet. Review must confirm that
+premise before accepting the in-place amendment. If a deployed `/2` record is
+found, allocate `/3` for this schema and explicitly reject the earlier schema;
+never silently reinterpret a record without `issuer`.
+
+`issuer` is mandatory and closed. `issuer.mode` is exactly `initial` or `boot`.
+For `initial`, `issuer.invocation_id` is the empty string. An initial record is
+an operator's candidate for pinning inputs and **never admits host qualification**,
+even when every other record field passes and the same boot has an earlier
+successful unit run. For `boot`, the identifier is a nonzero lowercase 32-hex
+systemd invocation ID belonging to the run of
+`swarma-user-manager-qualify.service` that publishes Q. Before clearing the
+entrypoint environment, the issuer captures only its own unit's `INVOCATION_ID`
+for this purpose and validates its format and unit context. All other environment
+influence is discarded. No request, caller identity, path, argv or policy value
+supplies this identifier; running `qualify --boot` outside that unit context
+cannot issue an admitting record. It is per-run evidence outside I, not a policy
+pin input. Missing, empty, malformed or all-zero boot invocation IDs refuse.
+
 Module UID/GID range endpoints are inclusive integers with
 `0 <= min <= max <= 4294967294`; reject inverted intervals, overflow and the
 reserved all-ones ID. Singleton (zero-width) intervals are valid: `[0,0]`
@@ -625,11 +646,14 @@ These two attestation fields are the only policy normalization exception.
 The operator installs P0 with admission stopped, runs `qualify`, verifies the
 passing protected candidate record and all its inputs, then atomically installs
 the same policy with only `qualification_digest=Q.inputs_digest` and
-`qualified=true` changed. No whole-record hash is the policy pin. The selected
-input format binds normalized policy, executable, backend, approved skeleton,
+`qualified=true` changed. Keep admission stopped, restart the reviewed oneshot
+and wait for it to re-run every check and publish a `boot` record with its own
+invocation ID before reopening admission. The initial candidate record never
+serves as that boot completion. No whole-record hash is the policy pin. The
+selected input format binds normalized policy, executable, backend, approved skeleton,
 complete station ranges, exact recorded NSS lines and module dependency/
-configuration closure including proven dynamic UID/GID ranges. Boot ID, audit time and fresh
-check outcomes are outside I and must never be omitted from the per-boot record.
+configuration closure including proven dynamic UID/GID ranges. Boot ID, issuer
+mode/invocation, audit time and fresh check outcomes are outside I and must never be omitted from the per-boot record.
 Changing any input requires operator re-qualification and a new pin; automation
 cannot choose a replacement pin or trust freshly discovered changed inputs.
 The full policy digest in §4/§6.1 authority evidence still binds the actual
@@ -656,7 +680,12 @@ account databases are available and before every platform service that can
 invoke the manager. Those consumers must require successful completion, not
 merely start ordering. Before admission, including direct invocations, require
 successful completion of the latest current-boot unit invocation as well as
-the current-boot record gate. Unknown unit completion is unknown qualification;
+the current-boot record gate. Read the latest unit completion and its invocation
+ID on the unlocked external-call path; require `Q.issuer.mode=boot` and equality
+of `Q.issuer.invocation_id` with that successful invocation ID. A stale same-boot
+success from a different invocation cannot authenticate a newer record. Neither
+the audit timestamp nor file times establish this binding. Unknown unit completion
+is unknown qualification;
 a visible record during publication is not readiness. After the operator
 installs a new pin, the unit must succeed before admission is reopened. No network dependency,
 network access or fallback fetch is permitted; qualify the unit's enforced
@@ -668,8 +697,9 @@ Under the deployment exclusion, boot mode reconstructs current I from trusted
 inputs and requires its digest to equal the unchanged policy pin **before**
 publication; it runs every §6.3 check again and revalidates all inputs before
 atomic publication. Only after all checks pass may a run write a new protected
-Q at the fixed record location, with current `boot_id`, audit time, full inputs and
-per-check results. The only product write is that record and its owned
+Q at the fixed record location, with current `boot_id`, its `boot` issuer and
+invocation ID, audit time, full inputs and per-check results. The only product
+write is that record and its owned
 publication temporary file; protected diagnostics go to the unit journal/log.
 It never edits policy, pin, skeleton, NSS or account/persistence configuration.
 An input mismatch, failed/unknown check, unsupported dependency or interrupted
@@ -684,13 +714,16 @@ Every boot therefore re-checks the host. A successful reboot changes Q's boot,
 time and fresh observations, while leaving **policy bytes and input pin
 unchanged**. This removes the routine manual root step without weakening boot
 binding or allowing changed inputs to qualify themselves. If the unit has not
-run, is still running or has failed, no valid current-boot record exists:
+run, is still running or has failed, no admissible current-boot record exists:
 absence or an old-boot record refuses; no previous-boot or flag-only fallback.
 Unit packaging, ordering and network denial remain pending implementation and
 executable qualification, not an installed capability claimed by this spec.
 
-`host_qualification` requires successful current-boot unit completion and
-validates policy/record protection and canonical format,
+`host_qualification` requires successful latest current-boot unit completion,
+`Q.issuer.mode=boot` and exact equality of Q's invocation ID with that completion's
+invocation ID. Validate these facts on the unlocked path; local checks while
+state locks are held do not issue systemd RPCs. It also validates policy/record
+protection and canonical format,
 `qualified=true`, `SHA256(CCJ(Q.inputs))=Q.inputs_digest=P.qualification_digest`,
 current deployed inputs equal to Q.inputs, every `ok` check and the current boot.
 A record from another boot cannot admit even with the same input pin. Runtime
@@ -897,7 +930,9 @@ not crash or fail setup; every positive neighbor must run in the same harness.
 | `SystemdUnexpectedVarlinkRefused`: add an unrecorded service, `io.systemd.DropIn`, alias or an unbounded Home/Machine provider under the userdb service directory; refuse before writes | `SystemdMinimalClosureQualifies`; also qualify a recorded reviewed bridge only with its exact bounded provider closure, and Home/Machine only with complete proven ranges | Ignore extra services, trust an allowed filename, erase forwarded ranges or accept only an automatic Home/Machine pool; the matching named variant must fail on forbidden host admission. Removal/replacement of a required recorded endpoint after issuance must become unknown. |
 | `SynthesizedSingletonRangesPreserved`: omitting root/nobody singleton ranges or accepting a station overlap at their endpoint cannot qualify; inverted, overflowing or all-ones intervals are invalid | `SynthesizedSingletonRangesAccepted`: canonical module `[0,0]` and `[65534,65534]` survive encoding/decoding and disjoint nonzero station ranges pass; station ID zero still refuses | Reject zero as missing, discard singletons, or weaken station bounds; the corresponding positive/negative assertion must fail. These are record/range tests, not evidence of an installed provider. |
 | `DynamicUserRangeOverlapRefused`: station UID or GID interval overlaps a configured NSS module dynamic interval, including a shared endpoint; qualification fails | `DynamicUserRangesDisjoint`: proven complete module ranges are disjoint from both station ranges; the immediately adjacent nonoverlapping boundary passes | Skip the overlap check, ignore GIDs or use exclusive endpoints; the corresponding case must fail. Unknown module ranges separately refuse rather than count as empty. |
-| `QualificationFlagWithoutRecordRefused`: set `qualified=true` with missing record, missing pin, unsafe record, nonpassing/missing check or another boot; refuse before any OS/lifecycle write | `QualifiedFlagWithPassingRecord`: root issuer's durable protected all-`ok` same-boot record, verified inputs and exact policy pin pass only host qualification | Admit from the flag alone or omit one record prerequisite; named negative fails on forbidden host admission. A passing host neighbor still needs fresh per-target checks. |
+| `QualificationFlagWithoutRecordRefused`: set `qualified=true` with missing record, missing pin, unsafe record, nonpassing/missing check or another boot; refuse before any OS/lifecycle write | `QualifiedFlagWithPassingRecord`: boot issuer's durable protected all-`ok` same-boot record with invocation ID matching the latest successful unit completion, verified inputs and exact policy pin pass only host qualification | Admit from the flag alone or omit one record prerequisite; named negative fails on forbidden host admission. A passing host neighbor still needs fresh per-target checks. |
+| `InitialQualificationNeverAdmits`: retain an all-`ok` initial record, install its unchanged inputs pin and set `qualified=true`; an earlier successful same-boot unit must not make that record admit | `BootIssuerRecordAdmits`: after pinning, the reviewed unit repeats all checks and publishes a protected current-boot `boot` record with its own invocation ID matching the latest successful completion; all other host checks pass | Ignore issuer mode or treat the initial candidate as a boot record; the initial-record refusal assertion fails. No initial record grants lifecycle admission. |
+| `StaleSameBootUnitSuccessRefused`: a protected newer `boot` record has invocation B, but the latest reported successful same-boot unit completion has invocation A; refuse before writes. Include a newer initial record with empty ID and the same stale success | `MatchingUnitInvocationAdmits`: protected `boot` record and latest terminal successful current-boot completion both name B, with all other prerequisites passing | Omit the invocation comparison or substitute timestamps; the mismatched-run refusal fails. Unknown, running or failed latest invocation and missing/invalid IDs remain closed. |
 | `PreviousBootQualificationRefused`: retain a passing previous-boot record with the unchanged input pin, or invoke before the oneshot completes; refuse `qualification_required` | `CurrentBootRequalified`: oneshot repeats all checks and publishes a fully passing current-boot record, admitting only host qualification | Drop the boot comparison or treat unit ordering/flag as readiness; named negative must fail on forbidden admission. Missing, running and failed oneshot neighbors stay closed, including a record already visible from an interrupted publication. |
 | `BootQualificationInputDriftRefused`: change any normalized policy, binary, backend, skeleton, range, NSS line or module-closure input before/during the boot run; exit nonzero, leave no admissible new record and preserve policy/pin bytes | `BootQualificationInputsUnchanged`: identical pinned inputs and all checks passing publish a current-boot record | Automatically adopt/re-pin changed inputs or omit the final input recheck; assert no new record is admissible and no policy mutation occurs on failure, including a changed-input race. |
 | `RebootMustNotRepin`: boot renewal attempts to rewrite the policy/pin or accept cached previous-boot check results; reject the attempt | `RebootPinUnchanged`: successive boots rerun every check and produce distinct boot/time records with identical inputs digest and byte-identical policy | Pin SHA256 of the whole boot record, rewrite the pin or skip checks; assert policy bytes unchanged, every check executed, new boot recorded and the old record rejected. No boot here is an executed host test. |
