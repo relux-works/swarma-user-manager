@@ -643,14 +643,17 @@ must establish the admitted filesystem/latency envelope or refuse this path.
 Before write, current-fact/closed-F failure yields manager
 `bump_key_admission_unconfirmed`; preserve native journal authorization/lock/
 deadline/storage errors as §5 requires. After possible write, keep the actual
-journal error **and unknown outcome/hold**. Keymaker retains `busy` for clean
+journal error and exact outcome classification: **unknown without proven
+durability**, or a **known append with uncertain cleanup after durability**.
+Retain any joint hold in either case; never append the active transition twice.
+Keymaker retains `busy` for clean
 local contention, `request_deadline_exceeded` for clean deadline expiry,
 `audit_unavailable` for uncertain local audit/commit, and existing generation,
 enrollment, custody, revoke and capacity codes for their actual causes. A
 restore-closed generation source is `generation_source_unavailable`; selected
 future C uses its proposed `state_witness_unavailable`, not a new PC2 code.
-A clean refusal never leaks a result; unknown commit additionally closes
-admission until recovery. No normal client retry clears a hold.
+A clean refusal never leaks a result; unresolved commit or cleanup additionally
+closes admission until recovery. No normal client retry clears a hold.
 
 Issuance (`sign`, `pubkey`, helper, and future message signing) and replay always
 require active generation, current pins/binding/epoch/custody, durable audit and
