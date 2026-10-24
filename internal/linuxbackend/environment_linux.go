@@ -104,6 +104,10 @@ func (g *deploymentGuard) WithContext(ctx context.Context) context.Context {
 	return context.WithValue(ctx, deploymentContextKey{}, g)
 }
 
+// Both digests are process-local: the namespace digest binds the full capture's
+// object identities and is intentionally outside the stable qualification pin.
+type deploymentFingerprint struct{ digest, namespace string }
+
 type deploymentGuard struct {
 	inner       manager.ActivationGuard
 	h           *ProductionEnvironment
@@ -111,7 +115,7 @@ type deploymentGuard struct {
 	maintenance []byte
 	exclusive   bool
 	ctx         context.Context
-	fingerprint string
+	fingerprint deploymentFingerprint
 }
 
 func (g *deploymentGuard) Check() error {
@@ -141,6 +145,18 @@ func (g *deploymentGuard) Check() error {
 	}
 	return nil
 }
+func (g *deploymentGuard) bindNamespace(runtime linuxos.NSSRuntime) error {
+	reviewed, ok := runtime.(reviewedFilesRuntime)
+	if !ok {
+		return qualification.ErrRequired
+	}
+	namespace, e := reviewed.systemd.CapturedNamespaceFingerprint()
+	if e != nil || namespace == "" || namespace != g.fingerprint.namespace {
+		return qualification.ErrRequired
+	}
+	return nil
+}
+
 func (g *deploymentGuard) Release() { g.inner.Release() }
 func (h *ProductionEnvironment) Acquire(ctx context.Context, exclusive bool) (manager.ActivationGuard, error) {
 	m, raw, e := loadDeployment(ctx, h.policy)
@@ -201,58 +217,58 @@ func (h *ProductionEnvironment) Acquire(ctx context.Context, exclusive bool) (ma
 // localFingerprint revalidates immutable local inputs and deployment inventory.
 // Mutable passwd/group/shadow bytes are compared around directory observations,
 // rather than globally frozen across legitimate product account-tool writes.
-func (h *ProductionEnvironment) localFingerprint(ctx context.Context, p manager.Policy) (string, error) {
+func (h *ProductionEnvironment) localFingerprint(ctx context.Context, p manager.Policy) (deploymentFingerprint, error) {
 	m, raw, e := loadDeployment(ctx, p)
 	if e != nil {
-		return "", e
+		return deploymentFingerprint{}, e
 	}
 	l, e := limits(p.Limits)
 	if e != nil {
-		return "", e
+		return deploymentFingerprint{}, e
 	}
 	if e = verifyFiles(ctx, m.BackendFiles); e != nil {
-		return "", e
+		return deploymentFingerprint{}, e
 	}
 	digest, e := linuxos.ExecutingDigest(ctx, filepath.Join(p.Root, "libexec/swarma-user-manager"))
 	if e != nil {
-		return "", e
+		return deploymentFingerprint{}, e
 	}
 	if _, _, e = loadSkeleton(ctx, p, m); e != nil {
-		return "", e
+		return deploymentFingerprint{}, e
 	}
 	if e = verifyFiles(ctx, m.Loader.Configuration); e != nil {
-		return "", e
+		return deploymentFingerprint{}, e
 	}
 	if e = verifyFiles(ctx, []FilePin{m.Loader.Cache}); e != nil {
-		return "", e
+		return deploymentFingerprint{}, e
 	}
 	for _, pin := range m.Loader.SearchRoots {
 		if _, e = captureTree(ctx, pin, l); e != nil {
-			return "", e
+			return deploymentFingerprint{}, e
 		}
 	}
 	if e = checkNoLauncher(ctx, m, l); e != nil {
-		return "", e
+		return deploymentFingerprint{}, e
 	}
 	etc, e := linuxos.OpenRoot("/etc")
 	if e != nil {
-		return "", e
+		return deploymentFingerprint{}, e
 	}
 	defer etc.Close()
 	cfg, moduleNames, e := linuxos.CaptureNSSConfiguration(ctx, etc, l)
 	if e != nil {
-		return "", e
+		return deploymentFingerprint{}, e
 	}
 	runtime, close, e := h.runtime(ctx, m, raw)
 	if e != nil {
-		return "", e
+		return deploymentFingerprint{}, e
 	}
 	defer close()
 	// Bind the complete loader closure of the fixed backend programs as well as
 	// NSS. No executable dependency may be replaced by a version label alone.
 	reviewed, ok := runtime.(reviewedFilesRuntime)
 	if !ok {
-		return "", qualification.ErrRequired
+		return deploymentFingerprint{}, qualification.ErrRequired
 	}
 	{
 		resolver := reviewed.files.Resolver.(*deploymentResolver)
@@ -260,26 +276,26 @@ func (h *ProductionEnvironment) localFingerprint(ctx context.Context, p manager.
 		for _, path := range []string{"/usr/bin/systemctl", "/usr/sbin/groupadd", "/usr/sbin/useradd", "/usr/sbin/userdel", "/usr/sbin/groupdel"} {
 			artifact, e := resolver.artifact(ctx, path)
 			if e != nil {
-				return "", e
+				return deploymentFingerprint{}, e
 			}
 			roots = append(roots, artifact)
 		}
 		if _, _, e = linuxos.CaptureImplementationClosure(ctx, roots, resolver, l); e != nil {
-			return "", e
+			return deploymentFingerprint{}, e
 		}
 	}
 	// CaptureModules for files+systemd now performs provider RPCs. Guard.Check
-	// runs under the core lock, so it binds immutable local artifacts only;
+	// runs under the core lock, so it uses local file and namespace checks;
 	// full provider completion remains in Capture and the directory observation.
 	modules, e := runtime.CaptureModules(ctx, []string{"files"}, l)
 	if e != nil {
-		return "", e
+		return deploymentFingerprint{}, e
 	}
-	systemd := ""
+	systemd, namespace := "", ""
 	if len(moduleNames) == 2 && moduleNames[1] == "systemd" {
-		systemd, e = reviewed.localSystemdFingerprint(ctx, l)
+		systemd, namespace, e = reviewed.localSystemdFingerprint(ctx, l)
 		if e != nil {
-			return "", e
+			return deploymentFingerprint{}, e
 		}
 	}
 	b, e := qualification.Canonical(struct {
@@ -290,9 +306,9 @@ func (h *ProductionEnvironment) localFingerprint(ctx context.Context, p manager.
 		Systemd    string
 	}{qualification.Hash(raw), digest, cfg, modules, systemd})
 	if e != nil {
-		return "", e
+		return deploymentFingerprint{}, e
 	}
-	return qualification.Hash(b), nil
+	return deploymentFingerprint{qualification.Hash(b), namespace}, nil
 }
 func checkNoLauncher(ctx context.Context, m DeploymentManifest, l linuxos.Limits) error {
 	for _, path := range m.NoLauncher.AbsentEntries {
@@ -526,6 +542,12 @@ func (h *ProductionEnvironment) Capture(ctx context.Context, p manager.Policy) (
 	modules, e := runtime.CaptureModules(ctx, names, l)
 	if e != nil {
 		return qualification.Inputs{}, nil, e
+	}
+	if len(names) == 2 && names[1] == "systemd" {
+		guard, ok := ctx.Value(deploymentContextKey{}).(*deploymentGuard)
+		if !ok || guard.h != h || guard.bindNamespace(runtime) != nil {
+			return qualification.Inputs{}, nil, qualification.ErrRequired
+		}
 	}
 	pd, e := qualification.PolicyDigest(p)
 	if e != nil {

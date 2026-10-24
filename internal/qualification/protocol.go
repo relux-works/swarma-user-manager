@@ -169,6 +169,13 @@ func (s Protocol) Pin(ctx context.Context, p manager.Policy) (*RecordGuard, erro
 			g.Release()
 		}
 	}()
+	// Preserve the deployment guard's observation scope through full capture,
+	// just as the issuer does; the retained guard itself remains local-only.
+	if scope, ok := g.(interface {
+		WithContext(context.Context) context.Context
+	}); ok {
+		ctx = scope.WithContext(ctx)
+	}
 	if g.Check() != nil {
 		return nil, ErrRequired
 	}

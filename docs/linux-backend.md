@@ -596,9 +596,24 @@ fixed protected closure manifest, actual `/etc`, `/run`, `/usr/lib` anchors,
 reviewed systemd library, providers and retained sources. A matching closure and
 clean direct completion can admit `files systemd`; every unknown stays unknown.
 The Environment installs no second parser or collector. The local guard hashes
-immutable manifest, library/provider closures and source bytes without contacting
-providers. Qualification capture and directory observation perform the full
-runtime checks outside the core lock. Unsupported loader/platform profiles,
+immutable manifest, library/provider closures and source bytes plus a process-local
+namespace snapshot. It reuses the landed bounded descriptor traversal to check
+all four roots' complete absent/empty states, the exact service-entry set, protected
+ancestor identities and each socket's device/inode/type, owner/group, mode,
+link count, size and modification/change timestamps. No-follow local checks never
+connect sockets or call providers. Directory timestamps/link counts are excluded
+from the identity digest as in the landed continuity check, so unrelated parent
+activity does not invalidate otherwise unchanged namespace facts.
+
+A successful full capture publishes its namespace digest only after direct clean
+completion, NSS agreement and final metadata checks. The issuer and reader carry
+the acquired guard's scope into capture; that completed digest must match the
+retained local baseline. Every subsequent guard check revalidates the same digest
+with fresh protected descriptors. Namespace identities remain outside stable I
+and the per-boot qualification pin. Qualification capture and directory observation
+perform the full runtime checks outside the core lock. The local check does not
+claim socket peer liveness or replace provider completion; those need full checks
+and the maintained deployment exclusion. Unsupported loader/platform profiles,
 incomplete inventory, missing journal genesis, missing root protection and
 unreviewed module behavior refuse.
 Fixture tests exercise protocol, failure paths and local primitives; they do not

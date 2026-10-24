@@ -12,7 +12,6 @@ import (
 	"io"
 	"net"
 	"net/url"
-	"path/filepath"
 	"reflect"
 	"sort"
 	"strconv"
@@ -71,14 +70,15 @@ type UserDBProviderClosure struct {
 // A DirectoryFence must exclude provider/configuration/account changes throughout
 // observation. No constructor/default claims that a deployment meets that fence.
 type SystemdNSSRuntime struct {
-	Files            FilesNSSRuntime
-	Library          ProtectedArtifact
-	Manifest         ProtectedArtifact
-	Etc, Run, UsrLib *Dir
-	Providers        map[string]UserDBProviderClosure
-	Sources          map[string]ProtectedArtifact // key is the exact reviewed source URL
-	mu               sync.Mutex
-	observed         map[string]unix.Stat_t // current-process identities, outside stable I
+	Files              FilesNSSRuntime
+	Library            ProtectedArtifact
+	Manifest           ProtectedArtifact
+	Etc, Run, UsrLib   *Dir
+	Providers          map[string]UserDBProviderClosure
+	Sources            map[string]ProtectedArtifact // key is the exact reviewed source URL
+	mu                 sync.Mutex
+	observed           map[string]unix.Stat_t // current-process identities, outside stable I
+	completedNamespace string                 // published only after successful full collection
 }
 
 var _ NSSRuntime = (*SystemdNSSRuntime)(nil)
@@ -286,7 +286,7 @@ func protectedUserDBPath(ctx context.Context, root *Dir, path, label string, l L
 	}
 	return "empty", nil
 }
-func userDBSockets(ctx context.Context, root *Dir, services []UserDBService, l Limits, observed map[string]unix.Stat_t) (err error) {
+func userDBSockets(ctx context.Context, root *Dir, services []UserDBService, l Limits, observed map[string]unix.Stat_t, probe bool) (err error) {
 	if root == nil || root.f == nil {
 		return refusal("directory_unknown", "userdb_anchor", nil)
 	}
@@ -348,8 +348,10 @@ func userDBSockets(ctx context.Context, root *Dir, services []UserDBService, l L
 		if st.Mode&unix.S_IFMT != unix.S_IFSOCK || st.Uid != root.owner || st.Gid != root.group || st.Nlink != 1 {
 			return refusal("directory_unknown", "userdb_socket", nil)
 		}
-		if e = probeUserDBEndpoint(ctx, current, name, st); e != nil {
-			return e
+		if probe {
+			if e = probeUserDBEndpoint(ctx, current, name, st); e != nil {
+				return e
+			}
 		}
 		observed["/run/systemd/userdb/"+name] = st
 	}
@@ -366,40 +368,15 @@ func (r *SystemdNSSRuntime) captureSystemd(ctx context.Context, l Limits) (NSSMo
 	fail := func(e error) (NSSModule, error) {
 		return NSSModule{}, refusal("directory_unknown", "userdb_closure", e)
 	}
-	b, e := protectedRead(ctx, r.Manifest.Directory, r.Manifest.Name, 1<<20, true)
-	if e != nil {
-		return fail(e)
-	}
-	if !filepath.IsAbs(r.Manifest.Path) || filepath.Clean(r.Manifest.Path) != r.Manifest.Path || filepath.Base(r.Manifest.Path) != r.Manifest.Name {
-		return fail(nil)
-	}
-	m, e := ParseSystemdClosure(b, l)
+	b, m, e := r.readSystemdManifest(ctx, l)
 	if e != nil {
 		return fail(e)
 	}
 	if len(r.Providers) != len(m.Services) {
 		return fail(nil)
 	}
-	observed := map[string]unix.Stat_t{}
-	for _, v := range m.Directories {
-		var anchor *Dir
-		var path string
-		switch v.Path {
-		case "/etc/userdb":
-			anchor, path = r.Etc, "userdb"
-		case "/run/userdb":
-			anchor, path = r.Run, "userdb"
-		case "/run/host/userdb":
-			anchor, path = r.Run, "host/userdb"
-		case "/usr/lib/userdb":
-			anchor, path = r.UsrLib, "userdb"
-		}
-		state, e := protectedUserDBPath(ctx, anchor, path, v.Path, l, observed)
-		if e != nil || state != v.State {
-			return fail(e)
-		}
-	}
-	if e = userDBSockets(ctx, r.Run, m.Services, l, observed); e != nil {
+	observed, e := r.captureNamespace(ctx, m, l, true)
+	if e != nil {
 		return fail(e)
 	}
 	checkSource := func(s RangeSource) error {

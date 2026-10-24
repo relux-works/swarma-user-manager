@@ -172,22 +172,26 @@ func (r reviewedFilesRuntime) Enumerate(ctx context.Context, names []string, l l
 	return r.systemd.Enumerate(ctx, names, l)
 }
 
-// This is an immutable-file fingerprint, never an admission verdict. It does
-// not parse the closure, query NSS, connect sockets or enumerate providers.
-func (r reviewedFilesRuntime) localSystemdFingerprint(ctx context.Context, l linuxos.Limits) (string, error) {
+// Bind immutable files plus the landed local namespace snapshot, never a
+// provider-completion verdict. No NSS, socket connection or provider RPC occurs.
+func (r reviewedFilesRuntime) localSystemdFingerprint(ctx context.Context, l linuxos.Limits) (string, string, error) {
 	s := r.systemd
 	if s == nil {
-		return "", qualification.ErrRequired
+		return "", "", qualification.ErrRequired
+	}
+	namespace, e := s.LocalNamespaceFingerprint(ctx, l)
+	if e != nil {
+		return "", "", e
 	}
 	manifest, e := linuxos.ReadProtected(ctx, s.Manifest.Directory, s.Manifest.Name, 1<<20, true)
 	if e != nil {
-		return "", e
+		return "", "", e
 	}
 	_, library, e := linuxos.CaptureImplementationClosure(ctx, []linuxos.ProtectedArtifact{s.Library}, r.files.Resolver, l)
 	if e != nil {
-		return "", e
+		return "", "", e
 	}
-	parts := []string{qualification.Hash(manifest), library}
+	parts := []string{qualification.Hash(manifest), library, namespace}
 	providers := make([]string, 0, len(s.Providers))
 	for name := range s.Providers {
 		providers = append(providers, name)
@@ -197,11 +201,11 @@ func (r reviewedFilesRuntime) localSystemdFingerprint(ctx context.Context, l lin
 		p := s.Providers[name]
 		_, implementation, e := linuxos.CaptureImplementationClosure(ctx, p.Implementation, p.Resolver, l)
 		if e != nil {
-			return "", e
+			return "", "", e
 		}
 		_, configuration, e := linuxos.CaptureConfigurationClosure(ctx, p.Configuration, l)
 		if e != nil {
-			return "", e
+			return "", "", e
 		}
 		parts = append(parts, name, implementation, configuration)
 	}
@@ -213,13 +217,13 @@ func (r reviewedFilesRuntime) localSystemdFingerprint(ctx context.Context, l lin
 	for _, url := range sources {
 		_, content, e := linuxos.CaptureConfigurationClosure(ctx, []linuxos.ProtectedArtifact{s.Sources[url]}, l)
 		if e != nil {
-			return "", e
+			return "", "", e
 		}
 		parts = append(parts, url, content)
 	}
 	b, e := qualification.Canonical(parts)
 	if e != nil {
-		return "", e
+		return "", "", e
 	}
-	return qualification.Hash(b), nil
+	return qualification.Hash(b), namespace, nil
 }

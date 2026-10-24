@@ -404,3 +404,65 @@ func TestQualificationOwnUnitContext(t *testing.T) {
 		t.Fatal("own unit control refused")
 	}
 }
+
+type qualificationScopeKey struct{}
+type qualificationScopedGuard struct{ *testGuard }
+
+func (g *qualificationScopedGuard) WithContext(ctx context.Context) context.Context {
+	return context.WithValue(ctx, qualificationScopeKey{}, g)
+}
+
+type qualificationScopedHost struct {
+	*host
+	scope    *qualificationScopedGuard
+	sawScope bool
+}
+
+func (h *qualificationScopedHost) Acquire(ctx context.Context, exclusive bool) (manager.ActivationGuard, error) {
+	g, e := h.host.Acquire(ctx, exclusive)
+	if e != nil {
+		return nil, e
+	}
+	h.scope = &qualificationScopedGuard{g.(*testGuard)}
+	return h.scope, nil
+}
+func (h *qualificationScopedHost) Capture(ctx context.Context, p manager.Policy) (Inputs, []string, error) {
+	if ctx.Value(qualificationScopeKey{}) != h.scope {
+		return Inputs{}, nil, ErrRequired
+	}
+	h.sawScope = true
+	return h.host.Capture(ctx, p)
+}
+
+// Both issuer and reader carry the acquired guard's scope through full capture;
+// a deployment requiring that scope must still admit a valid record.
+func TestQualificationCaptureGuardScope(t *testing.T) {
+	for _, mode := range []string{"issuer", "reader"} {
+		t.Run(mode, func(t *testing.T) {
+			var s Protocol
+			var p manager.Policy
+			var h *host
+			if mode == "issuer" {
+				s, p, h, _, _ = setup()
+			} else {
+				s, p, h, _, _ = issued(t)
+			}
+			scoped := &qualificationScopedHost{host: h}
+			s.Deployment = scoped
+			if mode == "issuer" {
+				if _, e := s.Issue(context.Background(), p, false); e != nil {
+					t.Fatal("issuer scope lost", e)
+				}
+			} else {
+				g, e := s.Pin(context.Background(), p)
+				if e != nil {
+					t.Fatal("reader scope lost", e)
+				}
+				g.Release()
+			}
+			if !scoped.sawScope {
+				t.Fatal("capture not reached")
+			}
+		})
+	}
+}

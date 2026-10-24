@@ -11,5 +11,12 @@ func QualificationSystemdAdapter(r *linuxos.SystemdNSSRuntime, raw []byte) linux
 }
 
 func QualificationSystemdLocal(r linuxos.NSSRuntime, l linuxos.Limits) (string, error) {
-	return r.(reviewedFilesRuntime).localSystemdFingerprint(context.Background(), l)
+	fp, _, e := r.(reviewedFilesRuntime).localSystemdFingerprint(context.Background(), l)
+	return fp, e
+}
+
+// Overlay-only access to the actual guard's successful-capture binding check.
+func QualificationBindSystemd(r linuxos.NSSRuntime, namespace string) error {
+	g := &deploymentGuard{fingerprint: deploymentFingerprint{namespace: namespace}}
+	return g.bindNamespace(r)
 }

@@ -445,6 +445,11 @@ func (r *SystemdNSSRuntime) collectSystemd(ctx context.Context, names []string, 
 	if e = c.Err(); e != nil {
 		return fail(e)
 	}
+	// Publish namespace evidence only after every direct stream, NSS agreement
+	// and final metadata/file check succeeded.
+	r.mu.Lock()
+	r.completedNamespace = namespaceFingerprint(after.ConfigurationDigest, r.observed)
+	r.mu.Unlock()
 	return append(filesModules, before), expected, nil
 }
 
