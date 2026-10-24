@@ -16,6 +16,7 @@ import (
 
 // Names resolves scheduler execution users through a trusted directory service.
 // Missing names and lookup errors are unknown, never arbitrary file-name matches.
+// A returned UID is validated ownership evidence only when the error is nil.
 type Names interface {
 	UID(context.Context, string) (uint32, error)
 }
@@ -100,7 +101,10 @@ func schedulerOwners(ctx context.Context, kind, name string, b []byte, names Nam
 	switch kind {
 	case "cron":
 		u, e := names.UID(ctx, name)
-		return []uint32{u}, e
+		if e != nil {
+			return nil, e
+		}
+		return []uint32{u}, nil
 	case "at":
 		for _, line := range strings.Split(string(b), "\n") {
 			if strings.HasPrefix(line, "# atrun uid=") {

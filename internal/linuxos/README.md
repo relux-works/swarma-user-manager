@@ -60,7 +60,8 @@ existing `golang.org/x/sys/unix` are required; there are no new dependencies.
 | Go | Build this package | `go build ./internal/linuxos` | Compiler verdict |
 | Go | Narrow primitive tests | `GOMAXPROCS=2 go test -p 1 ./internal/linuxos -count=1 -v -timeout=45s` | Named verdicts; Go temporary fixture directories |
 | Python 3, existing sudo | Disposable peer-account fixtures | Invoked only by the package tests as `sudo -n -u platform-test-a -- /usr/bin/python3 ...` (peer UID resolved at runtime) | Exact PID/path cleanup and named test verdicts |
-| Shell/Python 3 | Proposed root qualification | `/usr/bin/dash internal/linuxos/root-qualification.sh apply ABS_TEST_BINARY APPROVED_SHA`; then `verify`; then `rollback` | Protected disposable fixture at `/var/lib/swarma-linuxos-qualification`; no production policy or sudoers changes |
+| C compiler | Harmless loader-constructor regression fixture | `/usr/bin/cc -shared -fPIC -o PLANT_SO PLANT_C` (invoked by `TestRootBootstrapLoaderEntry`) | Temporary test-owned source, shared object and executable sentinel; removed with the fixture |
+| Shell/Python 3 | Proposed root qualification | `/usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin /usr/bin/dash /abs/path/root-qualification.sh apply ABS_TEST_BINARY APPROVED_SHA`; then `verify`; then `rollback` | Protected disposable fixture at `/var/lib/swarma-linuxos-qualification`; no production policy or sudoers changes |
 
 Unprivileged tests map root:S owners to the test runner only through private
 in-package constructors. They check inherited ACL rejection, symlinks, exact
@@ -81,17 +82,30 @@ its SHA-256 with `sha256sum /chosen/path/linuxos.test`. The owner must supply
 actual journal holds. There are no default/fixed IDs. The proposed bootstrap
 requires the host's real `/usr/bin/python3.14` interpreter. It checks root owners,
 nonwritable modes and non-symlink directory/file types before starting Python;
-another layout refuses and needs separate review. Launch the reviewed script
-with the trusted absolute `/usr/bin/dash`, never by sourcing it or invoking bash.
-The system shell/loader and fixed OS bootstrap utilities are trusted entry
-requirements; a script cannot repair an already compromised invoking process.
-Builtins clear loader/startup controls, reset PATH/IFS/locale and change cwd to
-`/` before any external bootstrap command. The fixed stat/interpreter commands
-run through `env -i`, and Python uses `-I -S`, excluding cwd, PYTHONPATH, user
-site and site startup imports. Regression tests run only this preamble and its
-first import unprivileged, never the guarded root body: writable-cwd and inherited
-PYTHONPATH plants must not execute, an isolated control passes, and an intentionally
-nonisolated control must detect the plant. No root script execution is claimed.
+another layout refuses and needs separate review. The tools-table invocation is
+**the only supported entry**, launched by the owner's trusted root shell. Replace
+`/abs/path/root-qualification.sh` with the absolute reviewed script path; for
+`verify` and `rollback`, keep the identical clean-launch prefix and change only
+the mode/arguments. Sourcing, direct execution, bare dash and bash are unsupported.
+The owner's root shell, the OS loader and fixed utilities are the trust root:
+`/usr/bin/env` itself starts in the owner's environment, which must already be
+trusted. This entry cannot protect that launcher from its own loader startup.
+Its `-i` clears inherited controls **before our dash or Python starts**, closing
+loader/startup injection into our code path. In-script environment changes cannot
+protect their own entry. An early builtin check refuses present loader/startup
+variables (including empty values) as defence in depth; it cannot undo a
+constructor that already ran. Builtins then reset PATH/IFS/locale and cwd to `/`.
+The fixed stat/interpreter commands also run through `env -i`, and Python uses
+`-I -S`, excluding cwd, PYTHONPATH, user site and site startup imports.
+
+Unprivileged regressions retain the import-only writable-cwd/PYTHONPATH plants,
+isolated control and deliberately nonisolated detection control. A harmless
+native constructor records each executable entered by the documented full-script
+launch with LD_PRELOAD in the outer environment: only the trusted env launcher
+may load it; our dash/Python must not. A narrowing control explicitly leaks it
+past `env -i` into dash and must record dash before the builtin refusal. The full
+script probe stops at the root-required guard, before fixture I/O. No privileged
+root script execution is claimed.
 Review the script and pass
 the approved binary hash to `apply`; it checks protected paths and exact copied
 bytes before executing. The opt-in test verifies actual account creation,

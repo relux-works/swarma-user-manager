@@ -1,14 +1,24 @@
 #!/usr/bin/dash
 # PROPOSED ONLY: owner-reviewed disposable Linux qualification, never installation.
-# Enter with the trusted absolute system dash; do not source or invoke with bash.
-# The operating-system shell/loader and fixed bootstrap utilities are trusted.
+# Supported invocation: /usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin /usr/bin/dash /abs/path/root-qualification.sh MODE ...
+# ONLY from the owner's trusted root shell; every other invocation is unsupported.
+# That shell and env's own loader startup are the owner's trust root. env -i
+# clears the environment BEFORE our dash/interpreter starts; the script cannot
+# protect env itself. Trust the OS shell/loader and fixed bootstrap utilities.
 # No sudoers changes. Before any future drop-in, use the host sudo-rs visudo -cf.
 set -efu
-# Builtins remove loader/startup controls before any external bootstrap program.
-unset LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT LD_DEBUG LD_DEBUG_OUTPUT LD_BIND_NOW \
- LD_BIND_NOT LD_DYNAMIC_WEAK LD_HWCAP_MASK LD_ORIGIN_PATH LD_PROFILE \
- LD_PROFILE_OUTPUT LD_SHOW_AUXV LD_TRACE_LOADED_OBJECTS LD_USE_LOAD_BIAS \
- GLIBC_TUNABLES GCONV_PATH LOCPATH NLSPATH ENV BASH_ENV CDPATH LANGUAGE
+# Defence in depth only: present-empty counts too. This cannot undo a loader
+# constructor that already ran during an unsupported inherited-environment entry.
+if [ -n "${LD_PRELOAD+x}${LD_LIBRARY_PATH+x}${LD_AUDIT+x}${LD_DEBUG+x}\
+${LD_DEBUG_OUTPUT+x}${LD_BIND_NOW+x}${LD_BIND_NOT+x}${LD_DYNAMIC_WEAK+x}\
+${LD_HWCAP_MASK+x}${LD_ORIGIN_PATH+x}${LD_PROFILE+x}${LD_PROFILE_OUTPUT+x}\
+${LD_SHOW_AUXV+x}${LD_TRACE_LOADED_OBJECTS+x}${LD_USE_LOAD_BIAS+x}${GLIBC_TUNABLES+x}\
+${GCONV_PATH+x}${LOCPATH+x}${NLSPATH+x}${ENV+x}\
+${BASH_ENV+x}${CDPATH+x}${LANGUAGE+x}${PYTHONPATH+x}\
+${PYTHONHOME+x}${PYTHONSTARTUP+x}${PYTHONUSERBASE+x}" ]; then
+ printf '%s\n' 'REFUSED: loader/startup environment present; use the documented clean entry' >&2
+ exit 1
+fi
 PATH=/usr/bin:/bin
 LC_ALL=C
 export LC_ALL

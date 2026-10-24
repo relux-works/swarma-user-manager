@@ -53,7 +53,10 @@ func TestRootBootstrapRejectsUntrustedImports(t *testing.T) {
 				cwd = clean
 			}
 			input := preamble
-			cmd := exec.Command("/usr/bin/dash", "-s")
+			entry := documentedRootEntry(t, "-s")
+			// Replace the script/mode with dash stdin, retaining the clean entry.
+			entry = entry[:len(entry)-1]
+			cmd := exec.Command(entry[0], entry[1:]...)
 			if mode == "isolated-positive-control" {
 				cmd = exec.Command("/usr/bin/python3", "-I", "-S", "-")
 				input = first + "\n"
