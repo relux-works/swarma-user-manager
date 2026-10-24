@@ -95,6 +95,12 @@ returns 1. Abrupt process/kernel termination is not a normal refusal.
 `TestQualificationDiagnosticCodes` covers formatting/privacy for every dictionary
 entry and fallback, including first-failure preservation. The issue, full-check
 and CLI stage tests drive actual refusal branches with positive controls.
+A complete closed check observation retains its specific failed-check code even
+when the collector also returns an error. Partial/invalid observations and
+errors accompanying passing fields report `checks/observation` and still refuse.
+`TestReviewA1rProductionCheckErrorDiagnostics` retains the production-shaped
+result-plus-error regression; `TestQualificationCheckObservationCompleteness`
+covers missing fields, malformed results, unknown checks and positive controls.
 Serialization failures unreachable from a validated fixed typed record are not
 claimed fault-injected by the dictionary test. Existing issuer, collision,
 withdrawal and boot-binding regressions keep their names and sentinel semantics.

@@ -67,7 +67,7 @@ func TestQualificationIssueRefusalStages(t *testing.T) {
 			p.QualificationDigest = strings.Repeat("e", 64)
 		}},
 		{"checks", "checks", "cron_denial", func(s *Protocol, p *manager.Policy, h *host, m *memStorage) {
-			h.checks.CronDenial = Check{Result: "failed", Reason: "private account"}
+			h.checks.CronDenial = Check{Result: "failed", Reason: "unsafe"}
 		}},
 		{"recapture", "recapture", "inputs_changed", func(s *Protocol, p *manager.Policy, h *host, m *memStorage) { h.drift = true }},
 		{"record", "record", "validation", func(s *Protocol, p *manager.Policy, h *host, m *memStorage) {
@@ -158,14 +158,14 @@ func TestQualificationPreflightParserSeparation(t *testing.T) {
 }
 
 // Claim: each of the eleven full-check failures names its own fixed check,
-// rather than serializing the private reason or accidentally reporting a peer.
+// using the production result-plus-error contract, without reporting a peer.
 func TestQualificationFullCheckDiagnostics(t *testing.T) {
 	labels := []string{"policy_protection", "source_configuration", "approved_skeleton", "cron_denial", "at_denial", "allow_precedence", "no_linger", "account_directory", "dynamic_user_ranges", "no_launcher", "account_restrictions"}
 	for n, label := range labels {
 		t.Run(label, func(t *testing.T) {
 			s, p, h, m, _ := setup()
 			fields := []*Check{&h.checks.PolicyProtection, &h.checks.SourceConfiguration, &h.checks.ApprovedSkeleton, &h.checks.CronDenial, &h.checks.AtDenial, &h.checks.AllowPrecedence, &h.checks.NoLinger, &h.checks.AccountDirectory, &h.checks.DynamicUserRanges, &h.checks.NoLauncher, &h.checks.AccountRestrictions}
-			*fields[n] = Check{Result: "failed", Reason: "private account/path"}
+			*fields[n] = Check{Result: "failed", Reason: "unsafe"}
 			ctx, d := WithDiagnostics(context.Background())
 			if _, e := s.Issue(ctx, p, false); e != ErrRequired || d.Line() != "qualification_refused stage=checks check="+label || m.b != nil {
 				t.Fatal("full-check diagnostic", e, d.Line())

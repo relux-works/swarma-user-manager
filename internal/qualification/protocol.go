@@ -20,6 +20,8 @@ func BootIssuance(ctx context.Context) bool { v, _ := ctx.Value(bootIssuanceKey{
 type Deployment interface {
 	Acquire(context.Context, bool) (manager.ActivationGuard, error)
 	Capture(context.Context, manager.Policy) (Inputs, []string, error)
+	// CheckAll may return complete failed checks with an error. Incomplete or
+	// invalid observations cannot identify a specific failed check.
 	CheckAll(context.Context, manager.Policy, Inputs, []string) (Checks, error)
 }
 
@@ -103,7 +105,9 @@ func (s Protocol) Issue(ctx context.Context, p manager.Policy, bootMode bool) (R
 		return fail("digest", "pin_mismatch")
 	}
 	checks, e := s.Deployment.CheckAll(ctx, p, i, names)
-	if e != nil {
+	// A collector failure can accompany a complete observation. Validate all
+	// fields before selecting a label; partial results remain unclassified.
+	if !checks.valid() {
 		return fail("checks", "observation")
 	}
 	if !checks.Passing() {
@@ -113,6 +117,10 @@ func (s Protocol) Issue(ctx context.Context, p manager.Policy, bootMode bool) (R
 				return fail("checks", labels[n])
 			}
 		}
+		return fail("checks", "observation")
+	}
+	// Even passing fields cannot turn a collector error into qualification.
+	if e != nil {
 		return fail("checks", "observation")
 	}
 	final, finalNames, e := s.Deployment.Capture(ctx, p)

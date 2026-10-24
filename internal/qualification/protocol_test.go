@@ -96,6 +96,10 @@ func (h *host) CheckAll(context.Context, manager.Policy, Inputs, []string) (Chec
 	if h.onChecks != nil {
 		h.onChecks()
 	}
+	// Mirror ProductionEnvironment: completed nonpassing checks carry an error.
+	if !h.checks.Passing() {
+		return h.checks, ErrRequired
+	}
 	return h.checks, nil
 }
 
