@@ -370,9 +370,15 @@ fixed initial command and qualification unit. Unit control normally entails a
 service-manager call while F/B/W exclusion is held. The literal blanket
 "no RPC under locks" rule and that required handoff therefore need the explicit
 architect disposition in Q1 (§9). **Neither requirement is silently waived.**
-Until that disposition and its no-cycle qualification are accepted, this
-control-call integration is an A3d activation blocker; this spec provides no
-relay process or lock-release workaround that would weaken continuous exclusion.
+The same question reaches the issuer's own D lease: the existing
+[qualification protocol](../internal/qualification/protocol.go) acquires its
+lease before `Capture`/`CheckAll` and retains it through publication, including
+qualified NSS/provider observations. An absolute RPC prohibition on D would
+also need that existing interface revised; moving calls to a relay or dropping
+D would not preserve its exclusion contract.
+Until the disposition and its no-cycle qualification are accepted, the unit
+control/issuer-call integration is an A3d activation blocker; this spec provides
+no relay process or lock-release workaround that weakens continuous exclusion.
 
 Interlock evidence must authenticate stopped new starts/resumes, the current
 maintenance assertion and the original P7 detection/deadline/response, plus
@@ -644,7 +650,7 @@ implement or qualify A3d, its guard, hooks, P7 response or notification transpor
 
 | Question | Recommendation | Safe state until resolved |
 |---|---|---|
-| Q1 — Meaning of no RPC under locks at the unit-control handoff | Confirm the existing A3 distinction: no RPC under journal/deployment/recorder/generation/effect locks; allow only the fixed qualifier/unit-control operations while F/B/W maintenance exclusion is held, after proving the invoked unit/control path never needs F/B/W or lifecycle locks. All unrelated RPC remains outside every lock. If an absolute prohibition includes F/B/W, revise A3 §4's ownership/control interface first; do not release package exclusion or insert a relay to disguise the wait | No unit-control integration or A3d activation from this document; continuous exclusion and the no-cycle rule are both retained |
+| Q1 — Meaning of no RPC under locks at the unit-control handoff | Distinguish local state/journal critical sections from continuous maintenance-exclusion leases: prohibit RPC under journal append, recorder, generation and effect locks; explicitly review only the fixed unit-control path under F/B/W and the already qualified issuer/provider observations under its own D. Prove every permitted callee has no back edge or reacquisition of caller-owned locks. All unrelated RPC remains outside every lock. If the prohibition is absolute for F/B/W or issuer D, revise A3 §4 and the existing qualifier interface first; never release exclusion or insert a relay to disguise the wait | No unit-control integration or A3d activation from this document; continuous exclusion and the no-cycle rule are both retained |
 | Q2 — Initial baseline import and checkpoint/restore custody | Use a separate explicit owner-qualified install/import of the existing A3b accepted baseline and retain a trusted journal checkpoint with its deployment identity. Never seed from current state. If coherent rollback resistance is required, select independent custody outside the restored failure domain; otherwise disclose A3's existing limitation | Empty/unknown/lost baseline or fork refuses; no invented restore floor or bootstrap acceptance |
 | Q3 — Concrete interlock, recovery fencing and notification receipt interfaces | Publish closed bounded authenticated schemas and validators for worker/qualifier quiescence, admission/P7 version continuity, affected-set/response evidence and both transport receipts. Preserve original clock/deadline across retries/boots and reserve durable incident capacity. Missing delivery capability blocks deployment; pending delivery blocks readiness but not immediate P7 response | No marker-only interlock, timer-only worker takeover, unverified delivery or unimplemented guard claim |
 | Q4 — Capacity, serialization pins and deployment budgets | Review these exact hard limits and source-pinned A3b byte mappings against the supported Ubuntu/profile archive sizes before implementation. Retain the profile's separately confirmed freshness/P7 values and finite operation deadlines. A larger encoding/store limit or revised payload serialization requires explicit versioned review, not a fallback | Saturation/unsupported payload refuses; these bounds never authorize a destructive capacity fix or permissive timeout |

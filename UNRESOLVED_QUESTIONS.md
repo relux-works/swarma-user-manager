@@ -60,11 +60,13 @@ the blanket no-RPC-under-locks rule at unit control; Q2 selects explicit initial
 baseline import/checkpoint custody; Q3 publishes authenticated interlock,
 recovery-fencing and both notification receipt interfaces; Q4 reviews hard
 budgets and source-pinned byte encodings; Q5 owns migration and disposable root
-qualification. Recommendation Q1 permits only the fixed control path under
-package/worker exclusion after proving no lock cycle, with no RPC under
-journal/deployment/recorder or lifecycle locks. This is an unapproved
-recommendation, not a waiver; an absolute prohibition needs A3's interface
-revised before implementation. Neither a surviving pin/Q nor a published
+qualification. Recommendation Q1 distinguishes short local journal/state
+critical sections from maintenance-exclusion leases; review only the fixed
+unit-control path under package/worker exclusion and already qualified issuer
+observations under its own deployment lease, proving no lock back edges.
+This is an unapproved recommendation, not a waiver; an absolute prohibition
+needs both A3's and the existing qualifier's interfaces revised before
+implementation. Neither a surviving pin/Q nor a published
 canonical example can admit; generation/effect/qualification codecs stay closed.
 
 There is no open choice about account pooling, station-readable private keys
