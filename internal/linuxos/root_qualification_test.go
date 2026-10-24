@@ -187,14 +187,18 @@ func qualificationRollback(ctx context.Context, d *Dir, s *qualificationState, p
 	return qualificationWrite(d, *s)
 }
 
-// PENDING by default: this opt-in root test exercises actual account commands,
+// Opt-in only: this root test exercises actual account commands,
 // root:S ownership, ACL/capability rejection, an unlinked fd, pidfd stop/absence
 // and bounded home/account/group rollback. It never activates a generation or
 // alters sudoers, cron/at policy, systemd/logind configuration or live stations.
+// Owner-run evidence: apply, verify and rollback passed on 2026-10-24 for
+// commit 4639d69, test-binary SHA-256
+// 402f02c3ea3e2110ab6408e0ed575ef5e8d81249cced6b0381093fd7f7255858.
+// That pass covers only that exact build on one host; default execution skips.
 func TestRootQualification(t *testing.T) {
 	mode := os.Getenv("LINUXOS_ROOT_QUALIFICATION")
 	if mode == "" {
-		t.Skip("PENDING: owner reviews root-qualification.sh, supplies root-owned unused-range/reservation policy and approved test-binary SHA, then runs apply, verify, rollback")
+		t.Skip("OPT-IN: owner reviews root-qualification.sh, supplies root-owned unused-range/reservation policy and approved test-binary SHA, then runs apply, verify, rollback")
 	}
 	if os.Geteuid() != 0 || mode != "apply" && mode != "verify" && mode != "rollback" {
 		t.Fatal("root and explicit qualification mode required")
