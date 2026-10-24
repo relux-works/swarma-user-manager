@@ -14,6 +14,9 @@ func TestReviewArtifactRetryDurability(t *testing.T) {
 	for _, directory := range []bool{false, true} {
 		t.Run(map[bool]string{false: "file", true: "directory"}[directory], func(t *testing.T) {
 			path := t.TempDir()
+			if e := os.Chmod(path, 0700); e != nil {
+				t.Fatal(e)
+			}
 			d, e := os.Open(path)
 			if e != nil {
 				t.Fatal(e)
