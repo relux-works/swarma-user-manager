@@ -66,6 +66,12 @@ and increase the entry budget instead of retrying identical zero-work batches.
 `CheckMailSpoolAbsent` reads protected `/etc/login.defs` and proves the derived
 mailbox absent through its qualified immediate parent. MAIL_DIR takes precedence
 over home-relative MAIL_FILE; the default is `/var/mail/<name>`. Trusted
+configuration uses a conservative shadow 4.17.4 parser subset: ASCII printable
+bytes plus tab/LF, physical lines at most 1022 bytes, full-line comments only,
+one unquoted path token, and no duplicate mailbox keys. Hash suffixes, either
+quote, trailing text or other unsupported bytes refuse before path observation;
+the checker never strips a suffix to manufacture a different path. The spec
+links the reference source and its last-definition-wins rule. Trusted
 `MailSpoolPolicy` supplies bounded work, all station UID/GID intervals and an
 exclusive system-ID boundary (default 1000). Only this mailbox check admits
 root:mail 2775: the named local mail GID must be system-scoped outside every

@@ -20,7 +20,7 @@ func TestMailSpoolConfiguration(t *testing.T) {
 		{"directory", "MAIL_DIR /srv/mail\n", "/srv/mail/worker-test"},
 		{"file", "MAIL_FILE .mail\n", "/srv/homes/worker-test/.mail"},
 		{"nested-file", "MAIL_FILE mail/inbox\n", "/srv/homes/worker-test/mail/inbox"},
-		{"precedence", "MAIL_FILE .mail\nMAIL_DIR /srv/mail # comment\n", "/srv/mail/worker-test"},
+		{"precedence", "MAIL_FILE .mail\n# MAIL_DIR takes precedence\nMAIL_DIR /srv/mail\n", "/srv/mail/worker-test"},
 		{"duplicate", "MAIL_DIR /srv/mail\nMAIL_DIR /srv/mail\n", ""},
 		{"duplicate-file", "MAIL_FILE .mail\nMAIL_FILE .other\n", ""},
 		{"empty", "MAIL_DIR\n", ""},

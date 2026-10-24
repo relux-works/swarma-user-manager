@@ -270,7 +270,24 @@ spool is absent. Read `login.defs` through the same protected, bounded,
 no-follow configuration reader: `MAIL_DIR/<derived-name>` takes precedence,
 otherwise `MAIL_FILE` is relative to the derived home, with default
 `/var/mail/<derived-name>` when neither is set. Duplicate or malformed mailbox
-settings refuse. Absence requires a protected existing immediate parent and
+settings refuse. The checker supports a conservative subset of shadow 4.17.4's
+[non-ECONF parser](https://github.com/shadow-maint/shadow/blob/4.17.4/lib/getdef.c#L535-L588):
+ASCII printable bytes, space/tab/LF only; every physical line is at most 1022
+bytes excluding LF, including comments and unrelated keys, to fit its 1024-byte
+`fgets` buffer. Full-line comments may follow space/tab indentation. Mailbox
+settings require one nonempty unquoted path token after an exact key separated
+by space/tab; leading/trailing space/tab is allowed. Hashes anywhere in a value,
+either quote, trailing text, CR/other controls and non-ASCII refuse before any
+absence observation. The reference recognizes comments only at the first
+non-space/tab character (lines 565–579); it retains unquoted suffix text and
+handles double quotes rather than treating `#` suffixes as comments. Each parsed
+definition replaces its predecessor via
+[putdef_str](https://github.com/shadow-maint/shadow/blob/4.17.4/lib/getdef.c#L371-L401)
+(lines 399–400), so the reference's last parsed definition wins; this checker
+refuses duplicates, including identical ones. Unsupported syntax never falls
+back to a different mailbox path.
+
+Absence requires a protected existing immediate parent and
 ENOENT for the no-follow leaf; an unsafe/missing parent or any present object
 (including a symlink) fails the postcondition. Recheck the protected configuration
 after the absence observation. A failed mailbox postcondition returns the proved
