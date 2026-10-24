@@ -177,8 +177,9 @@ automatic pin protocol nor host qualification. Before deployment:
   five-minute future-Date skew remains unconfirmed and cannot yet admit proof.
 - Qualify the complete independently held verifier/decoder closure, pinned key
   validity/revocation policy, exact Ubuntu/archive/package mapping, and native
-  hook/ownership/exclusion behavior. A mixed-repository invocation also needs
-  the reviewed composition adapter; the current bundle verifies one index.
+  hook/ownership/exclusion behavior. The multi-repository composition library
+  covers the finite approved source set; its actual deployed profile still
+  requires explicit qualification.
 - Implement the A3 §4 maintenance journal and qualifier lock handoffs, candidate
   diff checks, accepted frontier, original evidence retention and boot binding.
 - Integrate authenticated admission/containment and owner/curator pending-delivery

@@ -80,6 +80,16 @@ A batch may contain a recorded unpack/configure transition, but its final
 snapshot must be fully configured and trigger-free. Each invocation needs its
 own retained installed/payload evidence, not just today's endpoint bytes.
 
+`VerifyRepositories`/`VerifyRepositoryBatch` additionally compose up to three
+preapproved repository identities in one invocation or ordered batch. Every
+eligible package must have exactly one approved source; all source proofs must
+pass. Package/leaf high-water baselines remain global, while release high-water
+marks remain separate per source. Evidence parts bind the entire original
+invocation/profile, so a filtered subset cannot stand in for the transaction.
+Unknown, swapped, missing and replayed source proofs refuse without partial
+output. `TestUpdateMultipleRepositoryChains` exercises two signed suites in one
+invocation using the same qualified signing authority.
+
 The `.deb` reader checks the ar envelope, control identity and bounded tar
 members without executing scripts. Plain/gzip archives use the standard library;
 xz/zstd members require a separately pinned, unchanged `dpkg-deb` executable and
@@ -183,7 +193,7 @@ custody remain unqualified. No root action or package mutation was performed.
 |---|---|---|
 | `UpdateUnpackagedLeafRefused` | Mapping/ownership and authenticated regular payload checks; `TestVerifierRefusals/UpdateUnpackagedLeafRefused` | Native complete ownership/alias/root qualification pending |
 | `UpdateInstalledChecksumMismatchRefused` | Required installed MD5, independent SHA-256 and optional dpkg SHA-256; checksum subtests in `TestVerifierRefusals` | Caller must retain actual descriptor-bound installed objects under exclusion |
-| `UpdateArchiveChainBreakRefused` | Signature, exact index size/SHA, exact stanza/archive and control identity; index/deb/control subtests | Current bundle verifies one approved repository/index; mixed-repository invocations require a reviewed composition adapter |
+| `UpdateArchiveChainBreakRefused` | Signature, exact index size/SHA, exact stanza/archive and control identity; index/deb/control subtests | `VerifyRepositories`/`VerifyRepositoryBatch` compose the finite approved source set; `TestUpdateMultipleRepositoryChains` covers distinct suites and per-source replay |
 | `UpdateUnsignedOrExpiredRefused` | Signer/algorithm policy, Date/expiry/skew/time/release high-water; time/trust subtests | Pinned public timeconf source behind interface; SystemRunner/CollectorEntry embedding pending; unknown/untrusted source refuses |
 | `UpdateKeyringOrVerifierDriftRefused` | Held pinned tool/keyring/dependency checks; keyring/verifier subtests | Independently held complete tool closure requires root qualification |
 | `UpdateDowngradeRefused` | Debian ordering and archive identity, per-invocation batch chronology; `TestDebianVersionOrdering`, `TestUpdateBatchChronology` | High-water acceptance belongs to the next slice |

@@ -144,8 +144,11 @@ func makeTar(t *testing.T, files map[string][]byte) []byte {
 	return out.Bytes()
 }
 func makeDeb(t *testing.T, name, version, arch string, data []byte) []byte {
-	ctrl := makeTar(t, map[string][]byte{"control": []byte(fmt.Sprintf("Package: %s\nVersion: %s\nArchitecture: %s\n", name, version, arch)), "md5sums": []byte(fmt.Sprintf("%x  usr/lib/fixture\n", md5.Sum(data)))})
-	payload := makeTar(t, map[string][]byte{"usr/lib/fixture": data})
+	return makeDebAt(t, name, version, arch, data, "usr/lib/fixture")
+}
+func makeDebAt(t *testing.T, name, version, arch string, data []byte, leaf string) []byte {
+	ctrl := makeTar(t, map[string][]byte{"control": []byte(fmt.Sprintf("Package: %s\nVersion: %s\nArchitecture: %s\n", name, version, arch)), "md5sums": []byte(fmt.Sprintf("%x  %s\n", md5.Sum(data), leaf))})
+	payload := makeTar(t, map[string][]byte{leaf: data})
 	var b bytes.Buffer
 	b.WriteString("!<arch>\n")
 	for _, m := range []struct {
