@@ -129,14 +129,19 @@ The [macOS draft](spec/stations-macos-v0.md) preserves shared lifecycle and
 journal guarantees; it does not qualify an OS adapter. [Read-only observations](spec/stations-macos-facts.md)
 on macOS 27.0.1/26A434 dated 2026-10-24 settle diagnostic details only. Native
 qualification and mutation remain PENDING-VERIFY; root fixtures remain
-PENDING-HOST. P5 settles scope to explicitly named trusted tasks with soft
-limits (hard-limit tasks refused there or run on Linux). P7 settles immediate
-new-start closure on revocation and verified narrowing or stop within a
-published deadline; mechanisms and deadline still require qualification.
+PENDING-HOST. P5' makes macOS a full station platform alongside Linux, using
+[the normative parity matrix](spec/platform-parity.md) and required-guarantee
+declarations instead of task-name lists. Missing/unverified guarantees refuse;
+qualified weaker guarantees require exact authenticated operator acceptance and
+visible matrix/boundary-receipt/scheduler disclosure. Compensation never silently
+becomes equality. P7 retains immediate new-start closure on revocation and
+verified narrowing or stop within the original published deadline; mechanisms
+and deadline still require qualification.
 
 The recommendations below are proposals for resolving M1–M7, not approvals or
-new owner decisions. P5 and P7 retain their settled scope; the recommended
-mechanisms, profiles and procedures remain unselected and unqualified.
+new owner decisions. P5' supersedes the former named-task scope; P7 retains
+its settled response obligation. Recommended mechanisms, profiles and
+procedures remain unselected and unqualified.
 
 | Gate | Open decision/evidence after F1–F8 | Safe state |
 |---|---|---|
@@ -145,8 +150,27 @@ mechanisms, profiles and procedures remain unselected and unqualified.
 | M3 — Shared platform binding and revocation | Recommendation: jointly publish typed OpenDirectory/dyld/boot/launchd and latest-invocation proof; diagnostic print/PID/exit fields are insufficient. Resolve P7 with the finite deadline, clock and suspend/wake semantics, triggering event, affected-work set, response owner, verified-narrowing preconditions and stop-completion evidence. Restart, resume or failed narrowing MUST NOT restart the response clock | Linux codec unchanged; immediate new-start closure under P7; no macOS issuer/reader or running-work admission before qualification |
 | M4 — Cleanup/stop coverage | Recommendation: publish complete credential (real/effective/saved UID), holder, respawn and Mach scopes, actual per-user /var/folders mapping including stale UUID mappings, detached storage and every outside-home provider. Diagnostic ps/SysV/cron views are insufficient; unknown ownership never authorizes deletion | No removal/reuse from incomplete evidence; bump stays closed |
 | M5 — Native journal/durability | Recommendation: jointly qualify native reader/writer locking, sync/publication/crash semantics, original budgets and external restore custody with direct consumers. APFS metadata observations do not establish these guarantees | No production journal writer/consumer claim |
-| M6 — Key, root qualification and task scope | Recommendation: select the root-test host/procedure separately; publish task names/soft bounds, qualify admission and static UID-range deny, and retain the shared Keymaker pre-active provision/confirm activation gate. P5 is settled scope: explicitly named trusted soft-limit tasks; hard-limit tasks refuse or use Linux, with no waiver | `user.bump` closed; no mutations, execution or hard-limit claim from read-only facts |
+| M6 — Key, root qualification and guarantee admission | Select the root-test host/procedure separately; qualify static UID-range deny, required-guarantee admission and explicit weaker-property disclosure/acceptance under [P5' and the parity matrix](spec/platform-parity.md). No task-name publication gate remains. macOS station keys and Matrix login are absent until a separate, currently unplanned key-service port; retain the shared pre-active provision/confirm activation gate | `user.bump` closed; no mutations, execution, keys/login or hard-limit claim from read-only facts; scheduler/receipt integration remains unimplemented here |
 | M7 — Authentic update/requalification | Recommendation: publish authentic publisher/target/trust policy, update-writer exclusion including automatic/MDM/background updates, installed seal/Cryptex evidence, authorized pin-transition and interrupted failure/rollback rules. Qualify reviewed root verification and the five named MacUpdate cases, each paired with an authentic pre-approved-target control; history and a reported sealed snapshot are insufficient | No automatic acceptance of unverified updates; admission closed and P7 response applies on revocation |
+
+### Platform parity publication gates
+
+The [guarantee registry and declaration interface](spec/platform-parity.md#1-guarantee-identifiers)
+are normative requirements for the scheduler and versioned execution-boundary
+receipt, owned outside this implementation. Publish their encodings, finite
+bounds, operator-acceptance authority and task/profile/revision binding, then
+qualify the [positive and negative acceptance cases](spec/platform-parity.md#7-acceptance-cases-and-open-publication-gates).
+The Execution Isolation Contract must reuse these identifiers; station parts
+require station-contract acceptance. No pool-specific rows are defined here.
+
+Dedicated APFS volume quota per station, launchd resource limits/background
+scheduling and memory watcher/stop are candidates, all PENDING-VERIFY. Qualify
+scope, escape/exhaustion/failure, overshoot and completed-stop bounds before
+publishing any weaker compensation. Root host/procedure, native issuer/durability
+and provider/cleanup gates remain open. macOS `keys.station` and `matrix.login`
+are absent: no agent key, registration/message signatures or station login JWT.
+The separate key-service port is unplanned; the server-side registrar and numeric
+UID-map schema need no parity change. Account provisioning cannot fill this gap.
 
 ## Boot service validation after the openat2 sandbox correction
 

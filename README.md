@@ -62,11 +62,19 @@ managed-home, create/retire, journal and qualification guarantees to a proposed
 macOS backend. It includes the [Verified platform tools matrix](spec/stations-macos-v0.md#9-verified-platform-tools),
 with limited read-only observations dated 2026-10-24 on macOS 27.0.1/26A434;
 mutation and native qualification remain PENDING-VERIFY, with root obligations
-PENDING-HOST. Execution scope is explicitly named trusted tasks with soft
-resource limits; hard-limit tasks refuse there or use Linux. Qualification
-revocation immediately closes new starts and requires verified narrowing or
-stop within a published deadline. This draft delivers no backend code or
-execution authority. Linux behavior remains unchanged;
+PENDING-HOST. Under P5', macOS is a full station platform alongside Linux;
+there is no task-name allowlist. The normative [platform parity matrix](spec/platform-parity.md)
+publishes [stable guarantee identifiers and definitions](spec/platform-parity.md#1-guarantee-identifiers),
+per-platform mechanisms/proofs and the task declaration consumed by the scheduler.
+Missing required guarantees refuse placement; a qualified weaker guarantee needs
+explicit operator acceptance and visible disclosure in the matrix, boundary
+receipt and scheduler output. Soft compensation is never hard-limit equality.
+Native Xcode/simulator, Keychain, launchd and TCC capabilities have their own rows.
+macOS station keys and Matrix login are absent pending a separate key-service
+port. Scheduler/receipt integration is a normative requirement, not implemented
+here. Qualification revocation immediately closes new starts and requires
+verified narrowing or stop within the original published deadline. This draft
+delivers no backend code or execution authority. Linux behavior remains unchanged;
 production bump stays closed pending the shared Keymaker contract.
 
 The [read-only facts and retained query template](spec/stations-macos-facts.md)

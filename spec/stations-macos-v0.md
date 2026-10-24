@@ -17,13 +17,19 @@ caller roles, quotas, exact-ID deduplication and cleanup admission remain those
 of stations-v0 §§1–3. An account marked `active` is locally provisioned only;
 this slice installs no launcher, caller sudo rule or station execution authority.
 
-**Owner scope P5:** a macOS station MUST run only explicitly named trusted tasks
-whose accepted resource limits are **soft**. A task requiring **hard** resource
-limits MUST be refused on macOS or run on a qualified Linux backend. Trust alone
-does not admit an unnamed task, and soft watcher/stop behavior MUST NOT be
-represented as a hard ceiling. The allowed task names and their soft-limit
-bounds require publication before execution admission. This decision selects
-scope only; it supplies no new launcher, resource mechanism or qualification.
+**Owner scope P5':** macOS is a full station platform alongside Linux, with
+no task-name allowlist. The maintained normative [platform parity matrix](platform-parity.md)
+owns stable guarantee identifiers, per-platform status/mechanism/proof, and the
+task's required-guarantee declaration. The scheduler MUST refuse a placement
+whose required guarantee is absent, unverified or outside the qualified scope;
+a qualified weaker guarantee requires explicit authenticated operator acceptance
+for that exact task/profile under the matrix's rules. Baseline safety gates and
+non-waivable hard bounds remain mandatory. Every weaker property MUST be visible
+in the matrix, execution-boundary receipt and scheduler output. Soft limits
+remain compensation, never equality to a hard ceiling. Xcode/simulator,
+Keychain, launchd and TCC are capability rows, not exceptions. These are normative
+scheduler/receipt interface requirements owned elsewhere, not implemented here;
+this decision supplies no launcher, resource mechanism or host qualification.
 
 PENDING-VERIFY: the macOS sudo/caller-identity adapter MUST establish the same
 trusted transition, protected principal/generation, clean environment, empty
@@ -493,7 +499,7 @@ changing unrelated accounts, jobs, privacy permissions or policy:
 | Home and state protection | Real root/station identities on the approved APFS profile; descriptor-bound ACL/xattr/flags/alias tests, safe publication/quarantine and no station replacement of managed ancestors |
 | Authority durability | Shared journal/effect genesis and floor custody, actual native reader/writer exclusion, bounded flush/publication, crash recovery and external restore fences |
 | Maintained qualification | Root-controlled immutable inputs, writer/upgrade exclusion, authenticated current-boot launchd renewal, failed-latest-invocation refusal, no-launcher and independently qualified static range deny |
-| Task admission and revocation | Explicit named trusted-task/soft-limit controls, hard-limit refusal or Linux placement, immediate new-start closure on revocation and verified narrowing or completed stop by the published deadline |
+| Task admission and revocation | P5' required-guarantee declaration checked against the qualified parity matrix; absent/pending rows refuse, weaker rows need exact authorized acceptance and visible matrix/boundary-receipt/scheduler disclosure; immediate new-start closure on revocation and verified narrowing or completed stop by the original published deadline |
 | Cleanup coverage | Complete process and persistence exclusion through the quiet interval, all outside-home providers, repeated inventory after yields and no deletion based on numeric UID alone |
 | Safe failure/recovery | Admission remains closed; rollback uses exact receipt ownership, dependency order and renewed quiescence. Nonpassing/malformed protected issuer records may preserve rollback identity but never authorize pin/verify |
 
@@ -512,6 +518,7 @@ setup errors and skipped plants prove nothing.
 | `MacRecordCollisionRefused` — existing local/search UID/name/UUID adopted or overwritten | Fresh exclusive reservation creates only its receipted record; duplicate-ID retry returns the same result |
 | `MacPartialCreateHeld` — an interrupted multi-attribute write becomes active or retry adopts a foreign record | Resume/compensate only matching receipt identities, preserving another account |
 | `MacHiddenLoginStillDenied` — hiding/shell value substitutes for password/SSH/session/token denial | Fixture proves each denial independently; authorized noninteractive fixture work demonstrates the account is usable only through the admitted path |
+| `MacReadIsolationRefused` — station reads another station's private data or platform secrets through group, ACL, alias or metadata mistakes | The same qualified station can read its own approved work/controls; controlled foreign reads refuse without disclosing content |
 | `MacManagedMutationDenied` — station changes bytes, ACL/xattr/flags, root-owned entry or ancestor through write/delete/rename/hardlink/alias | Same station writes its own work file; weakened owned fixture demonstrates each attempted mutation is exercised |
 | `MacMetadataInspectionComplete` — inherited ACE, unknown `com.apple.*`, denied enumeration or APFS alias passes unnoticed | Fully inspected approved-metadata fixture passes; each planted violation produces its intended refusal without publishing content |
 | `MacSearchPartialRefused` — cache hit or one good node hides duplicate UID, missing node or collector error | Complete local/allowed-provider observations agree; a known unavailable-node plant refuses |
@@ -519,7 +526,9 @@ setup errors and skipped plants prove nothing.
 | `MacStopRespawnRefused` — double fork, UID-changing credentials, launchd respawn or partial visibility permits deletion | Owned controlled descendants are stopped and complete fresh absence holds through the quiet interval |
 | `MacExternalResidueRefused` — temp/cache, root-owned scheduled job, live unlinked IPC/socket/Mach residue or unknown scope admits reuse/bump | Remove only planted fixture-owned residue and repeat complete coverage; Keymaker bump gate still stays closed |
 | `MacIssuerBindingRefused` — manual issuer, stale boot/PID, replaced plist or failed latest job appears qualified | Actual bound successful renewal admits the next local gate, without launching a station |
-| `MacTaskScopeRefused` — unnamed/untrusted or hard-limit-required task admitted on macOS, or soft observation presented as a hard guarantee | Explicit named trusted soft-limit task passes the admission fixture; hard-limit tasks refuse or use independently qualified Linux placement |
+| `MacTaskScopeRefused` — missing required guarantee admits, task name bypasses capability checks, or a valid task refuses solely for lacking a listed name | Valid declared guarantees on a qualified profile admit regardless of task name; absent/pending requirements refuse or use independently qualified placement; a non-waivable hard bound cannot be softened |
+| `MacWeakerGuaranteeRefused` — a watcher/per-process limit/volume-only quota is silently reported as equal or used without exact operator acceptance | A qualified weaker profile plus a valid task/generation/profile-bound operator act exposes every weaker row in the matrix, boundary receipt and scheduler output; absent/pending mechanisms still refuse |
+| `MacCapabilityRequirementRefused` — Xcode/simulator, Keychain, launchd or TCC capability bypasses common isolation, limits or qualification | Explicit native capability and all common declared/baseline guarantees qualify together; missing key-service/Matrix-login dependencies remain absent |
 | `MacRevocationDeadlineRefused` — new start after revocation, unverified narrowing, clock reset by restart/resume/failed narrowing or unnarrowed work surviving the published response deadline | Valid qualification admits the controlled task; revoke and prove immediate start closure plus verified narrowing or bounded completed stop against the original clock, including failed-narrowing and absent-deadline refusal |
 | `MacJournalCrashRestoreRefused` — partial sync, stale tail/floor or coherent restore bypasses fences | Shared vectors/canonical bytes and qualified native ordering pass; independent restore custody remains required |
 | `MacUpdateTrustRefused` — invalid or unknown trust/revocation evidence admits an update or publishes a qualified record | Authentic pre-approved-target control with complete valid trust/revocation evidence reaches the next qualification gate; each invalid/unknown variant leaves admission closed and publishes no qualified record |
@@ -571,8 +580,9 @@ not evidence for this build, a production backend or permission to execute it.
 ## 10. Architect decisions and publication gates
 
 The recommendations below are proposals for resolving M1–M7, not approvals or
-new owner decisions. P5 and P7 retain their settled scope; the recommended
-mechanisms, profiles and procedures remain unselected and unqualified.
+new owner decisions. P5' supersedes the former named-task scope; P7 retains
+its settled response obligation. Recommended mechanisms, profiles and
+procedures remain unselected and unqualified.
 
 | Gate | Required decision/evidence | State until resolved |
 |---|---|---|
@@ -581,7 +591,7 @@ mechanisms, profiles and procedures remain unselected and unqualified.
 | M3 — Shared platform binding and revocation | Recommendation: jointly publish typed OpenDirectory/dyld/boot/launchd and latest-invocation proof; diagnostic print/PID/exit fields are insufficient. Resolve P7 with the finite deadline, clock and suspend/wake semantics, triggering event, affected-work set, response owner, verified-narrowing preconditions and stop-completion evidence. Restart, resume or failed narrowing MUST NOT restart the response clock | Linux codec unchanged; immediate new-start closure under P7; no macOS issuer/reader or running-work admission before qualification |
 | M4 — Cleanup/stop coverage | Recommendation: publish complete credential (real/effective/saved UID), holder, respawn and Mach scopes, actual per-user /var/folders mapping including stale UUID mappings, detached storage and every outside-home provider. Diagnostic ps/SysV/cron views are insufficient; unknown ownership never authorizes deletion | No removal/reuse from incomplete evidence; bump stays closed |
 | M5 — Native journal/durability | Recommendation: jointly qualify native reader/writer locking, sync/publication/crash semantics, original budgets and external restore custody with direct consumers. APFS metadata observations do not establish these guarantees | No production journal writer/consumer claim |
-| M6 — Key, root qualification and task scope | Recommendation: select the root-test host/procedure separately; publish task names/soft bounds, qualify admission and static UID-range deny, and retain the shared Keymaker pre-active provision/confirm activation gate. P5 is settled scope: explicitly named trusted soft-limit tasks; hard-limit tasks refuse or use Linux, with no waiver | `user.bump` closed; no mutations, execution or hard-limit claim from read-only facts |
+| M6 — Key, root qualification and guarantee admission | Select the root-test host/procedure separately; qualify static UID-range deny, required-guarantee admission and explicit weaker-property disclosure/acceptance under [P5' and the parity matrix](platform-parity.md). No task-name publication gate remains. macOS station keys and Matrix login are absent until a separate, currently unplanned key-service port; retain the shared pre-active provision/confirm activation gate | `user.bump` closed; no mutations, execution, keys/login or hard-limit claim from read-only facts; scheduler/receipt integration remains unimplemented here |
 | M7 — Authentic update/requalification | Recommendation: publish authentic publisher/target/trust policy, update-writer exclusion including automatic/MDM/background updates, installed seal/Cryptex evidence, authorized pin-transition and interrupted failure/rollback rules. Qualify reviewed root verification and the five named MacUpdate cases, each paired with an authentic pre-approved-target control; history and a reported sealed snapshot are insufficient | No automatic acceptance of unverified updates; admission closed and P7 response applies on revocation |
 
 These gates do not reopen one-account-per-station, platform-owned managed
