@@ -19,7 +19,9 @@ retains allocation/execution authority; the station registry owns station
 records; Keymaker owns keys and signing; the broker owns credentials. The helper
 MUST NOT become a second composer, signer, scheduler or launcher. It installs
 scaffolding and asks no synchronous platform service questions under its state
-lock. Composition uses Curator's separately authorized installer boundary.
+lock. The [accepted local-v0 sources](station-effect-receipts.md#6-accepted-local-v0-authority-sources)
+select root-approved skeleton content for this no-launcher slice; the later
+Curator composition provider uses the same authority-source interface.
 
 | In v0 | Explicitly outside this slice |
 |---|---|
@@ -52,17 +54,22 @@ Retain `swarma-user-manager helper-op/1` and `helper-result/1` from
 helper does not have. `user.bump` follows the decided same-account model in §6; its implementation
 and cross-service qualification gates remain closed until satisfied.
 
-Only a root-configured dispatcher principal may create, retire or bump its own
-agent allocations, within its configured quota. The principal's protected
-service identity and generation MUST still match policy; numeric UID reuse
-cannot inherit caller authority. An installer is not an agent caller. This
-slice publishes no operator-entry adapter and admits no operator override;
-operator/service functions in helper.md remain later gated work.
+Only a root-configured dispatcher principal may create or bump its own agent
+allocations, within its configured quota. In local v0, only the configured
+operator principal may retire, through an authenticated, exact-content-confirmed
+per-act export waiver ([authority sources](station-effect-receipts.md#6-accepted-local-v0-authority-sources)).
+Dispatcher retirement with export confirmation comes later. The principal's
+protected service identity and generation MUST still match policy; numeric UID
+reuse cannot inherit authority. An installer is not an agent caller. The
+operator entry and confirmation adapter remain deployment gates; no generic
+waiver field or station/operator privilege is inferred from request content.
 
 The binary is root-owned at a fixed absolute path with protected ancestors,
 not setuid. Its sudoers rule permits only that path with empty arguments, e.g.
 `<dispatcher> ALL=(root) NOPASSWD: /opt/swarma/libexec/swarma-user-manager ""`.
-This is sudoers notation, not a shell command. No station UID has this rule.
+This is dispatcher sudoers notation, not a shell command. The later qualified
+operator entry uses authenticated, non-cached sudo and exact-act confirmation
+from helper.md §11, never the dispatcher NOPASSWD rule. No station UID has either rule.
 Require effective UID zero, trusted sudo transition and decimal `SUDO_UID`;
 refuse `not_root`, `not_invoked_by_sudo`, `argv_not_allowed` or
 `caller_role_not_permitted` as appropriate. Clear the environment, fix cwd,
@@ -147,8 +154,12 @@ argument comparison in this closed slice is structural comparison of the
 validated field names, JSON types and exact ASCII string values, independent
 of JSON whitespace/member order. No generic JSON serializer's output is a
 signature or journal canonicalization. The effect store and generation chain
-must reconcile after a crash before any new work. Their concrete on-disk
-encoding remains a publication gate; generation records alone cannot dedup.
+must reconcile after a crash before any new work. The proposed
+[OS-effect receipt contract](station-effect-receipts.md#2-versioned-effect-store-encoding)
+publishes a versioned encoding, deterministic write-ahead object names,
+receipt-backed recovery and quarantine. It resolves Q3's effect-encoding
+specification slice; review, implementation/migration and qualification remain
+gates. Generation records alone cannot dedup or prove OS-object ownership.
 
 For `(caller principal,request_id)`, same operation/arguments resume admitted
 pending work or return the recorded terminal result plus current target state.
@@ -165,7 +176,11 @@ quiet interval, deletion entries/depth/work and cooperative elapsed time.
 No implicit numeric defaults are admitted. Yield the lock between deletion
 batches, retaining the generation/UID reservation, quota charge and a durable
 in-flight marker. Revalidate identity, quiescence and trusted descriptors on
-reacquisition. Never wait on another platform service under this lock.
+reacquisition. The [backend lock protocol](station-effect-receipts.md#4-lock-discipline-and-evidence-freshness)
+requires releasing both effect and generation locks for NSS, account tools,
+service calls and backend I/O, then revalidating exact journal tail, policy
+versions and maintained fences before commit. The current core must change
+before linking such a backend; a stored clean verdict is not current authority.
 
 | Effect step | Required generation append, in order | Required evidence before proceeding |
 |---|---|---|
@@ -206,6 +221,8 @@ Reject NSS ambiguity, range overlaps with services/test identities, pending
 reservations and failed cleanliness scans. Never recycle a number until the
 whole range cycle and helper.md's platform/system/per-user temporary-area UID
 hygiene checks pass. Bump retains its reservation and is not allocation reuse.
+Continuation uses [exact reserved-identity restoration](station-effect-receipts.md#5-exact-reserved-identity-restoration),
+never another allocator call; NSS supplies collision evidence, not ownership.
 
 Derive `worker-<label>` and `<platform-root>/workers/worker-<label>`;
 no name or home collision outside the ledger is adopted. Use a fresh CSPRNG
@@ -241,15 +258,18 @@ objects this effect proves it created, in reverse dependency order (§3).
 
 ## 5. Retirement and local cleanup
 
-Admission requires an authoritative dispatcher cleanup record: launches,
-a2a/runner ingress and home-mutating leases fenced; work stopped or stop
-admitted; all required durable handover/output custody and separate broker
-unbind obligations satisfied. In this slice, no workspace/export workflow is
-implemented: only an allocation with authoritative evidence of no such pending
-obligation is admissible. Missing evidence refuses `cleanup_not_admitted`.
-A lifecycle caller cannot invent an operator waiver or use retirement to
-silently discard unresolved work. The exact cleanup admission adapter remains
-Q3; until it exists, no deployed retirement is claimed.
+Admission requires the [local-v0 cleanup source](station-effect-receipts.md#6-accepted-local-v0-authority-sources):
+an authenticated configured operator's exact-generation, exact-content-confirmed
+retire act, durably recording its explicit per-act export-obligation waiver.
+Launch/runner ingress and home-mutating leases must be fenced and work stopped
+or stop admitted. V0 has no export confirmation; unexported work can be
+destroyed under this explicit operator act. Dispatcher retirement is not yet
+admitted. Missing/unknown evidence refuses `cleanup_not_admitted`; caller text
+cannot supply a waiver. Broker unbind is a separate effect; unresolved cleanup
+obligations remain durable and direct operator retirement may proceed through
+broker outage as helper.md §4.4 specifies. The concrete operator-entry,
+confirmation and cleanup/handoff adapters remain Q3 deployment gates; until
+they exist, no deployed retirement is claimed.
 
 1. Persist the effect and append `retiring` under the shared lock. Consumers
    MUST refuse new starts, leases and signing for this generation from this
@@ -357,15 +377,17 @@ inventory is unknown/unreadable, refuse
 the fenced cleanup handoff, preserve reservations and evidence, and never
 append successor `active` or reactivate the old generation.
 
-The caller then uses ordinary retirement (§5) followed by a separately
-admitted new account (§4). The protected handoff links the terminal bump to
-that same owner's `user.retire` of the original target generation, allowing
+The configured operator then uses retirement (§5) followed by a separately
+admitted new dispatcher allocation (§4). The protected handoff links the
+terminal bump's original allocation owner to the authorized operator's
+`user.retire` of the original target generation, allowing
 only forward teardown of its still-reserved account. It does not adopt an
 unrelated pending effect or report account absence from a `removed` label.
 Finish any already-started successor rollback as `creating -> removed`;
 continue an old `retiring -> removed` only after ordinary retirement cleanup,
 and never repeat or reverse an already durable `removed` append. The cleanup
-admission/effect encoding remains Q3; without that adapter, refuse cleanup
+admission and protected handoff adapter remain Q3; the separate OS receipt
+encoding does not supply them. Without that adapter, refuse cleanup
 admission rather than guessing a target. New allocation obeys the normal
 round-robin and `uid_not_clean` rules; do not immediately reuse the dirty UID.
 
@@ -487,8 +509,11 @@ In sticky native directories do not expose a writable temporary file or
 unchecked destination; the root-owned parent and live lease interlock prevent
 station replacement of the final root-owned entry.
 
-Curator publishes a consistent release under a closed/absent home lease and a
-shared composition/start interlock; an unknown or live lease refuses mutation.
+For local v0, the root-approved skeleton source supplies the pinned release
+under the no-launcher fence and a closed/absent home lease. Its complete
+manifest and source protection are verified before publication; an unknown or
+live lease refuses mutation. The later Curator provider publishes a consistent
+release under a shared composition/start interlock through the same interface.
 Per-file atomic replace alone is not an atomic multi-file release. Persist
 composition intent and publish the pin last only after all controls are durable;
 partial updates keep admission closed until recovered. Only an already-approved
@@ -544,6 +569,12 @@ retirement wins. A locally coherent whole-machine rollback remains outside
 local detectability; an in-domain hash chain is not an anti-rollback oracle.
 
 ## 9. Qualification plan: negative cases first
+
+The [OS-effect qualification plan](station-effect-receipts.md#7-qualification-plan-negative-cases-first)
+adds paired negative/positive cases for unreceipted writes, collisions,
+quarantine, exact restoration, unlocked I/O and stale prepared evidence.
+Those backend/root cases remain PENDING; a matching intent alone never proves
+ownership. Their crash continuations retain the lifecycle ordering in §3.
 
 These are required test specifications, **not passing implementation tests**.
 Run only narrow cases in an isolated fixture. The unprivileged runner plays
@@ -941,9 +972,12 @@ is claimed by syntax checking or by the script's non-root refusal control.
 Independent spec review and content review precede implementation. The bump
 model and journal-over-ledger authority are decided. The reviewed
 `gen-journal/1` adapter alignment, ordered Keymaker pre-active provisioning
-and confirmation contract (§6.2), complete UID inventory backend, effect and
-cleanup admission encodings, Curator composition/start interlock and per-runtime
-mapping, configured bounds and Linux qualification evidence are explicit gates.
+and confirmation contract (§6.2), complete UID inventory backend, review and
+implementation of the [versioned OS receipt contract](station-effect-receipts.md),
+cleanup admission/handoff encoding, authenticated operator entry, versioned
+policy and all six accepted local-v0 authority-source adapters, configured
+bounds and Linux qualification evidence are explicit gates. Curator
+composition/start interlock and per-runtime mapping remain later launch gates.
 A fixture pass does not close an integration gate. Record every unrun test as
 PENDING with its missing dependency; do not publish production readiness or
 claim a local root fixture qualifies a complete station.
