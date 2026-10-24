@@ -17,12 +17,13 @@ import (
 )
 
 type Recorder struct {
-	anchor string
-	path   string
-	dir    *os.File
-	owner  uint32
-	limits Limits
-	mu     sync.Mutex
+	syncFile func(*os.File) error
+	anchor   string
+	path     string
+	dir      *os.File
+	owner    uint32
+	limits   Limits
+	mu       sync.Mutex
 }
 
 func protected(f *os.File, owner uint32, dir bool) error {
@@ -88,7 +89,7 @@ func openRecorder(path string, owner uint32, anchor string, l Limits) (*Recorder
 		d.Close()
 		return nil, ErrStore
 	}
-	return &Recorder{anchor: anchor, path: path, dir: d, owner: owner, limits: l}, nil
+	return &Recorder{syncFile: (*os.File).Sync, anchor: anchor, path: path, dir: d, owner: owner, limits: l}, nil
 }
 func (r *Recorder) Close() error { return r.dir.Close() }
 func (r *Recorder) file(name string) (*os.File, error) {
@@ -217,6 +218,9 @@ func (r *Recorder) load() ([]event, error) {
 	if _, e = replay(events); e != nil {
 		return nil, e
 	}
+	if e = r.durable(events); e != nil {
+		return nil, e
+	}
 	return events, nil
 }
 func (r *Recorder) append(events []event, v event) error {
@@ -251,7 +255,28 @@ func (r *Recorder) append(events []event, v event) error {
 	if n, e := f.Write(b); e != nil || n != len(b) {
 		return ErrStore
 	}
-	if f.Sync() != nil || f.Close() != nil || r.dir.Sync() != nil {
+	if r.syncFile(f) != nil || f.Close() != nil || r.syncFile(r.dir) != nil {
+		return ErrStore
+	}
+	return nil
+}
+
+// A complete but previously unacknowledged append may still be in page cache.
+// Re-establish file and parent durability before any retry/scan acknowledges it.
+// A torn/corrupt event never reaches this recovery path.
+func (r *Recorder) durable(events []event) error {
+	for _, event := range events {
+		f, e := r.file(fmt.Sprintf("%020d.json", event.Sequence))
+		if e != nil {
+			return e
+		}
+		e = r.syncFile(f)
+		ce := f.Close()
+		if e != nil || ce != nil {
+			return ErrStore
+		}
+	}
+	if r.syncFile(r.dir) != nil {
 		return ErrStore
 	}
 	return nil

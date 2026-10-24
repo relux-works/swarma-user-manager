@@ -262,3 +262,39 @@ func TestUpdateCapturedChecksumEntry(t *testing.T) {
 		}
 	}
 }
+
+// Claim: a complete event left visible by a sync failure is not durable evidence
+// until recovery actually syncs it and its directory; retries do not duplicate
+// the terminal event. This injects I/O acknowledgement failure, not power loss.
+func TestRecorderSyncFailureCannotAcknowledge(t *testing.T) {
+	r := recorderFixture(t)
+	ctx := context.Background()
+	s := sampleSnapshot("1")
+	id, e := r.Begin(ctx, "boot-a", "invocation", "sync-failure", ID{}, s)
+	if e != nil {
+		t.Fatal(e)
+	}
+	r.syncFile = func(f *os.File) error {
+		if f.Name() == "event" || filepath.Base(f.Name()) == "00000000000000000002.json" {
+			return os.ErrPermission
+		}
+		return f.Sync()
+	}
+	if e = r.End(ctx, id, s, "complete"); e != ErrStore {
+		t.Fatal("failed sync acknowledged", e)
+	}
+	if _, e = r.Scan(ctx, s); e != ErrStore {
+		t.Fatal("unsynced terminal event accepted", e)
+	}
+	r.syncFile = (*os.File).Sync
+	if e = r.End(ctx, id, s, "complete"); e != nil {
+		t.Fatal("durable retry", e)
+	}
+	if got, e := r.Scan(ctx, s); e != nil || len(got.Pending) != 1 {
+		t.Fatal("recovery queue", got, e)
+	}
+	entries, e := os.ReadDir(r.path)
+	if e != nil || len(entries) != 3 {
+		t.Fatal("duplicate retry effect", e, len(entries))
+	}
+}

@@ -28,7 +28,10 @@ Limits bound journal bytes, entry count and snapshot members. Exhaustion refuses
 without pruning history. Each new event uses exclusive no-follow creation,
 file sync then parent sync before success. A partial/unsynced event is not a
 successful allocation or completion; a retained torn file blocks recovery.
-Conflicting reuse cannot append, and identical end events append no second effect.
+Before acknowledging a retry or scan, every complete retained event and the
+parent are synced again: page-cache visibility after a failed sync is not
+durability. Torn/corrupt events are held, never repaired or truncated. Conflicting
+reuse cannot append, and identical end events append no second effect.
 
 Boot scan compares the full current package/leaf snapshot with the final retained
 snapshot and returns every complete unreconciled invocation, in aggregate order.
