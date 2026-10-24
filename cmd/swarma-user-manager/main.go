@@ -19,14 +19,25 @@ func run() int {
 	sudoEnvironment := sudoEnvironmentPresent(os.Environ())
 	os.Clearenv()
 	syscall.Umask(0077)
+	maintenance, _ := maintenanceMode(in.Args)
+	diagnosticMode := maintenance || len(in.Args) == 1 && in.Args[0] == "qualify-preflight"
 	if os.Chdir("/") != nil {
+		if diagnosticMode {
+			return qualificationEntryRefusal("working_directory")
+		}
 		_ = json.NewEncoder(os.Stdout).Encode(manager.PublicRefusal(nil, "state_unavailable"))
 		return 1
 	}
 	// Backend subprocesses use fixed absolute paths and an empty environment.
 	if os.Setenv("PATH", "/usr/sbin:/usr/bin:/sbin:/bin") != nil {
+		if diagnosticMode {
+			return qualificationEntryRefusal("environment")
+		}
 		_ = json.NewEncoder(os.Stdout).Encode(manager.PublicRefusal(nil, "state_unavailable"))
 		return 1
+	}
+	if len(in.Args) == 1 && in.Args[0] == "qualify-preflight" {
+		return runQualificationPreflight(ownInvocation)
 	}
 	if selected, boot := maintenanceMode(in.Args); selected {
 		return runQualification(in, realUID, sudoEnvironment, boot, ownInvocation)

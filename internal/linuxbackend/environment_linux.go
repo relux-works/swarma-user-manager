@@ -119,29 +119,33 @@ type deploymentGuard struct {
 }
 
 func (g *deploymentGuard) Check() error {
-	if g.ctx.Err() != nil || g.inner.Check() != nil {
+	fail := func(check string) error {
+		qualification.NoteRefusal(g.ctx, "guard", check)
 		return qualification.ErrRequired
+	}
+	if g.ctx.Err() != nil || g.inner.Check() != nil {
+		return fail("lease")
 	}
 	p, e := manager.LoadCandidatePolicy()
 	if e != nil || !sameJSON(p, g.h.policy) {
-		return qualification.ErrRequired
+		return fail("policy_changed")
 	}
 	_, b, e := loadDeployment(g.ctx, p)
 	if e != nil || string(b) != string(g.manifest) {
-		return qualification.ErrRequired
+		return fail("deployment_changed")
 	}
 	if g.exclusive && g.maintenance != nil {
 		b, e = readPrivate(g.ctx, filepath.Join(p.Root, "lib/user-manager/maintenance.json"), 1024)
 		if e != nil || string(b) != string(g.maintenance) {
-			return qualification.ErrRequired
+			return fail("maintenance_marker")
 		}
 	} else if linuxos.ProtectedAbsent(filepath.Join(p.Root, "lib/user-manager/maintenance.json")) != nil {
-		return qualification.ErrRequired
+		return fail("maintenance_marker")
 	}
 	// Only local protected reads: no collector, unit query, NSS or other RPC.
 	fp, e := g.h.localFingerprint(g.ctx, p)
 	if e != nil || fp != g.fingerprint {
-		return qualification.ErrRequired
+		return fail("local_fingerprint")
 	}
 	return nil
 }
@@ -159,13 +163,20 @@ func (g *deploymentGuard) bindNamespace(runtime linuxos.NSSRuntime) error {
 
 func (g *deploymentGuard) Release() { g.inner.Release() }
 func (h *ProductionEnvironment) Acquire(ctx context.Context, exclusive bool) (manager.ActivationGuard, error) {
+	fail := func(check string, e error) (manager.ActivationGuard, error) {
+		qualification.NoteRefusal(ctx, "acquire", check)
+		if e == nil {
+			e = qualification.ErrRequired
+		}
+		return nil, e
+	}
 	m, raw, e := loadDeployment(ctx, h.policy)
 	if e != nil {
-		return nil, e
+		return fail("deployment_manifest", e)
 	}
 	lease, e := linuxos.AcquireDeployment(ctx, m.LockPath, exclusive)
 	if e != nil {
-		return nil, e
+		return fail("deployment_lock", e)
 	}
 	g := &deploymentGuard{inner: lease, h: h, manifest: raw, exclusive: exclusive, ctx: ctx}
 	ok := false
@@ -180,12 +191,12 @@ func (h *ProductionEnvironment) Acquire(ctx context.Context, exclusive bool) (ma
 			var v maintenanceRecord
 			boot, e := manager.BootIdentity()
 			if e != nil || qualification.DecodeClosed(marker, &v, 1024) != nil || v.Format != "station-maintenance/1" || v.BootID != boot || !v.AdmissionStopped {
-				return nil, qualification.ErrRequired
+				return fail("maintenance_marker", nil)
 			}
 			g.maintenance = marker
 		} else {
 			if !errors.Is(x, unix.ENOENT) || !qualification.BootIssuance(ctx) || linuxos.ProtectedAbsent(m.MaintenancePath) != nil {
-				return nil, qualification.ErrRequired
+				return fail("maintenance_marker", nil)
 			}
 			// At boot, a missing/previous-boot record already closes every direct
 			// admission. A same-boot retry still requires explicit stopped admission.
@@ -194,21 +205,21 @@ func (h *ProductionEnvironment) Acquire(ctx context.Context, exclusive bool) (ma
 				q, e := qualification.Decode(prior, h.policy)
 				boot, e2 := manager.BootIdentity()
 				if e != nil || e2 != nil || q.BootID == boot {
-					return nil, qualification.ErrRequired
+					return fail("prior_record", nil)
 				}
 			} else if !errors.Is(x, unix.ENOENT) {
-				return nil, qualification.ErrRequired
+				return fail("prior_record", nil)
 			}
 		}
 	} else if linuxos.ProtectedAbsent(m.MaintenancePath) != nil {
-		return nil, qualification.ErrRequired
+		return fail("maintenance_marker", nil)
 	}
 	g.fingerprint, e = h.localFingerprint(ctx, h.policy)
 	if e != nil {
-		return nil, e
+		return fail("local_fingerprint", e)
 	}
 	if g.Check() != nil {
-		return nil, qualification.ErrRequired
+		return fail("deployment_guard", nil)
 	}
 	ok = true
 	return g, nil

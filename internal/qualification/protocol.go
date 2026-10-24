@@ -45,31 +45,32 @@ type Protocol struct {
 // Issue withdraws the prior record before any checks. A failed retry cannot
 // preserve an earlier success. It never mutates policy or repairs deployment.
 func (s Protocol) Issue(ctx context.Context, p manager.Policy, bootMode bool) (Record, error) {
+	fail := func(stage, check string) (Record, error) { return Record{}, refuse(ctx, stage, check) }
 	if s.Deployment == nil || s.Storage == nil || s.Boot == nil || s.Now == nil || manager.ValidatePolicy(p) != nil || !p.NoLauncher {
-		return Record{}, ErrRequired
+		return fail("policy", "protocol_configuration")
 	}
 	if bootMode {
 		if !p.Qualified || !validHash(p.QualificationDigest) || p.QualificationDigest == ZeroDigest {
-			return Record{}, ErrRequired
+			return fail("policy", "boot_policy")
 		}
 	} else if p.Qualified || p.QualificationDigest != ZeroDigest {
-		return Record{}, ErrRequired
+		return fail("policy", "initial_policy")
 	}
 	issuer := Issuer{Mode: "initial"}
 	if bootMode {
 		if s.Invocation == nil {
-			return Record{}, ErrRequired
+			return fail("issuer", "invocation_id")
 		}
 		id, e := s.Invocation(ctx)
 		if e != nil || !ValidInvocationID(id) {
-			return Record{}, ErrRequired
+			return fail("issuer", "invocation_id")
 		}
 		issuer = Issuer{Mode: "boot", InvocationID: id}
 	}
 	ctx = context.WithValue(ctx, bootIssuanceKey{}, bootMode)
 	g, e := s.Deployment.Acquire(ctx, true)
 	if e != nil || g == nil {
-		return Record{}, ErrRequired
+		return fail("acquire", "deployment_guard")
 	}
 	defer g.Release()
 	if scope, ok := g.(interface {
@@ -77,43 +78,71 @@ func (s Protocol) Issue(ctx context.Context, p manager.Policy, bootMode bool) (R
 	}); ok {
 		ctx = scope.WithContext(ctx)
 	}
-	if g.Check() != nil || s.Storage.Withdraw(ctx) != nil {
-		return Record{}, ErrRequired
+	if g.Check() != nil {
+		return fail("guard", "deployment_guard")
+	}
+	if s.Storage.Withdraw(ctx) != nil {
+		return fail("withdraw", "prior_record")
 	}
 	boot, e := s.Boot()
 	if e != nil || !bootID.MatchString(boot) {
-		return Record{}, ErrRequired
+		return fail("boot", "identity")
 	}
 	i, names, e := s.Deployment.Capture(ctx, p)
-	if e != nil || i.Validate(p) != nil || !validNames(names, p) {
-		return Record{}, ErrRequired
+	if e != nil || i.Validate(p) != nil {
+		return fail("capture", "inputs")
+	}
+	if !validNames(names, p) {
+		return fail("capture", "names")
 	}
 	digest, e := i.Digest()
-	if e != nil || bootMode && digest != p.QualificationDigest {
-		return Record{}, ErrRequired
+	if e != nil {
+		return fail("digest", "inputs_digest")
+	}
+	if bootMode && digest != p.QualificationDigest {
+		return fail("digest", "pin_mismatch")
 	}
 	checks, e := s.Deployment.CheckAll(ctx, p, i, names)
-	if e != nil || !checks.Passing() {
-		return Record{}, ErrRequired
+	if e != nil {
+		return fail("checks", "observation")
+	}
+	if !checks.Passing() {
+		labels := []string{"policy_protection", "source_configuration", "approved_skeleton", "cron_denial", "at_denial", "allow_precedence", "no_linger", "account_directory", "dynamic_user_ranges", "no_launcher", "account_restrictions"}
+		for n, c := range checks.values() {
+			if c.Result != "ok" || c.Reason != "" {
+				return fail("checks", labels[n])
+			}
+		}
+		return fail("checks", "observation")
 	}
 	final, finalNames, e := s.Deployment.Capture(ctx, p)
-	if e != nil || !equal(i, final) || !equal(names, finalNames) || g.Check() != nil || ctx.Err() != nil {
-		return Record{}, ErrRequired
+	if e != nil || !equal(i, final) || !equal(names, finalNames) {
+		return fail("recapture", "inputs_changed")
+	}
+	if g.Check() != nil || ctx.Err() != nil {
+		return fail("recapture", "guard_changed")
 	}
 	current, e := s.Boot()
 	if e != nil || current != boot {
-		return Record{}, ErrRequired
+		return fail("recapture", "boot_changed")
 	}
 	q := Record{Issuer: issuer, Format: "station-qualification/2", Inputs: i, InputsDigest: digest, StationNames: names, Checks: checks, BootID: boot, IssuedAtUnixMS: s.Now().UnixMilli()}
 	raw, e := Canonical(q)
-	if e != nil || q.Validate(p) != nil || int64(len(raw)) > p.Limits.RecordBytes {
-		return Record{}, ErrRequired
+	if e != nil {
+		return fail("record", "encoding")
+	}
+	if q.Validate(p) != nil {
+		return fail("record", "validation")
+	}
+	if int64(len(raw)) > p.Limits.RecordBytes {
+		return fail("record", "size")
 	}
 	if s.Storage.Publish(ctx, raw) != nil {
-		return Record{}, ErrRequired
+		return fail("publish", "durable_record")
 	}
 	return q, nil
 }
+
 func equal(a, b any) bool {
 	x, e := Canonical(a)
 	y, f := Canonical(b)
