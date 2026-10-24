@@ -470,7 +470,7 @@ Provider implementations still require their own publication/qualification.
 
 | Purpose | Binding local-v0 source and admission rule |
 |---|---|
-| `host_qualification` | Root installs the protected policy and the reviewed binary issues the canonical root-run qualification record in §6.3. The policy pins its digest beside `qualified`; admit only when record protection, all checks, deployed policy/binary/backend/skeleton, boot and current NSS configuration match. A flag alone never admits; mismatch or unavailable evidence refuses `qualification_required`. |
+| `host_qualification` | Root installs the protected policy and the reviewed binary issues the canonical root-run qualification record in §6.3. The policy pins the qualification-input digest beside `qualified`; admit only when record protection, all checks, deployed policy/binary/backend/skeleton, boot and current NSS configuration match. A flag alone never admits; mismatch or unavailable evidence refuses `qualification_required`. |
 | `cleanup_admission` | Only the configured authenticated operator principal may retire in v0. Each exact-generation retire request is the explicit direct-operator act in helper §4.4: authentication, exact-content confirmation and durable per-act export-obligation waiver. No generic waiver field or standing discard is added. Dispatcher retirement with confirmed export is later work. |
 | `managed_content` | A root-owned approved-skeleton directory, with protected ancestors and manifest/content digest pinned in policy. Verify the complete selected skeleton and approved bytes, not a caller path or freshly trusted digest of live home content. The Curator composition/start interlock provider comes later; no launcher is admitted meanwhile. |
 | `persistence_denial` | The root step installs cron.deny/at.deny coverage for station accounts in the configured range and ensures no linger. Verify exact station **names** because these deny files are not numeric UID filters, allow-file precedence, no user-manager/session persistence and no linger. Each reserved name must be covered before activation; a host qualification flag cannot excuse a missing new-name entry. |
@@ -520,18 +520,20 @@ external restore custody and receipt ownership rules remain independent gates.
 ### 6.3 Root issuer and closed qualification record
 
 The reviewed installed `swarma-user-manager` binary supplies the maintenance
-entry `swarma-user-manager qualify`. It is invoked only from the operator's
-trusted root maintenance entry with admission stopped and exclusive deployment
+entry `swarma-user-manager qualify`. The operator invokes it from the trusted
+root maintenance entry; the root boot unit invokes its closed `qualify --boot`
+mode below. Both require admission stopped and exclusive deployment
 configuration ownership. Dispatcher/station callers cannot invoke it; their
 empty-argv sudo rules do not widen. `qualify` is not a `helper-op/1` operation.
 It reads fixed protected configuration, never caller-supplied paths, digests,
 check verdicts or environment authority. It verifies every host prerequisite
 of §6.2, writes evidence, and does not repair policy, account or persistence
 state, run a launcher, or set `qualified`. The disposable primitive
-`root-qualification.sh` does not issue this record. This maintenance entry and
-its production reader are specified here, not implemented or qualified.
-Checks run on the unqualified candidate policy; they do not require an already
-passing host record or invoke lifecycle admission to bootstrap the issuer.
+`root-qualification.sh` does not issue this record. These maintenance/boot
+entries and their production reader are specified here, not implemented or
+qualified. Initial operator checks may run on an unqualified candidate policy
+without a prior passing host record or lifecycle admission; boot mode instead
+requires an already installed input pin as specified below.
 
 The protected policy root determines the fixed record location
 `<protected-root>/lib/user-manager/qualification/record.json`. The directory is
@@ -540,16 +542,17 @@ single-link root:root 0600 file. No symlink traversal, untrusted ancestor or
 alternate caller location is accepted. Publish with exclusive same-filesystem
 temporary creation, file fsync, atomic replacement and parent fsync; collision
 with an unrelated temporary object refuses. A failed or interrupted issuance
-cannot install a passing pin. Keep failed diagnostics in protected maintenance
-logs; never record account hashes, secrets or raw tool output in the record.
+cannot publish a passing record or install a pin. Keep failed diagnostics in
+protected maintenance logs; never record account hashes, secrets or raw tool output in the record.
 
 The closed record has exactly these mandatory fields, encoded with the pinned
 registrar CCJ-1 implementation, no trailing LF and no second canonicalizer:
 
 ```text
-Q = {format:"station-qualification/1",policy_digest,binary_digest,backend_digest,
-     skeleton_digest,nss_configuration:{passwd,group,shadow},nss_modules,
-     station_range:{uid_min,uid_max,gid_min,gid_max},station_names,
+I = {format:"station-qualification-inputs/1",policy_digest,binary_digest,
+     backend_digest,skeleton_digest,nss_configuration:{passwd,group,shadow},
+     nss_modules,station_range:{uid_min,uid_max,gid_min,gid_max}}
+Q = {format:"station-qualification/2",inputs:I,inputs_digest,station_names,
      checks,boot_id,issued_at_unix_ms}
 nss_modules entry = {name,implementation_digest,configuration_digest,
                      uid_ranges,gid_ranges}
@@ -563,12 +566,15 @@ each check = {result,reason}
 All objects are closed. Reject unknown/duplicate members, omitted fields,
 noncanonical bytes, unknown format, invalid types, overflow and exceeded finite
 bounds from the reviewed policy. Digests are lowercase 64-hex SHA-256 strings.
+The previous `station-qualification/1` record is not accepted under this
+input-pin contract; no silent reinterpretation or boot fallback is allowed.
 Range endpoints are inclusive nonzero UID/GID integers within the existing
 policy bounds; arrays of ranges are sorted and nonoverlapping. `station_range`
 is exactly the installed policy's two ranges, not an observed free subset.
-`station_names` is a sorted unique array of the complete protected
-policy-derived station-name coverage being checked, including all reserved
-names. It does not exempt a later new name from fresh denial checks.
+`station_names` is per-run check coverage outside I, a sorted unique array of
+the complete protected policy-derived coverage being checked, including reserved
+names. Its derivation is policy-bound; new reservations do not change the
+qualification-input pin or exempt a new name from fresh denial checks.
 `boot_id` is the current kernel boot identifier; `issued_at_unix_ms` is a
 positive integer audit timestamp, not an authority TTL or monotonic fence.
 Each result is exactly `ok`, `failed` or `unknown`; `ok` has empty `reason`,
@@ -597,34 +603,93 @@ backend/configuration digest; changed backend dependencies are a version change.
 after complete protected no-follow verification of that skeleton. Equal path
 names or a digest freshly taken from station content cannot substitute.
 
-The two-way policy/record binding must not require a hash fixed point. For
-this record only, let P0 be the validated closed deployed policy with exactly
-`qualified=false` and `qualification_digest` set to 64 zeroes, all other fields
-unchanged. Define:
+The policy pins the stable qualification **inputs**, not the boot identifier,
+time or check results. For qualification only, let P0 be the validated closed
+deployed policy with exactly `qualified=false` and `qualification_digest` set
+to 64 zeroes, all other fields unchanged. Define:
 
 ```text
-Q.policy_digest = SHA256(CCJ({domain:"station-qualification-policy/1",policy:P0}))
-P.qualification_digest = SHA256(CCJ(Q))
+I.policy_digest = SHA256(CCJ({domain:"station-qualification-policy/1",policy:P0}))
+Q.inputs_digest = SHA256(CCJ(I))
+P.qualification_digest = SHA256(CCJ(I))
 ```
 
-The operator installs P0 with admission stopped, runs `qualify`, verifies a
-passing protected record and matching inputs, then atomically installs the
-same policy with only its record pin and `qualified=true` changed. These two
-attestation fields are the only normalization exception. Any other policy
-change, including source/module configuration, ranges, skeleton selection,
-operator pins or backend version, requires re-qualification; so does changing
-the executable or approved skeleton. Reboot requires a new same-boot record.
-The full policy digest in §4/§6.1 authority evidence is unchanged by this
-qualification-specific formula: prepared authority still binds the actual
-complete current policy, including its pin and flag. Installing a new pin
-therefore invalidates already prepared authority evidence.
+These two attestation fields are the only policy normalization exception.
+The operator installs P0 with admission stopped, runs `qualify`, verifies the
+passing protected candidate record and all its inputs, then atomically installs
+the same policy with only `qualification_digest=Q.inputs_digest` and
+`qualified=true` changed. No whole-record hash is the policy pin. The selected
+input format binds normalized policy, executable, backend, approved skeleton,
+complete station ranges, exact recorded NSS lines and module dependency/
+configuration closure including proven dynamic UID/GID ranges. Boot ID, audit time and fresh
+check outcomes are outside I and must never be omitted from the per-boot record.
+Changing any input requires operator re-qualification and a new pin; automation
+cannot choose a replacement pin or trust freshly discovered changed inputs.
+The full policy digest in §4/§6.1 authority evidence still binds the actual
+complete current policy, including the pin/flag. Installing a new pin invalidates
+already prepared authority evidence. The source's fresh evidence also binds the
+complete retained Q bytes/digest and current boot; a stable input pin is not a
+stable authority token.
 
-`host_qualification` validates policy and record protection and canonical
-format, `qualified=true`, the exact record digest pin, the normalized policy
-digest, current executing/installed binary, backend and approved skeleton,
-exact range, every `ok` check, current boot and the current NSS inputs in §6.4.
-Read/revalidate under the §4 configuration exclusion and exact-basis protocol;
-protection or digests checked once at startup are insufficient. Missing,
+#### Boot oneshot
+
+The reviewed deployment installs `swarma-user-manager-qualify.service`, a
+root-owned systemd `Type=oneshot` unit with protected root-owned ancestors,
+unit/drop-ins and executable, none writable by a non-root principal. It runs
+as root with a fixed absolute executable
+and exactly `qualify --boot`, a sanitized fixed environment and no caller paths.
+This is the same reviewed binary and complete check implementation as operator
+`qualify`; `--boot` restricts it to renewal of an already qualified input pin.
+The boot mode requires `qualified=true` and a nonzero valid existing pin; it
+cannot bootstrap an unqualified installation. Dispatcher/station sudo rules
+still permit neither maintenance mode.
+
+Order the oneshot after the local filesystems and protected configuration/
+account databases are available and before every platform service that can
+invoke the manager. Those consumers must require successful completion, not
+merely start ordering. Before admission, including direct invocations, require
+successful completion of the latest current-boot unit invocation as well as
+the current-boot record gate. Unknown unit completion is unknown qualification;
+a visible record during publication is not readiness. After the operator
+installs a new pin, the unit must succeed before admission is reopened. No network dependency,
+network access or fallback fetch is permitted; qualify the unit's enforced
+network denial and local-only NSS dependencies. An NSS module/check requiring
+network cannot pass this boot contract. A network outage is not permission to
+skip a source or substitute local-only agreement.
+
+Under the deployment exclusion, boot mode reconstructs current I from trusted
+inputs and requires its digest to equal the unchanged policy pin **before**
+publication; it runs every §6.3 check again and revalidates all inputs before
+atomic publication. Only a fully passing run writes a new protected Q at the
+fixed record location, with current `boot_id`, audit time, full inputs and
+per-check results. The only product write is that record and its owned
+publication temporary file; protected diagnostics go to the unit journal/log.
+It never edits policy, pin, skeleton, NSS or account/persistence configuration.
+An input mismatch, failed/unknown check, unsupported dependency or interrupted
+run publishes no record and exits nonzero; the failed unit and bounded reason
+are visible in systemd status/journal. Do not expose credentials or raw account
+material. Keep manager readiness closed as `qualification_required`; only an
+operator can reconcile changed inputs and install a new pin. A retry requires
+admission stopped and withdrawal of any prior issuer-owned current-boot record
+before checking, so failure cannot leave a previous run's success admissible.
+
+Every boot therefore re-checks the host. A successful reboot changes Q's boot,
+time and fresh observations, while leaving **policy bytes and input pin
+unchanged**. This removes the routine manual root step without weakening boot
+binding or allowing changed inputs to qualify themselves. If the unit has not
+run, is still running or has failed, no valid current-boot record exists:
+absence or an old-boot record refuses; no previous-boot or flag-only fallback.
+Unit packaging, ordering and network denial remain pending implementation and
+executable qualification, not an installed capability claimed by this spec.
+
+`host_qualification` requires successful current-boot unit completion and
+validates policy/record protection and canonical format,
+`qualified=true`, `SHA256(CCJ(Q.inputs))=Q.inputs_digest=P.qualification_digest`,
+current deployed inputs equal to Q.inputs, every `ok` check and the current boot.
+A record from another boot cannot admit even with the same input pin. Runtime
+also checks the current NSS inputs in §6.4 and the current executing/installed
+binary, backend and approved skeleton under §4's configuration exclusion and
+exact-basis protocol; startup-only comparisons are insufficient. Missing,
 unreadable, malformed, failed, unknown, drifted or mismatched evidence yields
 `unknown` (or a conclusive `refuse`) and the public gate refuses
 `qualification_required` before lifecycle writes/activation. Keep reservations
@@ -728,10 +793,13 @@ not crash or fail setup; every positive neighbor must run in the same harness.
 | `UnknownAuthorityCannotQualify`: missing/unknown source, wrong source label/version, stale evidence or cached clean cannot open production or bump activation | `ExplicitAuthorityEvidenceValidated`: exact accepted version-bound provider evidence passes only its qualified scope | Treat unknown evidence as admitted; assert refusal before write and before any successor selection. The real provider positive awaits implementation/root qualification. |
 | `PolicyProtectionQualificationRefused`: policy missing, non-root-owned, group-writable or otherwise broader than 0600 refuses `qualification_required` before writes | `ProtectedPolicyQualifies`: root:root 0600 policy and ancestors, pinned source versions and successful root-run evidence qualify | Ignore the file owner/mode or trust flag alone; the named negative must fail on forbidden admission. |
 | `PersistenceQualificationRefused`: missing cron.deny entry, missing at.deny entry, effective allow-file admission or lingering enabled refuses `qualification_required` | `CompletePersistenceDenialQualifies`: exact reserved names denied in both mechanisms, effective precedence verified and no linger; host and per-target checks pass | Omit each deny/linger check separately; the corresponding named case must fail on forbidden qualification/activation. |
-| `QualificationRecordMismatchRefused`: change record bytes/pin, policy content, executable/backend or skeleton after issuance; refuse `qualification_required` before writes | `QualificationRecordMatches`: protected canonical record with matching deployment, boot, all checks `ok` and exact pin admits only the host gate | Skip one binding comparison; the corresponding negative must fail on forbidden admission. Normalize only the two attestation fields; changing another policy field must invalidate qualification. |
+| `QualificationRecordMismatchRefused`: alter record inputs/digest, policy input pin, policy content, executable/backend or skeleton after issuance; refuse `qualification_required` before writes | `QualificationRecordMatches`: protected canonical record with matching deployment, boot, all checks `ok` and exact input pin admits only the host gate | Skip one binding comparison; the corresponding negative must fail on forbidden admission. Normalize only the two attestation fields; changing another policy field must invalidate qualification. |
 | `NSSLineDriftRefused`: change any recorded passwd/group/shadow line, including spacing or action clauses, after qualification; host and account-directory results become unknown | `NSSConfigurationMatches`: exact unchanged lines, qualified module configuration and complete local/NSS agreement permit the relevant observation | Ignore one database line or normalize whitespace; the named drift assertion must fail. Also plant a module configuration/range change while lines remain equal. |
 | `DynamicUserRangeOverlapRefused`: station UID or GID interval overlaps a configured NSS module dynamic interval, including a shared endpoint; qualification fails | `DynamicUserRangesDisjoint`: proven complete module ranges are disjoint from both station ranges; the immediately adjacent nonoverlapping boundary passes | Skip the overlap check, ignore GIDs or use exclusive endpoints; the corresponding case must fail. Unknown module ranges separately refuse rather than count as empty. |
 | `QualificationFlagWithoutRecordRefused`: set `qualified=true` with missing record, missing pin, unsafe record, nonpassing/missing check or another boot; refuse before any OS/lifecycle write | `QualifiedFlagWithPassingRecord`: root issuer's durable protected all-`ok` same-boot record, verified inputs and exact policy pin pass only host qualification | Admit from the flag alone or omit one record prerequisite; named negative fails on forbidden host admission. A passing host neighbor still needs fresh per-target checks. |
+| `PreviousBootQualificationRefused`: retain a passing previous-boot record with the unchanged input pin, or invoke before the oneshot completes; refuse `qualification_required` | `CurrentBootRequalified`: oneshot repeats all checks and publishes a fully passing current-boot record, admitting only host qualification | Drop the boot comparison or treat unit ordering/flag as readiness; named negative must fail on forbidden admission. Missing, running and failed oneshot neighbors stay closed, including a record already visible from an interrupted publication. |
+| `BootQualificationInputDriftRefused`: change any normalized policy, binary, backend, skeleton, range, NSS line or module-closure input before/during the boot run; exit nonzero, publish no new record and preserve policy/pin bytes | `BootQualificationInputsUnchanged`: identical pinned inputs and all checks passing publish a current-boot record | Automatically adopt/re-pin changed inputs or omit the final input recheck; assert no record publication and no policy mutation on failure, including a changed-input race. |
+| `RebootMustNotRepin`: boot renewal attempts to rewrite the policy/pin or accept cached previous-boot check results; reject the attempt | `RebootPinUnchanged`: successive boots rerun every check and produce distinct boot/time records with identical inputs digest and byte-identical policy | Pin SHA256 of the whole boot record, rewrite the pin or skip checks; assert policy bytes unchanged, every check executed, new boot recorded and the old record rejected. No boot here is an executed host test. |
 | `NonOperatorRetirementRefused`: dispatcher or wrong pinned operator cannot waive export or enter retirement; no cleanup writes | `ExplicitOperatorRetirementAdmitted`: exact authenticated/confirmed operator act journals its scoped export waiver and unresolved broker obligation before forward retirement | Reuse dispatcher authority or omit exact-act confirmation; named negative fails on unauthorized retirement. |
 | `PreactiveProcessIncident`: any station UID process before active prevents activation and leaves an incident/reservation | `NeverLaunchedInventoryClean`: no station process and complete accounted UID-object inventory permit only the locally provisioned active state | Treat no-launcher configuration as proof without inventory; named negative fails on active append. |
 
@@ -744,12 +812,16 @@ suites, not by an unrelated full-suite pass.
 
 ## 8. Implementation and review gates
 
-The current core's private effect lock spans backend calls; releasing only
-generation locks does not satisfy this contract. A backend adapter alone
-cannot repair it. Implement v2 persistence/migration, prepared-step scheduling,
-durable in-flight exclusion, fresh evidence validation and exact restoration
-before linking a real backend. Existing v1 fake-backend tests prove none of
-the OS receipt, lock-release or root qualification claims here.
+The landed v2 core uses unlocked preflight and per-effect flights: it persists
+intent/in-flight state under the effect lock, releases state locks for bounded
+backend/source work, then reacquires, reloads and revalidates the exact current
+basis before admitting a dependent step. Historical stopped-flight resolution
+and fresh authority remain separate. V2 persistence, flight scheduling and
+restoration boundaries exist. Injected-backend tests exercise these core
+contracts; production OS ownership, provider coverage, boot-unit enforcement
+and root qualification still need their own evidence. Linking a real backend still
+requires the corresponding reviewed implementation and qualification; no
+fake-backend pass closes those gates.
 
 Remaining gates: independent/content review of this contract; numeric bounds
 and capacity/progress qualification; protected maintenance admission and

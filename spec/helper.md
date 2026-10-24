@@ -54,7 +54,7 @@ Revisions 0.2–0.5 introduced the separate launcher, per-caller policy, account
 
 ## 1. Purpose
 
-**First station writer scope.** [Station accounts v0](stations-v0.md), §§1–3, defines the proposed closed Linux station-only subset of this broader design. Its explicit refusals and activation gates take precedence for that slice; later-phase contracts below remain design requirements, not available operations. In particular conversation recycle does not authorize account-generation reset, which remains pending curator ruling.
+**First station writer scope.** [Station accounts v0](stations-v0.md), §§1–3, defines the proposed closed Linux station-only subset of this broader design. Its explicit refusals and activation gates take precedence for that slice; later-phase contracts below remain design requirements, not available operations. Conversation recycle alone does not authorize account-generation reset. Q1 is decided: [station accounts v0 §6](stations-v0.md#6-same-account-generation-bump) specifies an explicitly admitted same-account bump with destructive reset, old-generation removal and fresh-generation re-admission; implementation, Keymaker/binding and qualification gates remain.
 
 Figure [M-UM1: privileged components and process boundaries](../diagrams/components.puml) maps the responsibilities below; it describes the design, not implemented components.
 

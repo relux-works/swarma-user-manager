@@ -97,8 +97,10 @@ accepted. The executable can refuse an unqualified host earlier.
 
 The [qualification issuer and account-directory contract](spec/station-effect-receipts.md#63-root-issuer-and-closed-qualification-record)
 specifies a root-only `swarma-user-manager qualify` maintenance entry, canonical
-digest-pinned evidence and exact recorded NSS configuration. That entry and its
-production reader remain unimplemented; a `qualified` flag alone never admits.
+input-pinned evidence, per-boot records and exact recorded NSS configuration.
+A root-owned networkless boot oneshot repeats every check without changing the
+pin. These entries and their production reader remain unimplemented; a
+`qualified` flag alone never admits.
 
 | Tool | Purpose | Command | Output |
 |---|---|---|---|
