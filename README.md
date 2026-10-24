@@ -227,3 +227,7 @@ The root qualification command above is its only supported entry, from the
 owner's trusted root shell. Keep the clean-launch prefix for `verify` and
 `rollback`; see the package README for the launcher trust boundary and pending
 privileged qualification.
+
+The [A3 evidence implementation](docs/update-evidence.md) documents the protected
+transaction recorder and its separate format; automatic pinning and deployment
+remain closed.
