@@ -138,6 +138,13 @@ func (r PathReader) Probe(ctx context.Context, path string) (PathProbe, error) {
 					return PathProbe{}, refusal("qualification_failed", "resolve_link", e)
 				}
 				target := string(b[:n])
+				// Lexical cleaning before walking links changes kernel '..'
+				// semantics. Refuse noncanonical targets; leading parent steps
+				// are safe because prefix is already resolved and protected.
+				// Join below only concatenates admitted canonical components.
+				if !loaderLinkTarget(target) {
+					return PathProbe{}, refusal("qualification_failed", "resolve_link_syntax", nil)
+				}
 				out.Links = append(out.Links, PathLink{filepath.Join(prefix, part), target})
 				if !filepath.IsAbs(target) {
 					target = filepath.Join(prefix, target)
@@ -158,6 +165,18 @@ func (r PathReader) Probe(ctx context.Context, path string) (PathProbe, error) {
 		}
 	}
 	return PathProbe{}, refusal("qualification_failed", "resolve_limit", nil)
+}
+
+func loaderLinkTarget(target string) bool {
+	if filepath.Clean(target) != target {
+		return false
+	}
+	for _, part := range strings.Split(target, "/") {
+		if part == "." {
+			return false
+		}
+	}
+	return true
 }
 
 // OpenArtifact accepts a canonical no-follow path; close its Directory after use.

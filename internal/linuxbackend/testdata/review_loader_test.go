@@ -3,8 +3,10 @@ package linuxos_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"github.com/relux-works/swarma-user-manager/internal/linuxbackend"
 	"github.com/relux-works/swarma-user-manager/internal/linuxos"
+	"github.com/relux-works/swarma-user-manager/internal/qualification"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -41,11 +43,12 @@ func reviewRunLoader(t *testing.T, runner, root string) string {
 	return string(b)
 }
 
-// Kernel path resolution processes '..' only after intermediate symlinks. Both
-// production capture and replay must either follow that object or refuse; a
-// lexical-clean decoy must never become the attested implementation bytes.
+// Native resolution establishes the dotdot witness independently. Unsupported
+// link targets refuse before authority; the simple-link control and a canonical
+// spelling of the real target admit. Real-target byte drift then refuses both
+// local replay and full capture, with no partial closure returned.
 func TestReviewLoaderSymlinkDotDot(t *testing.T) {
-	for _, bad := range []bool{false, true} {
+	for _, bad := range []bool{true, false} {
 		t.Run(map[bool]string{false: "control", true: "symlink-dotdot"}[bad], func(t *testing.T) {
 			ctx := context.Background()
 			f := newLoaderFixture(t)
@@ -78,17 +81,6 @@ func TestReviewLoaderSymlinkDotDot(t *testing.T) {
 				t.Fatal(e)
 			}
 			defer a.Directory.Close()
-			profile, files, digest, e := f.resolver(t, nil).Capture(ctx, []linuxos.ProtectedArtifact{a}, loaderLimits())
-			if e != nil {
-				t.Fatal("fixture capture", e)
-			}
-			if !linuxbackend.QualificationLoaderProfileValid(profile, 10000) {
-				t.Fatal("profile rejected before attack")
-			}
-			pinned := f.resolver(t, profile.Resolutions)
-			if e := pinned.Revalidate(ctx); e != nil {
-				t.Fatal("baseline replay", e)
-			}
 			runner := reviewLoaderRunner(t, f.root)
 			native := reviewRunLoader(t, runner, root)
 			want := "VALUE=1"
@@ -96,13 +88,37 @@ func TestReviewLoaderSymlinkDotDot(t *testing.T) {
 				want = "VALUE=2"
 			}
 			if !strings.Contains(native, want) {
-				t.Fatal("native positive", native)
+				t.Fatal("native witness absent", native)
+			}
+			profile, files, digest, e := f.resolver(t, nil).Capture(ctx, []linuxos.ProtectedArtifact{a}, loaderLimits())
+			if bad {
+				if !reviewLoaderOperation(e, "resolve_link_syntax") || files != nil || digest != "" {
+					t.Fatal("symlink-dotdot was not specifically refused", files, digest, e)
+				}
+				// Use an admitted spelling of the same real object for the byte-drift
+				// control; this never qualifies the unsupported target spelling.
+				if e = os.Remove(alias); e != nil {
+					t.Fatal(e)
+				}
+				if e = os.Symlink(actual, alias); e != nil {
+					t.Fatal(e)
+				}
+				profile, files, digest, e = f.resolver(t, nil).Capture(ctx, []linuxos.ProtectedArtifact{a}, loaderLimits())
+			}
+			if e != nil || len(files) != 2 || digest == "" {
+				t.Fatal("canonical capture", files, e)
+			}
+			if !linuxbackend.QualificationLoaderProfileValid(profile, 10000) {
+				t.Fatal("profile rejected")
+			}
+			pinned := f.resolver(t, profile.Resolutions)
+			if e = pinned.Revalidate(ctx); e != nil {
+				t.Fatal("baseline replay", e)
 			}
 			real, e := filepath.EvalSymlinks(alias)
 			if e != nil {
 				t.Fatal(e)
 			}
-			t.Logf("native=%s canonical=%s captured=%+v", strings.TrimSpace(native), real, files)
 			var recorded string
 			for _, record := range profile.Resolutions {
 				if record.Name == "dep.so" {
@@ -110,24 +126,45 @@ func TestReviewLoaderSymlinkDotDot(t *testing.T) {
 				}
 			}
 			if recorded != real {
-				t.Errorf("qualified different object: recorded=%s native=%s", recorded, real)
+				t.Fatal("qualified different object", recorded, real)
+			}
+			loaderELF(t, real, "int dep(void){return 3;}")
+			if e = pinned.Revalidate(ctx); !errors.Is(e, qualification.ErrRequired) {
+				t.Fatal("local replay ignored real byte drift", e)
+			}
+			drift, dg, e := linuxos.CaptureImplementationClosure(ctx, []linuxos.ProtectedArtifact{a}, pinned, loaderLimits())
+			if !errors.Is(e, qualification.ErrRequired) || drift != nil || dg != "" {
+				t.Fatal("full capture ignored real byte drift", drift, dg, e)
 			}
 			if bad {
-				loaderELF(t, actual, "int dep(void){return 3;}")
-				if e := pinned.Revalidate(ctx); e == nil {
-					t.Error("local replay ignored changed real implementation bytes")
+				if e = os.Remove(alias); e != nil {
+					t.Fatal(e)
 				}
-				_, again, e := linuxos.CaptureImplementationClosure(ctx, []linuxos.ProtectedArtifact{a}, pinned, loaderLimits())
-				if e == nil && again == digest {
-					t.Error("full capture ignored changed real implementation bytes")
+				if e = os.Symlink(target, alias); e != nil {
+					t.Fatal(e)
 				}
-				native = reviewRunLoader(t, runner, root)
-				if !strings.Contains(native, "VALUE=3") {
-					t.Fatal("actual bytes did not change runtime", native)
+				if e = pinned.Revalidate(ctx); !errors.Is(e, qualification.ErrRequired) {
+					t.Fatal("local replay admitted unsupported spelling", e)
 				}
+				drift, dg, e = linuxos.CaptureImplementationClosure(ctx, []linuxos.ProtectedArtifact{a}, pinned, loaderLimits())
+				if !errors.Is(e, qualification.ErrRequired) || drift != nil || dg != "" {
+					t.Fatal("full capture admitted unsupported spelling", e)
+				}
+			}
+			if native = reviewRunLoader(t, runner, root); !strings.Contains(native, "VALUE=3") {
+				t.Fatal("real runtime target unchanged", native)
 			}
 		})
 	}
+}
+func reviewLoaderOperation(err error, op string) bool {
+	for err != nil {
+		if e, ok := err.(*linuxos.Error); ok && e.Operation == op {
+			return true
+		}
+		err = errors.Unwrap(err)
+	}
+	return false
 }
 
 // A previously loaded object's DT_SONAME aliases its original lookup name.
