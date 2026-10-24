@@ -12,8 +12,9 @@ import (
 
 const ReaderHold = 250 * time.Millisecond
 
-// policy is private: a fixture can change its owner/anchor only from package tests.
-// No CLI flag, environment variable or production API can relax root ownership.
+// policy is private: fixtures can change owner/anchor from package tests or the
+// explicitly tagged test seam. No CLI flag, environment variable or default-build
+// API can relax root ownership.
 type policy struct {
 	owner  uint32
 	anchor string
@@ -220,7 +221,44 @@ func inspect(ctx context.Context, path string, floor Floor, p policy) (v View, e
 	return
 }
 
-// WithActive is a lock primitive for a qualified consumer, not a complete production adapter.
+// WithEvidence verifies a floor and supplies one data-locked view for a qualified
+// consumer's multi-pair release. It performs no identity-pair admission itself.
+// Before calling it the consumer must verify its external restore fence, load
+// its durable floor and finish remote work without state locks. The callback
+// MUST check every requested (uid, generation) pair with View.Active (including
+// its capacity check) and, when needed, View.Generation for retained lifecycle
+// evidence; View.Generation alone does not establish active admission. It MUST
+// persist its floor, recheck binding/revocation, durably commit and hand off its
+// bounded response before deadline. Discard the result on any failure or expiry.
+// Go cannot preempt a callback, undo its effects or recall bytes already handed
+// to a socket. Success here does not qualify a complete production adapter.
+func WithEvidence(ctx context.Context, path string, floor Floor, commit func(View, time.Time) error) error {
+	return withEvidence(ctx, path, floor, production, commit)
+}
+func withEvidence(ctx context.Context, path string, floor Floor, p policy, commit func(View, time.Time) error) error {
+	return readWindow(ctx, path, p, func(_ *directory, j *os.File, deadline time.Time) error {
+		v, e := verifyUntil(j, floor, deadline)
+		if e != nil {
+			return e
+		}
+		return commitEvidence(v, deadline, commit)
+	})
+}
+func commitEvidence(v View, deadline time.Time, commit func(View, time.Time) error) error {
+	if time.Now().After(deadline) {
+		return refuse("journal_reader_deadline")
+	}
+	if e := commit(v, deadline); e != nil {
+		return e
+	}
+	if time.Now().After(deadline) {
+		return refuse("journal_reader_deadline")
+	}
+	return nil
+}
+
+// WithActive checks one exact active pair within WithEvidence's read window.
+// It is a lock primitive for a qualified consumer, not a complete production adapter.
 // Before calling it the consumer must verify its external restore fence, load its durable
 // floor, and finish remote work without state locks. The callback MUST persist its new
 // floor, recheck binding/revocation, durably commit and hand off its bounded response
@@ -230,12 +268,8 @@ func WithActive(ctx context.Context, path string, floor Floor, uid int64, genera
 	return withActive(ctx, path, floor, uid, generation, production, commit)
 }
 func withActive(ctx context.Context, path string, floor Floor, uid int64, generation string, p policy, commit func(View, time.Time) error) error {
-	return readWindow(ctx, path, p, func(_ *directory, j *os.File, deadline time.Time) error {
-		v, e := verifyUntil(j, floor, deadline)
-		if e != nil {
-			return e
-		}
-		if e = v.Active(uid, generation); e != nil {
+	return withEvidence(ctx, path, floor, p, func(v View, deadline time.Time) error {
+		if e := v.Active(uid, generation); e != nil {
 			return e
 		}
 		if time.Now().After(deadline) {

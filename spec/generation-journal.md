@@ -251,8 +251,18 @@ floor was stored. Simultaneous older snapshots MUST NOT overwrite a newer floor.
 The offline `bytes` command validates content and a supplied floor only; `verify`
 also verifies paths and locks. Neither creates a durable reader high-water or
 certifies the external restore fence. Their output is diagnostic. The library's
-`WithActive` is a lock primitive whose callback obligations are explicit; it is
-not a qualified Keymaker adapter.
+`WithEvidence(ctx, path, floor, commit)` supplies one verified, data-locked view
+and deadline for a multi-pair commit. It does not check identity pairs itself:
+the consumer MUST check every requested `(uid,generation)` using `View.Active`
+(which includes the reserve check). `View.Generation` supplies retained
+lifecycle evidence, not active admission by itself. Within that same window the
+consumer MUST persist its floor, recheck binding/revocation, durably commit and
+hand off its bounded response; any failure or expiry discards the unreleased
+result. The primitive refuses an expired deadline before callback entry and
+after callback return; it cannot undo callback effects or recall released bytes.
+`WithActive` delegates to this window and adds the existing single-pair active
+check. Both are lock primitives, not qualified Keymaker adapters. `Checkpoint`
+runs bounded local persistence and **never admits a release**.
 
 Refusal codes are stable; a checker emits `{"Code":"...","Line":N}` on stderr
 and exits 1, with no view on stdout. `Line` is one-based for a record refusal,

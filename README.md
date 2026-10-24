@@ -73,6 +73,12 @@ checkpoint. Production consumers must preserve their durable high-water and
 external restore fence as specified; an offline success does not authorize
 admission. [Vectors](vectors/gen-journal/README.md) document the stable layout.
 
+The `genjournal.WithEvidence` library entry point supplies one locked view for a
+multi-pair release. Its callback must check every pair with `View.Active`, persist
+the durable floor, commit and hand off its bounded response within `ReaderHold`.
+It checks expiry before and after the callback; it cannot undo callback effects.
+`WithActive` adds the single-pair check; `Checkpoint` never admits a release.
+
 The normal journal writer enforces one 1000 ms fence budget with a 1 MiB journal
 ceiling and a lifecycle retirement reserve (529 bytes per creating/active
 generation, 264 per retiring generation). A fresh host conservatively budgets
