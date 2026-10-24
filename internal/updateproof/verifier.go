@@ -105,7 +105,7 @@ func Verify(ctx context.Context, p Profile, base Baseline, inv Invocation, b Bun
 }
 func verify(ctx context.Context, p Profile, base Baseline, inv Invocation, b Bundle, clock Clock, transitional bool) (Evidence, error) {
 	fail := func(e error) (Evidence, error) { return Evidence{}, e }
-	if !p.Limits.valid() || !inv.ID.valid() || inv.ID.Kind != "invocation" || inv.Status != "complete" || (!transitional && (inv.Before.PendingTriggers || inv.After.PendingTriggers)) || !inv.Before.valid(p.Limits) || !inv.After.valid(p.Limits) {
+	if !p.Limits.valid() || !inv.ID.valid() || inv.ID.Kind != "invocation" || (inv.Status != "complete" && !(transitional && inv.Status == "observed")) || (!transitional && (inv.Before.PendingTriggers || inv.After.PendingTriggers)) || !inv.Before.valid(p.Limits) || !inv.After.valid(p.Limits) {
 		return fail(ErrGap)
 	}
 	lower, upper := clock.Now, clock.Now
@@ -380,5 +380,5 @@ func VerifyBatch(ctx context.Context, p Profile, base Baseline, batch Batch, bun
 }
 
 func packageStateAllowed(s string, transitional bool) bool {
-	return s == "installed" || transitional && (s == "unpacked" || s == "triggers-awaited" || s == "triggers-pending")
+	return s == "installed" || transitional && (s == "unpacked" || s == "triggers-awaited" || s == "triggers-pending" || s == "half-installed" || s == "half-configured")
 }

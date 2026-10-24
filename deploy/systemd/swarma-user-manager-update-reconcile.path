@@ -1,0 +1,12 @@
+# EXAMPLE ONLY: durable recorder entries are the queue; no periodic timer.
+# The watch also covers an enqueue racing with the service's previous invocation.
+[Unit]
+Description=Watch the protected Swarma update chronology
+After=local-fs.target
+
+[Path]
+PathChanged=/opt/swarma/lib/user-manager/update-evidence
+Unit=swarma-user-manager-update-reconcile.service
+
+[Install]
+WantedBy=multi-user.target

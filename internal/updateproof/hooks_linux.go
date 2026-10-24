@@ -18,10 +18,14 @@ const HookConfigPath = "/opt/swarma/etc/update-evidence.json"
 const RecorderPath = "/opt/swarma/lib/user-manager/update-evidence"
 
 type HookConfig struct {
-	Format    string
-	Profile   Profile
-	Baseline  Snapshot
-	APT, DPKG Tool
+	Format               string
+	Profile              Profile
+	Baseline             Snapshot
+	APT, DPKG, Systemctl Tool
+	FrontierSequence     uint64
+	FrontierSHA256       string
+	ProofBaseline        RepositoryBaseline
+	Repositories         []Repository
 }
 
 func readRootFile(path string, limit int64) ([]byte, error) {
@@ -154,7 +158,7 @@ func caller(pid int, boot string, tool Tool) (nativeCaller, error) {
 // creates a maintenance assertion: the qualified admission owner must already
 // have stopped admission and established the pre-update containment interlock.
 func NativeHook(ctx context.Context, phase string, parentPID int) (ScanResult, error) {
-	allowed := map[string]bool{"apt-pre": true, "apt-post": true, "dpkg-pre": true, "dpkg-post": true, "boot-scan": true}
+	allowed := map[string]bool{"apt-pre": true, "apt-post": true, "dpkg-pre": true, "dpkg-post": true, "boot-scan": true, "reconcile": true}
 	if !allowed[phase] || os.Getuid() != 0 || os.Geteuid() != 0 {
 		return ScanResult{}, ErrGap
 	}
@@ -176,17 +180,8 @@ func NativeHook(ctx context.Context, phase string, parentPID int) (ScanResult, e
 		return ScanResult{}, e
 	}
 	defer r.Close()
-	if phase == "boot-scan" {
-		release, e := packageReadExclusion()
-		if e != nil {
-			return ScanResult{}, e
-		}
-		defer release()
-		snapshot, e := captureNative(ctx, cfg, r, nil)
-		if e != nil {
-			return ScanResult{}, e
-		}
-		return r.Scan(ctx, snapshot)
+	if phase == "boot-scan" || phase == "reconcile" {
+		return nativeReconcile(ctx, cfg, r, boot)
 	}
 	if marker(boot) != nil {
 		return ScanResult{}, ErrGap
@@ -239,7 +234,13 @@ func NativeHook(ctx context.Context, phase string, parentPID int) (ScanResult, e
 		_, e = r.BeginArtifacts(ctx, boot, kind, self.token, parent, snapshot, artifacts)
 		return ScanResult{}, e
 	}
-	return ScanResult{}, r.ObservePost(ctx, id, snapshot)
+	if e = r.ObservePost(ctx, id, snapshot); e != nil {
+		return ScanResult{}, e
+	}
+	if kind == "aggregate" || parent == (ID{}) {
+		e = enqueueNative(ctx, cfg)
+	}
+	return ScanResult{}, e
 }
 func (r *Recorder) lookup(ctx context.Context, boot, kind, token string) (ID, []Package, error) {
 	u, e := r.lock(ctx)
@@ -274,20 +275,46 @@ func (r *Recorder) endpoint(ctx context.Context, initial Snapshot) (Snapshot, er
 	return events[len(events)-1].Snapshot, nil
 }
 func packageReadExclusion() (func(), error) {
+	d, e := openProtectedDir("/var/lib/dpkg", 0, "/")
+	if e != nil {
+		return nil, e
+	}
+	release, e := packageReadExclusionAt(d, 0)
+	if e != nil {
+		d.Close()
+		return nil, e
+	}
+	return func() { release(); d.Close() }, nil
+}
+func packageReadExclusionAt(d *os.File, owner uint32) (func(), error) {
+	if protected(d, owner, true) != nil {
+		return nil, ErrGap
+	}
 	var files []*os.File
 	release := func() {
 		for i := len(files) - 1; i >= 0; i-- {
 			files[i].Close()
 		}
 	}
-	for _, name := range []string{"/var/lib/dpkg/lock-frontend", "/var/lib/dpkg/lock"} {
-		fd, e := unix.Open(name, unix.O_RDWR|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+	for _, name := range []string{"lock-frontend", "lock"} {
+		fd, e := unix.Openat(int(d.Fd()), name, unix.O_RDWR|unix.O_NOFOLLOW|unix.O_CLOEXEC|unix.O_NONBLOCK, 0)
 		if e != nil {
 			release()
 			return nil, ErrGap
 		}
 		f := os.NewFile(uintptr(fd), name)
 		files = append(files, f)
+		var st unix.Stat_t
+		if unix.Fstat(fd, &st) != nil || st.Uid != owner || st.Mode&unix.S_IFMT != unix.S_IFREG || st.Mode&0022 != 0 || st.Nlink != 1 {
+			release()
+			return nil, ErrGap
+		}
+		for _, x := range []string{"system.posix_acl_access", "security.capability"} {
+			if _, e := unix.Fgetxattr(fd, x, nil); e != unix.ENODATA {
+				release()
+				return nil, ErrGap
+			}
+		}
 		lock := unix.Flock_t{Type: unix.F_WRLCK, Whence: 0, Start: 0, Len: 0}
 		if unix.FcntlFlock(f.Fd(), unix.F_OFD_SETLK, &lock) != nil {
 			release()
@@ -298,6 +325,16 @@ func packageReadExclusion() (func(), error) {
 }
 
 func captureNative(ctx context.Context, cfg HookConfig, r *Recorder, artifacts []Package) (Snapshot, error) {
+	database, e := openProtectedDir("/var/lib/dpkg", 0, "/")
+	if e != nil {
+		return Snapshot{}, e
+	}
+	defer database.Close()
+	databaseBefore, e := databaseDigest(ctx, database, 0, cfg.Profile.Limits)
+	if e != nil {
+		return Snapshot{}, e
+	}
+
 	previous, e := r.endpoint(ctx, cfg.Baseline)
 	if e != nil {
 		return Snapshot{}, e
@@ -329,15 +366,9 @@ func captureNative(ctx context.Context, cfg HookConfig, r *Recorder, artifacts [
 		if name == "" || arch == "" || version == "" {
 			return Snapshot{}, ErrGap
 		}
-		pkg := Package{Name: name, Version: version, Architecture: arch, Status: "incomplete"}
-		if state == "install ok installed" {
-			pkg.Status = "installed"
-		} else {
-			if fields := strings.Fields(state); len(fields) == 3 && fields[0] == "install" && fields[1] == "ok" {
-				pkg.Status = fields[2]
-			}
-			snapshot.PendingTriggers = true
-		}
+		status, pending := nativePackageStatus(state)
+		pkg := Package{Name: name, Version: version, Architecture: arch, Status: status}
+		snapshot.PendingTriggers = snapshot.PendingTriggers || pending
 		if prior, ok := old[pkg.key()]; ok && prior.Version == pkg.Version {
 			pkg.ArchiveSHA256 = prior.ArchiveSHA256
 		}
@@ -433,6 +464,11 @@ func captureNative(ctx context.Context, cfg HookConfig, r *Recorder, artifacts [
 	}
 	sort.Slice(snapshot.Packages, func(i, j int) bool { return snapshot.Packages[i].key() < snapshot.Packages[j].key() })
 	sort.Slice(snapshot.Leaves, func(i, j int) bool { return snapshot.Leaves[i].Path < snapshot.Leaves[j].Path })
+	databaseAfter, e := databaseDigest(ctx, database, 0, cfg.Profile.Limits)
+	if e != nil || databaseBefore != databaseAfter {
+		return Snapshot{}, ErrGap
+	}
+	snapshot.DatabaseSHA256 = databaseAfter
 	if !snapshot.valid(cfg.Profile.Limits) {
 		return Snapshot{}, ErrGap
 	}
@@ -516,6 +552,7 @@ func retainArtifactAt(d *os.File, owner uint32, b []byte, l Limits, syncFile fun
 	}
 	name := Digest(b)
 	var total int64
+	matched := false
 	for _, n := range names {
 		if !digestOK(n) {
 			return ErrStore
@@ -543,12 +580,24 @@ func retainArtifactAt(d *os.File, owner uint32, b []byte, l Limits, syncFile fun
 			}
 			// A prior write may be visible despite a failed sync. Re-establish
 			// both durability obligations before acknowledging an identical retry.
-			if syncFile(f) != nil || f.Close() != nil || syncFile(d) != nil {
+			syncErr := syncFile(f)
+			closeErr := f.Close()
+			if syncErr != nil || closeErr != nil {
 				return ErrStore
 			}
-			return nil
+			matched = true
+			continue
 		}
 		f.Close()
+	}
+	if total > l.Bytes {
+		return ErrStore
+	}
+	if matched {
+		if syncFile(d) != nil {
+			return ErrStore
+		}
+		return nil
 	}
 	if len(names) >= l.Entries || total+int64(len(b)) > l.Bytes {
 		return ErrStore

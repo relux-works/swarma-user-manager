@@ -1,0 +1,21 @@
+# EXAMPLE ONLY: install/enable only after root qualification of the full A3 profile.
+[Unit]
+Description=Reconcile retained Swarma package update evidence
+After=local-fs.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+UMask=0077
+WorkingDirectory=/
+ExecStart=/opt/swarma/libexec/swarma-user-manager update-hook reconcile
+TimeoutStartSec=70
+Restart=no
+StandardInput=null
+StandardOutput=journal
+StandardError=journal
+NoNewPrivileges=yes
+RestrictAddressFamilies=AF_UNIX
+IPAddressDeny=any

@@ -42,7 +42,7 @@ func VerifyRepositories(ctx context.Context, p RepositoryProfile, base Repositor
 }
 func verifyRepositories(ctx context.Context, p RepositoryProfile, base RepositoryBaseline, inv Invocation, b RepositoryBundle, clock Clock, transitional bool) (RepositoryEvidence, error) {
 	fail := func(e error) (RepositoryEvidence, error) { return RepositoryEvidence{}, e }
-	if !p.Common.Limits.valid() || !inv.ID.valid() || inv.Status != "complete" || !inv.Before.valid(p.Common.Limits) || !inv.After.valid(p.Common.Limits) {
+	if !p.Common.Limits.valid() || !inv.ID.valid() || (inv.Status != "complete" && !(transitional && inv.Status == "observed")) || !inv.Before.valid(p.Common.Limits) || !inv.After.valid(p.Common.Limits) {
 		return fail(ErrGap)
 	}
 	if len(p.Common.Mappings) == 0 {
@@ -190,12 +190,19 @@ func filterLeaves(leaves []Leaf, keys map[string]bool) []Leaf {
 	return out
 }
 func filterSnapshot(s Snapshot, keys map[string]bool) Snapshot {
-	return Snapshot{Packages: filterPackages(s.Packages, keys), Leaves: filterLeaves(s.Leaves, keys), PendingTriggers: s.PendingTriggers}
+	return Snapshot{Packages: filterPackages(s.Packages, keys), Leaves: filterLeaves(s.Leaves, keys), PendingTriggers: s.PendingTriggers, DatabaseSHA256: s.DatabaseSHA256}
 }
 
 // VerifyRepositoryBatch retains every invocation and each source's high-water
 // within a provisional batch. No caller baseline is mutated on partial failure.
 func VerifyRepositoryBatch(ctx context.Context, p RepositoryProfile, base RepositoryBaseline, batch Batch, bundles map[ID]RepositoryBundle, source TimeSource) ([]RepositoryEvidence, error) {
+	clock, e := sampleTime(ctx, source, batch.ID.Boot)
+	if e != nil {
+		return nil, e
+	}
+	return verifyRepositoryBatch(ctx, p, base, batch, bundles, clock)
+}
+func verifyRepositoryBatch(ctx context.Context, p RepositoryProfile, base RepositoryBaseline, batch Batch, bundles map[ID]RepositoryBundle, clock Clock) ([]RepositoryEvidence, error) {
 	if !batch.ID.valid() || len(batch.Invocations) == 0 || len(batch.Invocations) > p.Common.Limits.Entries || len(bundles) != len(batch.Invocations) {
 		return nil, ErrGap
 	}
@@ -207,10 +214,6 @@ func VerifyRepositoryBatch(ctx context.Context, p RepositoryProfile, base Reposi
 		if pkg.Status != "installed" {
 			return nil, ErrGap
 		}
-	}
-	clock, e := sampleTime(ctx, source, batch.ID.Boot)
-	if e != nil {
-		return nil, e
 	}
 	watermarks := map[string]ReleaseWatermark{}
 	for id, w := range base.Releases {

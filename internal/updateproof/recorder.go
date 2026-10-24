@@ -57,6 +57,17 @@ func replay(events []event) (map[ID]*recorded, error) {
 			if rec == nil || rec.end != nil || rec.observed != nil || e.Parent != rec.begin.Parent || e.Token != rec.begin.Token || e.Status != "hook-observed" {
 				return nil, ErrStore
 			}
+			if e.ID.Kind == "aggregate" {
+				if currentAggregate != e.ID || currentInvocation != (ID{}) || endpoint == nil || !same(*endpoint, e.Snapshot) {
+					return nil, ErrGap
+				}
+				currentAggregate = ID{}
+			} else {
+				if currentInvocation != e.ID {
+					return nil, ErrGap
+				}
+				currentInvocation = ID{}
+			}
 			copy := e
 			rec.observed = &copy
 			snapshot := e.Snapshot
@@ -67,7 +78,7 @@ func replay(events []event) (map[ID]*recorded, error) {
 				return nil, ErrStore
 			}
 			if e.ID.Kind == "aggregate" {
-				if currentAggregate != e.ID || currentInvocation != (ID{}) {
+				if (currentAggregate != e.ID && !(currentAggregate == (ID{}) && rec.observed != nil)) || currentInvocation != (ID{}) {
 					return nil, ErrStore
 				}
 				if endpoint == nil || !same(*endpoint, e.Snapshot) {
@@ -75,7 +86,7 @@ func replay(events []event) (map[ID]*recorded, error) {
 				}
 				currentAggregate = ID{}
 			} else {
-				if currentInvocation != e.ID {
+				if currentInvocation != e.ID && !(currentInvocation == (ID{}) && rec.observed != nil && endpoint != nil && same(*endpoint, rec.observed.Snapshot) && same(e.Snapshot, rec.observed.Snapshot)) {
 					return nil, ErrStore
 				}
 				currentInvocation = ID{}
@@ -221,8 +232,9 @@ func asInvocation(r *recorded) Invocation {
 }
 
 // ObservePost records the in-process hook, never the process's terminal exit.
-// An independently authenticated terminal observer must call End later. Without
-// it Scan refuses; the hook cannot certify its own enclosing process's success.
+// It releases chronology membership for the next invocation, without claiming
+// process success. Legacy Scan requires End; Reconcile instead observes terminal
+// database/closure state under exclusion and verifies every retained payload.
 func (r *Recorder) ObservePost(ctx context.Context, id ID, after Snapshot) error {
 	if !after.valid(r.limits) {
 		return ErrGap

@@ -14,7 +14,7 @@ import (
 // Claim: only the fixed hook phases select maintenance dispatch; caller paths,
 // flags and surplus arguments cannot select privileged recording.
 func TestUpdateHookDispatch(t *testing.T) {
-	for _, phase := range []string{"apt-pre", "apt-post", "dpkg-pre", "dpkg-post", "boot-scan"} {
+	for _, phase := range []string{"apt-pre", "apt-post", "dpkg-pre", "dpkg-post", "boot-scan", "reconcile"} {
 		if p, ok := updateHookMode([]string{"update-hook", phase}); !ok || p != phase {
 			t.Fatal(phase)
 		}

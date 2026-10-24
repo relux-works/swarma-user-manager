@@ -92,12 +92,16 @@ type Leaf struct {
 	GID          uint32 `json:"gid"`
 }
 type Snapshot struct {
+	DatabaseSHA256  string    `json:"database_sha256,omitempty"`
 	Packages        []Package `json:"packages"`
 	Leaves          []Leaf    `json:"leaves"`
 	PendingTriggers bool      `json:"pending_triggers"`
 }
 
 func (s Snapshot) valid(l Limits) bool {
+	if s.DatabaseSHA256 != "" && !digestOK(s.DatabaseSHA256) {
+		return false
+	}
 	if len(s.Packages) == 0 || len(s.Packages) > l.Members || len(s.Leaves) > l.Members {
 		return false
 	}

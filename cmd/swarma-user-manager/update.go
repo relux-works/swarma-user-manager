@@ -15,7 +15,7 @@ func updateHookMode(args []string) (string, bool) {
 		return "", false
 	}
 	switch args[1] {
-	case "apt-pre", "apt-post", "dpkg-pre", "dpkg-post", "boot-scan":
+	case "apt-pre", "apt-post", "dpkg-pre", "dpkg-post", "boot-scan", "reconcile":
 		return args[1], true
 	}
 	return "", false
@@ -25,13 +25,17 @@ func runUpdateHook(in manager.Invocation, realUID int, sudoEnvironment bool, pha
 	if !maintenanceAllowed(in, realUID, sudoEnvironment) {
 		return refuse()
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	deadline := 5 * time.Second
+	if phase == "boot-scan" || phase == "reconcile" {
+		deadline = 60 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), deadline)
 	defer cancel()
 	scan, e := updateproof.NativeHook(ctx, phase, os.Getppid())
 	if e != nil {
 		return refuse()
 	}
-	if phase == "boot-scan" && json.NewEncoder(os.Stdout).Encode(scan) != nil {
+	if (phase == "boot-scan" || phase == "reconcile") && json.NewEncoder(os.Stdout).Encode(scan) != nil {
 		return refuse()
 	}
 	return 0
