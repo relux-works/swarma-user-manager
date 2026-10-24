@@ -205,7 +205,7 @@ describes protected deployment inputs and the stopped-admission pin/restart flow
 | Linux adapter tests | Exact lifetime/receipt mappings, split writes, source binding and closed production authority | `go test -p 1 ./internal/linuxbackend -count=1` | Named test verdicts; private seams |
 | Core/backend tests | Fake lifecycle, v2 receipts/flights, authority, operator admission and protected evidence | `go test -p 1 ./internal/manager -count=1` | Named test verdicts; isolated Go temporary fixtures |
 | Prepared journal tests | Exact-tail admission and native activation lock guard | `go test -p 1 ./tools/genjournal -run '^(TestNativeActivationGuard\|TestPreparedAppendRequiresExactTail)$' -count=1` | Named test verdicts |
-| Shared-host serialization | Bound package/race-test contention | `env GORACE=atexit_sleep_ms=0 GOMAXPROCS=2 heavy-slot --label architect -- go test -p 1 ./internal/manager -count=1` | Task-local untracked logs |
+| Shared-host serialization | Run heavy suites serially on shared hosts | `env GORACE=atexit_sleep_ms=0 GOMAXPROCS=2 go test -p 1 ./internal/manager -count=1` | Task-local untracked logs |
 
 ## Linux station tools
 
@@ -241,7 +241,7 @@ narrow test/tool commands and fixture/artifact locations.
 
 | Tool | Purpose / exact entry point | Output |
 |---|---|---|
-| Go through `heavy-slot` | `env GOMAXPROCS=2 heavy-slot --label architect -- go test -p 1 ./internal/updateproof ./cmd/swarma-user-manager -count=1` | Narrow verdicts and owned fixtures; task-local untracked logs |
+| Go (serialized on shared hosts) | `env GOMAXPROCS=2 go test -p 1 ./internal/updateproof ./cmd/swarma-user-manager -count=1` | Narrow verdicts and owned fixtures; task-local untracked logs |
 | `dpkg` | Native held pinned descriptor with fixed `--audit`; owned lock/audit fixture: `go test ./internal/updateproof -run '^TestReconcileOwnedDpkgAuditExclusion$' -count=1` | Clean means exit zero and empty stdout/stderr; fixture uses only an owned empty database |
 | `systemctl` | Native held pinned descriptor with fixed `--no-block start swarma-user-manager-update-reconcile.service` | Bounded enqueue acknowledgement; root deployment remains pending |
 | `systemd-analyze` | `systemd-analyze verify --man=no --generators=no deploy/systemd/swarma-user-manager-update-reconcile.service deploy/systemd/swarma-user-manager-update-reconcile.path` | Unit parser diagnostics; uninstalled executable paths require owned copies pointing to a built fixture binary |

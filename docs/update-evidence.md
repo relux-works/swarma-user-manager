@@ -291,8 +291,8 @@ No previously committed reviewer tests are removed or renamed.
 
 | Tool | Exact entry point / use | Output |
 |---|---|---|
-| Go | `env GOMAXPROCS=2 heavy-slot --label architect -- go test -p 1 ./internal/updateproof -count=1` | Owned temporary synthetic repository, typed verdicts; no install |
-| Go CLI check | `env GOMAXPROCS=2 heavy-slot --label architect -- go test -p 1 ./cmd/swarma-user-manager -run '^TestUpdateHook' -count=1` | Root/non-sudo selection and actual unprivileged refusal |
+| Go | `env GOMAXPROCS=2 go test -p 1 ./internal/updateproof -count=1` | Owned temporary synthetic repository, typed verdicts; no install |
+| Go CLI check | `env GOMAXPROCS=2 go test -p 1 ./cmd/swarma-user-manager -run '^TestUpdateHook' -count=1` | Root/non-sudo selection and actual unprivileged refusal |
 | `gpg`, `gpgconf` | Invoked only by `TestVerifierRefusals`/batch fixtures with an isolated owned `--homedir`; generate/sign/export a synthetic test key and locate its own agent | Fixture key/signatures in test temp directory; fixture's recorded agent PID stopped at cleanup |
 | `gpgv` | Fixed descriptor-based command in `signature_linux.go`; `--homedir`, `--keyring`, `--status-fd 2`, `--output -` | Bounded signed payload/status, no ambient key lookup |
 | `dpkg-deb` | Fixed `--ctrl-tarfile` or `--fsys-tarfile` on a private retained archive copy | Bounded tar bytes, no script/install |
@@ -300,6 +300,6 @@ No previously committed reviewer tests are removed or renamed.
 | `systemctl` | Held pinned descriptor, fixed `--no-block start swarma-user-manager-update-reconcile.service` | Bounded enqueue acknowledgement; no wait for package locks |
 | Hook samples | Fixed `update-hook` commands above, not installed | Protected recorder/artifact state only; no qualification verdict |
 
-Run with a task-local `TMPDIR` when retaining scratch evidence. Builds and
-race/check commands should also use the existing shared-host heavy slot. Full
-repository suites and live package/root mutation are unnecessary for this slice.
+Run with a task-local `TMPDIR` when retaining scratch evidence. Run heavy
+suites serialized on shared hosts with `GOMAXPROCS=2` and `-p 1`. Full repository
+suites and live package/root mutation are unnecessary for this slice.

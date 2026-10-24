@@ -173,9 +173,9 @@ reintroducing `yes` in the shipped service. Do not substitute an openat fallback
 | systemd-run/systemctl | Fixed nonroot transient command above | Real sandbox, own-unit query and cgroup check; terminal exit status |
 | Go owned test probe | `QUALIFICATION_BOOT_TOOL_PROBE=1 /absolute/task/scratch/qualification.test -test.run='^TestQualificationBootToolReadProbe$' -test.v` | Actual protected read under the old/corrected sandbox; no authority or writes |
 
-On the shared host, wrap each test/build/live probe in the existing
-`heavy-slot --label architect --` helper with `GOMAXPROCS=2` and a task-local
-TMPDIR. Retain numbered logs and exact commands/exit codes in task scratch.
+Run heavy suites serialized on shared hosts with `GOMAXPROCS=2` and `-p 1`,
+and use a task-local TMPDIR. Retain numbered logs and exact commands/exit codes
+in task scratch.
 No full suite or privileged operation is required for these regressions.
 Root installation and end-to-end qualification remain owner-run validation.
 A corrected delivery must regenerate the binary/unit/deployment pins and rerun

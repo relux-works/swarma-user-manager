@@ -90,9 +90,11 @@ peer-owned process stop and scaffold verification. They do not qualify root
 account tools, production persistence provisioning, complete host scope, root:S
 homes or a production authority provider.
 
+Run heavy suites serialized on shared hosts with `GOMAXPROCS=2` and `-p 1`.
+
 ```sh
-env GORACE=atexit_sleep_ms=0 GOMAXPROCS=2 heavy-slot --label architect -- go test -p 1 ./internal/linuxbackend -count=1
-env GORACE=atexit_sleep_ms=0 GOMAXPROCS=2 heavy-slot --label architect -- go test -p 1 ./internal/linuxos -run '^(TestExactDeletion.*|TestRemovalCommandsPermittedAbsence|TestPeerTemporaryFileInventory|TestPeerProcessStopAndAbsence|TestVerifierFailClosedWalk)$' -count=1 -v
+env GORACE=atexit_sleep_ms=0 GOMAXPROCS=2 go test -p 1 ./internal/linuxbackend -count=1
+env GORACE=atexit_sleep_ms=0 GOMAXPROCS=2 go test -p 1 ./internal/linuxos -run '^(TestExactDeletion.*|TestRemovalCommandsPermittedAbsence|TestPeerTemporaryFileInventory|TestPeerProcessStopAndAbsence|TestVerifierFailClosedWalk)$' -count=1 -v
 go build -o <scratch>/swarma-user-manager ./cmd/swarma-user-manager
 ```
 
@@ -439,8 +441,8 @@ ordering/network enforcement, complete host inventories/exclusion and production
 qualification remain pending. Narrow validation is:
 
 ```sh
-env GORACE=atexit_sleep_ms=0 GOMAXPROCS=2 heavy-slot --label architect -- go test -p 1 ./internal/linuxos -run '^TestSystemd' -count=1 -v
-env GORACE=atexit_sleep_ms=0 GOMAXPROCS=2 heavy-slot --label architect -- go test -p 1 ./internal/nssprobe -run '^TestProbe' -count=1 -v
+env GORACE=atexit_sleep_ms=0 GOMAXPROCS=2 go test -p 1 ./internal/linuxos -run '^TestSystemd' -count=1 -v
+env GORACE=atexit_sleep_ms=0 GOMAXPROCS=2 go test -p 1 ./internal/nssprobe -run '^TestProbe' -count=1 -v
 ```
 
 Tests use private directories and Unix sockets, fixture ELF/NSS modules, retained

@@ -248,12 +248,11 @@ missing retained evidence and approved empty migration. They do not qualify
 real NSS/accounts, complete Linux inventories or a root deployment.
 
 ```sh
-env GORACE=atexit_sleep_ms=0 GOMAXPROCS=2 heavy-slot --label architect -- go test -p 1 ./internal/manager -count=1
-env GORACE=atexit_sleep_ms=0 GOMAXPROCS=2 heavy-slot --label architect -- go test -p 1 ./tools/genjournal -run '^(TestNativeActivationGuard|TestPreparedAppendRequiresExactTail)$' -count=1
+env GORACE=atexit_sleep_ms=0 GOMAXPROCS=2 go test -p 1 ./internal/manager -count=1
+env GORACE=atexit_sleep_ms=0 GOMAXPROCS=2 go test -p 1 ./tools/genjournal -run '^(TestNativeActivationGuard|TestPreparedAppendRequiresExactTail)$' -count=1
 go build -o <output>/swarma-user-manager ./cmd/swarma-user-manager
 ```
 
-Heavy-slot is the shared-host serialization wrapper; elsewhere use the same
-narrow Go commands with the local resource policy. Logs/build outputs belong
-in task-local untracked scratch. No full repository suite or account tool is
-needed to exercise this core boundary.
+Run heavy suites serialized on shared hosts with `GOMAXPROCS=2` and `-p 1`.
+Logs/build outputs belong in task-local untracked scratch. No full repository
+suite or account tool is needed to exercise this core boundary.
