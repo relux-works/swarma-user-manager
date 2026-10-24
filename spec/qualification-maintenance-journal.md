@@ -15,7 +15,7 @@ A3b reconciliation produces provisional evidence, not an accepted frontier.
 ## 1. Negative obligations before acceptance
 
 The implementation MUST reject malformed/tampered records, broken predecessor
-chains, reused sequences or transaction IDs, incomplete aggregate membership,
+chains, unauthorized sequence/transaction-ID reuse, incomplete aggregate membership,
 missing evidence, partial tails, unknown durability, uncompleted attempts,
 pin/Q without matching acceptance, stale unit completion and saturation. It MUST
 retain admission/P7 fences and history, without frontier advance, old-pin
@@ -252,8 +252,11 @@ boot except that crash recovery may close it as interrupted from a later boot;
 that closure cannot contain a new-boot Q as if the old run completed.
 
 Only `intent -> accepted`, `intent -> refused`, or `intent -> interrupted` is
-legal. An accepted entry requires every check in §§5–6, both exact Q references,
-step 5 and reason ok. A refusal/interruption does not advance accepted state.
+legal. An accepted entry requires every check in §§5–6, both exact Q proof
+references, step 5 and reason ok. The writer validates the prospective accepted transition
+under maintenance before appending; it does not invoke admission to authorize
+the commit. The actual admission guard applies only after durable publication.
+A refusal/interruption does not advance accepted state.
 No second terminal result, in-place correction or conversion of a refusal into
 acceptance is allowed. Retry is a **new intent** after the old one is terminal,
 with `retry_of` naming that old intent; it must re-prove all evidence and perform
@@ -533,17 +536,17 @@ The **future** A3-enabled guard and boot precheck MUST validate all of:
    that acceptance's `candidate_inputs`, candidate state and planned artifacts.
    Check `qualified=true`, current protection and every original Q invariant;
    a flag, independently written pin or standalone Q never supplies acceptance.
-4. On the accepting boot/run, SHA-256 and size of current protected Q bytes equal the
-   record identity in the minimized proof referenced by `unit.q`,
+4. On the accepting boot/run, SHA-256 and size of current protected Q bytes
+   equal the record identity in the minimized proof referenced by `unit.q`,
    `Q.boot_id=unit.boot_id=accepted.boot_id=current_boot`, Q issuer is boot,
    and `Q.issuer.invocation_id=unit.invocation_id` equals the latest terminal
    successful current-boot qualification-unit invocation. All eleven checks
-   are ok; `initial_q` was a passing initial record of the same inputs and
-   cannot substitute. A later legitimate ordinary same-boot renewal uses the stable-input
-   renewal rule below as well; a changed-input or unresolved-attempt run may
+   are ok; the `initial_q` proof was captured from a passing initial record of
+   the same inputs and cannot substitute for the boot record. A later legitimate
+   ordinary same-boot renewal uses the stable-input renewal rule below as well; a changed-input or unresolved-attempt run may
    not be relabeled ordinary renewal to evade a new accepted outcome.
-5. For ordinary renewal, including a **later boot**, boot precheck first validates the unchanged accepted
-   inputs/frontier and absence of pending/unmatched work. It then authorizes
+5. For ordinary renewal, including a **later boot**, boot precheck first
+   validates the unchanged accepted inputs/frontier and absence of pending/unmatched work. It then authorizes
    only ordinary networkless renewal of that existing pin. After terminal
    success require fresh current-boot Q and its matching latest unit invocation
    under the existing Q contract. The old accepted Q proof remains historical and

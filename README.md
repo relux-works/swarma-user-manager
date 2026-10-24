@@ -269,10 +269,20 @@ open; automatic pinning and deployment remain closed. The document includes exac
 narrow test/tool commands and fixture/artifact locations.
 
 
+The [A3c qualification-maintenance journal](spec/qualification-maintenance-journal.md)
+specifies `qual-maint/1`, write-ahead intent/outcome binding, crash recovery,
+capacity refusals and future admission/boot checks. Its
+[canonical examples](vectors/qual-maint/README.md) exercise framing only;
+A3d implementation and root qualification remain pending. The
+[open decisions](spec/qualification-maintenance-journal.md#9-open-decisions-and-recommendations)
+include the package-exclusion/unit-control lock boundary. No automatic pinning
+or admission is activated by this publication.
+
 ### A3 evidence tools
 
 | Tool | Purpose / exact entry point | Output |
 |---|---|---|
+| Pinned registrar CCJ-1 / coreutils | Validate example bytes with `ccj.Parse` / `ccj.Marshal` from the `go.mod` pin; `sha256sum vectors/qual-maint/*.jsonl`; `wc -c vectors/qual-maint/*.jsonl` | Canonical-byte verdict, SHA-256 and byte counts including LF; expected identities in the vector README; no runtime journal checker claimed |
 | Go (serialized on shared hosts) | `env GOMAXPROCS=2 go test -p 1 ./internal/updateproof ./cmd/swarma-user-manager -count=1` | Narrow verdicts and owned fixtures; task-local untracked logs |
 | `dpkg` | Native held pinned descriptor with fixed `--audit`; owned lock/audit fixture: `go test ./internal/updateproof -run '^TestReconcileOwnedDpkgAuditExclusion$' -count=1` | Clean means exit zero and empty stdout/stderr; fixture uses only an owned empty database |
 | `systemctl` | Native held pinned descriptor with fixed `--no-block start swarma-user-manager-update-reconcile.service` | Bounded enqueue acknowledgement; root deployment remains pending |

@@ -41,7 +41,8 @@ encoding proposal is now published separately; remaining gates follow.
 ### A3 update publication gates
 
 Publish the supported repository/package/closure profile and stable verifier
-custody; protected transaction/exclusion and maintenance-journal encoding;
+custody; protected transaction/exclusion and review of the
+[A3c maintenance-journal encoding](spec/qualification-maintenance-journal.md);
 finite resource/freshness bounds and clock policy; P7 deadline/containment owner;
 and owner/curator notification adapters and qualified root recovery. Integrate
 the A2 macOS §7.1 companion reference when it lands. The
@@ -49,6 +50,22 @@ the A2 macOS §7.1 companion reference when it lands. The
 and root outline are PENDING. Station admission stays closed until A3 is landed,
 implemented and qualified; no timer, missing-evidence fallback, automatic keyring
 rotation, admission reopening or generation changes are authorized.
+
+The A3c specification names the separate closed `qual-maint/1` journal, immutable
+transaction/evidence bindings and every A3 step's crash/recovery obligation. It
+is specification-only; its guard, automatic pinning and runtime/root tests are
+unimplemented. The [five open decisions and recommendations](spec/qualification-maintenance-journal.md#9-open-decisions-and-recommendations)
+remain gates: Q1 resolves the tension between continuous package exclusion and
+the blanket no-RPC-under-locks rule at unit control; Q2 selects explicit initial
+baseline import/checkpoint custody; Q3 publishes authenticated interlock,
+recovery-fencing and both notification receipt interfaces; Q4 reviews hard
+budgets and source-pinned byte encodings; Q5 owns migration and disposable root
+qualification. Recommendation Q1 permits only the fixed control path under
+package/worker exclusion after proving no lock cycle, with no RPC under
+journal/deployment/recorder or lifecycle locks. This is an unapproved
+recommendation, not a waiver; an absolute prohibition needs A3's interface
+revised before implementation. Neither a surviving pin/Q nor a published
+canonical example can admit; generation/effect/qualification codecs stay closed.
 
 There is no open choice about account pooling, station-readable private keys
 or station ownership of managed-home ancestors: public CIP-0024 decisions
