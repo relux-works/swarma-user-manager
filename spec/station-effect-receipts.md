@@ -102,7 +102,7 @@ tool output, credentials or station file contents.
 | Kind | Mandatory body fields and meaning |
 |---|---|
 | `intent` | `key,effect,operation,purpose,identity,target,manifest_digest,preconditions`: immutable admitted write or evidence preparation. |
-| `flight` | `key,attempt,basis,deadline_ms`: one exclusive execution attempt; only a resolving receipt can close it. |
+| `flight` | `key,attempt,basis,deadline_ms`: one exclusive execution attempt; a conclusive resolving receipt closes execution even when its basis is stale, without admitting that evidence as current authority. |
 | `receipt` | `key,attempt,flight_hash,outcome,objects,manifest_digest,evidence_digest`: trusted executor's durable observation; `outcome` is `applied`, `absent`, `no_progress` or `unknown`. |
 | `incident` | `key,attempt,reason,objects`: `reason` is `unproved_owner`, `identity_conflict`, `stale_result`, `unknown_execution` or `quarantine_conflict`. |
 | `resolution` | `key,incident_seq,maintenance_digest,disposition,objects`: protected maintenance evidence; disposition is `owned`, `absent` or `hold`. This never authorizes adoption of an unrelated object. |
@@ -159,6 +159,10 @@ Shared closed structures and scalar rules:
   it additionally proves no write occurred, and never means cleanup succeeded.
   Partial applied deletion uses `applied` with its exact observations, without
   implying the whole batch/tree is complete. `unknown` proves no ownership.
+  A conclusive `applied`, `absent` or `no_progress` receipt resolves that exact
+  attempt regardless of current-basis mismatch; it does not release target
+  fences/reservations or establish authority for the next step. Receipt-only
+  closure and current admission are separate decisions under §4.
 - `objects` is an array of closed tagged observations. An account observation
   has `{kind:"account",name,uid,gid,home,shell,password_locked,supplementary_gids}`;
   a group has `{kind:"group",name,gid,members}`. Verify local protected account
@@ -199,6 +203,12 @@ An incident blocks dependent mutations until protected maintenance resolves
 that exact incident and all unresolved execution outcomes. A resolution may
 recognize independently proved original ownership or absence; it cannot create
 ownership or bypass lifecycle, cleanup or activation gates.
+An incident does not prevent recording a conclusive historical resolving
+receipt; resolving execution neither clears the incident nor grants admission.
+Basis staleness alone is a freshness hold, not an incident requiring maintenance.
+Do not create `stale_result` incidents solely for an unrelated tail append;
+that reason requires an additional unsafe/contradictory condition. Existing
+incidents retain their maintenance requirement even after fresh preparation.
 
 The store remains root-owned 0600 under protected root-owned ancestors. Retain
 the existing 8 MiB whole-file ceiling; qualification must set finite per-record,
@@ -288,10 +298,13 @@ neither `removed` nor a nonzero account-tool exit proves physical absence.
 
 ## 4. Lock discipline and evidence freshness
 
-When both locks are needed, acquire the effect lock first, then the generation
-lock, with finite lock budgets; release in reverse order. No code may acquire
-the effect lock while holding the generation lock. A durable in-flight marker
-reserves only its exact effect/identity, not either global lock. Another
+There are two lock domains with three distinct persistent lock inodes. The
+effect store uses `effects.lock`; the generation journal uses `gate.lock` and
+`data.lock`. The full acquisition order is `effects.lock -> gate.lock -> data.lock`,
+with finite budgets and reverse release; preserve the generation format's
+gate/data exclusion and bounded-window rules. No code may acquire an earlier
+lock while holding a later one. A durable in-flight marker
+reserves only its exact effect/identity, not any global lock. Another
 request cannot replace it; a duplicate cannot launch a second worker. An
 expired timeout does not prove that an account-tool child stopped. Retain
 ownership of the child/incarnation until it exits or is conclusively terminated;
@@ -312,16 +325,44 @@ after a crash, unresolved execution requires maintenance before retry.
    the observation-to-commit interval; it is not a mutex held across RPC.
    Read-only preparation may precede an intent, but cannot authorize a write
    until its bound flight is durable. All writes and compensations use intents.
-3. Reacquire in the same order and replay current journal/store state. Compare
-   exact owner/request/step/key/attempt, UID/GID/name/generation and previous
-   generation, chain tail, policy/caller/backend digests, fence epoch and boot.
-   Recheck trusted object identities, active fence/lease validity, deadlines
-   and current authority. Require no unresolved incident or superseding worker.
-4. Commit a resolving receipt and lifecycle transition only with these checks
-   satisfied. A stale successful result may be preserved as historical object
-   evidence, but cannot activate, release a reservation, clear an incident or
-   authorize a dependent destructive write. Keep the target fenced and repeat
-   preparation from the current basis; never blindly repeat a mutation.
+3. Reacquire in the same order and replay verified journal/store state. Bind
+   the returned outcome to the immutable original owner/request/step/key,
+   attempt/flight hash, identity and worker incarnation. Establish that this
+   exact worker stopped and that its execution outcome is conclusive.
+   A conclusively completed attempt MUST receive a durable resolving receipt
+   regardless of basis staleness. Record the original flight basis and exact
+   outcome as historical evidence; do not relabel it with the current basis.
+   Closing this flight records execution only, including during a current
+   incident/authority hold. Unknown outcomes or live/unproved workers remain
+   unresolved and prohibit retry; a timeout cannot close them.
+4. Separately decide current admission. Compare exact generation/previous
+   generation, chain tail, policy/caller/backend digests, fence epoch and boot;
+   recheck trusted object identities, live fence/lease validity, deadlines and
+   caller authority. Require no unresolved incident or superseding worker.
+   Only these current checks permit a dependent write, lifecycle transition
+   or activation. A stale resolving receipt cannot activate, release a
+   reservation, clear an incident or authorize any dependent write. Keep
+   target fences and reservations held. Fresh preparation against the exact
+   current basis is mandatory before such admission; never blindly repeat
+   the mutation merely because its old flight has closed.
+
+For a conclusively completed read-only `evidence_prepare` at tail T while an
+unrelated append advances the tail to T+1, persist its historical resolving
+receipt and close that flight normally. If no independent incident/authority
+hold exists, start a new numbered preparation attempt under the same immutable
+intent at T+1; no maintenance is required solely for that tail mismatch.
+The original stale verdict stays inadmissible, and fences/reservations remain
+held through preparation and commit. With an existing incident, read-only
+re-preparation may collect reconciliation evidence but cannot clear the incident
+or authorize a write; protected maintenance must resolve it as specified above.
+
+For a completed mutation, first reconcile its recorded side effects with fresh
+owned-object observations under current fences. `applied` is not permission
+to repeat it. Retry the same write intent only after conclusive absence or
+proved no-progress, and fresh admission of that exact write; otherwise continue
+the appropriate forward/compensation path or retain an incident. Historical
+resolution cannot adopt an unreceipted object or waive maintenance for genuinely
+unknown execution, conflicting identity or missing provenance.
 
 Prepared evidence is admissible only for the exact recorded policy version
 and **exact current journal tail**, not merely an ancestor. Any intervening
@@ -434,7 +475,7 @@ Provider implementations still require their own publication/qualification.
 | `managed_content` | A root-owned approved-skeleton directory, with protected ancestors and manifest/content digest pinned in policy. Verify the complete selected skeleton and approved bytes, not a caller path or freshly trusted digest of live home content. The Curator composition/start interlock provider comes later; no launcher is admitted meanwhile. |
 | `persistence_denial` | The root step installs cron.deny/at.deny coverage for station accounts in the configured range and ensures no linger. Verify exact station **names** because these deny files are not numeric UID filters, allow-file precedence, no user-manager/session persistence and no linger. Each reserved name must be covered before activation; a host qualification flag cannot excuse a missing new-name entry. |
 | `process_fence` | There is no v0 launcher and the platform starts no process under a station UID. Accounts have locked passwords and no login. Maintain this deployment restriction through unlocked work and perform complete UID process/object inventory before `active` and `removed`. Any UID process before `active` refuses activation and records an incident; partial/unknown inventory refuses. Owned expected objects must match receipts; unexplained objects never become owned by inventory. |
-| `activation_guard` | The local verified journal guard performs final generation/fence validation and commit under both exclusive journal locks (effect-state and generation-transition exclusion). It accepts only fresh evidence from the other sources. It cannot hold those locks while acquiring external evidence; the §4 protocol still applies. |
+| `activation_guard` | The local verified journal guard performs final generation/fence validation and commit under the journal's exclusive `gate.lock` then `data.lock`, after the separate effect-store `effects.lock`; full order is effects -> gate -> data. It accepts only fresh evidence from the other sources. It cannot hold any of those locks while acquiring external evidence; the §4 protocol still applies. |
 
 The policy file itself must be root:root 0600, a regular single-link file,
 under protected root-owned ancestors, opened without following links. Missing
@@ -493,6 +534,7 @@ not crash or fail setup; every positive neighbor must run in the same harness.
 | `DeletionReplacementNotUnlinked`: entry replaced after batch preparation, symlink, foreign mount or partial scan blocks progress/complete verdict; reservations remain | `PartialOwnedBatchResumes`: bounded batch interrupted after some unlinks; absent admitted entries reconciled, matching owned remainder progresses under same intent | Skip entry identity or mark budget exhaustion done; negative fails on replacement preservation/unfinished-state assertions. Include a too-small no-progress budget and a larger bounded valid neighbor. |
 | `ExternalIOHoldsNoStateLock`: stalled NSS/systemctl/service or filesystem backend call must not hold either global lock; duplicate request cannot start a second worker | `LocalTransitionSerialized`: unrelated target advances while the stalled target stays in-flight; bounded local intent/receipt commits serialize correctly | Hold effect or generation lock across call, or ignore flight; assert unrelated bounded progress and exactly one worker, not merely a timeout. |
 | `StalePreparedEvidenceRechecked`: advance journal tail or policy/caller/backend/fence version while query is unlocked; old result cannot commit active/removed or clear hold | `CurrentFencedEvidenceCommits`: same exact basis and continuously valid exclusion permit the intended commit | Accept ancestor tail or timestamp-only freshness; named stale case fails. Include an unrelated-tail append and same-version fence loss. |
+| `CompletedStaleFlightReprepares`: unrelated tail T -> T+1 while a read-only worker completes must not strand its flight; resolve the stopped attempt durably without admitting stale authority, retain fences/reservations, then re-prepare the same intent against T+1 | Same-basis completion still resolves; `UnknownWorkerNeverRetried` retains live/unknown-worker exclusion. An independent incident stays held for maintenance even after completion | Block the resolving receipt solely on tail mismatch; this named case must fail on absence of a fresh-preparation continuation. The bounded literal-spec trace is not a runtime backend qualification. |
 | `UnknownWorkerNeverRetried`: timeout/crash with child outcome unknown leaves flight unresolved and prevents second write | `StoppedAttemptSameIntentRetry`: conclusive stopped/absent worker and fresh basis permit same intent, new attempt, unchanged names | Clear flight on timeout; assert no duplicate tool call and retained accounting. |
 | `ReceiptVersionAndCapacityClosed`: v1, malformed v2, conflicting key, missing receipt, stale floor, restore hold or insufficient receipt reserve admits no OS write | `DurableV2Recovery`: valid bounded v2 and ancestor checkpoint reconcile an already committed append once, retaining all records | Drop version/capacity/floor checks separately; assert zero writes and no lost IDs. A coherent whole-machine rollback still needs external restore custody. |
 | `GenerationReservationNotReassigned`: old removed bump generation or failed successor cannot release/steal the retained account or charge a reused UID as another generation | `ExactGenerationAccountingRetained`: original reservation, cursor and quota survive each crash boundary and terminal replay | Join charges by UID alone or free the reservation on removed; named exact-generation assertions fail. |
