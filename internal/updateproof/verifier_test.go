@@ -213,6 +213,8 @@ func TestVerifierRefusals(t *testing.T) {
 			f.release = strings.Replace(f.release, "Date: "+f.clock.Now.Add(-time.Hour).Format(time.RFC1123Z), "Date: "+f.clock.Now.Add(10*time.Minute).Format(time.RFC1123Z), 1)
 			f.sign(false)
 		}},
+		{"UpdateUnsignedOrExpiredRefused_bad_signature", ErrTrust, func() { f.bundle.Signature[len(f.bundle.Signature)-1] ^= 1 }},
+		{"UpdateUnsignedOrExpiredRefused_revoked_signer", ErrTrust, func() { f.profile.Signers[0].Revoked = true }},
 		{"UpdateUnsignedOrExpiredRefused_unsigned", ErrTrust, func() { f.bundle.Signature = nil }},
 		{"UpdateUnsignedOrExpiredRefused_signer", ErrTrust, func() { f.profile.Signers[0].Fingerprint = strings.Repeat("A", 40) }},
 		{"UpdateUnsignedOrExpiredRefused_equivocation", ErrTime, func() {
