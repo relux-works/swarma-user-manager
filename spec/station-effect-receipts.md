@@ -542,7 +542,7 @@ single-link root:root 0600 file. No symlink traversal, untrusted ancestor or
 alternate caller location is accepted. Publish with exclusive same-filesystem
 temporary creation, file fsync, atomic replacement and parent fsync; collision
 with an unrelated temporary object refuses. A failed or interrupted issuance
-cannot publish a passing record or install a pin. Keep failed diagnostics in
+cannot leave an admissible passing record or install a pin. Keep failed diagnostics in
 protected maintenance logs; never record account hashes, secrets or raw tool output in the record.
 
 The closed record has exactly these mandatory fields, encoded with the pinned
@@ -568,9 +568,16 @@ noncanonical bytes, unknown format, invalid types, overflow and exceeded finite
 bounds from the reviewed policy. Digests are lowercase 64-hex SHA-256 strings.
 The previous `station-qualification/1` record is not accepted under this
 input-pin contract; no silent reinterpretation or boot fallback is allowed.
-Range endpoints are inclusive nonzero UID/GID integers within the existing
-policy bounds; arrays of ranges are sorted and nonoverlapping. `station_range`
-is exactly the installed policy's two ranges, not an observed free subset.
+Module UID/GID range endpoints are inclusive integers with
+`0 <= min <= max <= 4294967294`; reject inverted intervals, overflow and the
+reserved all-ones ID. Singleton (zero-width) intervals are valid: `[0,0]`
+represents root synthesis and `[65534,65534]` represents nobody synthesis.
+The interval `[0,0]` is encoded as `{min:0,max:0}` in the range-entry schema.
+Zero is an actual endpoint, never missing/unknown evidence. Arrays are sorted
+and nonoverlapping; an empty array requires proof of no synthesized IDs.
+`station_range` retains the existing nonzero policy allocation bounds and is
+exactly the installed policy's two ranges, not an observed free subset.
+Permitting module synthesis at zero does not permit allocating station ID zero.
 `station_names` is per-run check coverage outside I, a sorted unique array of
 the complete protected policy-derived coverage being checked, including reserved
 names. Its derivation is policy-bound; new reservations do not change the
@@ -591,7 +598,7 @@ unsupported, partial or missing check cannot pass. Check meanings are fixed:
 | `allow_precedence` | Effective cron/at allow-file precedence cannot admit any covered station name. |
 | `no_linger` | No station linger, user-manager or session persistence is enabled for covered identities. |
 | `account_directory` | Complete qualified authoritative-local/NSS agreement under §6.4, covering reserved identities and the station number/name namespaces. |
-| `dynamic_user_ranges` | Proven module UID/GID ranges are disjoint from the entire configured station ranges. |
+| `dynamic_user_ranges` | Proven module synthesized UID/GID ranges are disjoint from the entire configured station ranges. |
 | `no_launcher` | Protected deployment configuration and installed entry/service inventory agree with `no_launcher=true`; no platform launcher is deployed or enabled. |
 | `account_restrictions` | Every present reserved station identity has its exact admitted identity fields, locked password, no-login shell and forbidden memberships absent; future identities require the same fresh checks. |
 
@@ -660,15 +667,15 @@ skip a source or substitute local-only agreement.
 Under the deployment exclusion, boot mode reconstructs current I from trusted
 inputs and requires its digest to equal the unchanged policy pin **before**
 publication; it runs every §6.3 check again and revalidates all inputs before
-atomic publication. Only a fully passing run writes a new protected Q at the
-fixed record location, with current `boot_id`, audit time, full inputs and
+atomic publication. Only after all checks pass may a run write a new protected
+Q at the fixed record location, with current `boot_id`, audit time, full inputs and
 per-check results. The only product write is that record and its owned
 publication temporary file; protected diagnostics go to the unit journal/log.
 It never edits policy, pin, skeleton, NSS or account/persistence configuration.
 An input mismatch, failed/unknown check, unsupported dependency or interrupted
-run publishes no record and exits nonzero; the failed unit and bounded reason
-are visible in systemd status/journal. Do not expose credentials or raw account
-material. Keep manager readiness closed as `qualification_required`; only an
+run leaves no admissible new record and exits nonzero; the failed unit and
+bounded reason are visible in systemd status/journal. Do not expose credentials
+or raw account material. Keep manager readiness closed as `qualification_required`; only an
 operator can reconcile changed inputs and install a new pin. A retry requires
 admission stopped and withdrawal of any prior issuer-owned current-boot record
 before checking, so failure cannot leave a previous run's success admissible.
@@ -722,30 +729,120 @@ re-read these protected lines and require byte equality with the record before
 using the account directory; any difference makes the directory and host
 qualification unknown and requires re-qualification.
 
-`nss_modules` lists exactly the modules selected by those three lines, once
-each in first-appearance order (`passwd`, then `group`, then `shadow`). Each
-module needs a reviewed bounded complete lookup/agreement implementation plus
-protected provenance for its implementation/configuration digests and every
-UID/GID interval it can synthesize dynamically. Those digests bind the complete
-reviewed module dependency/configuration closure, not only a module label or
-one arbitrarily selected file; an uninspectable dependency cannot qualify. A module with no dynamic IDs
-has explicitly empty arrays, supported by its reviewed semantics; an unknown
-or unbounded range is not empty and cannot qualify. Include all reachable
-module behavior under NSS action clauses; one successful earlier module does
-not excuse an unqualified later source. No module name, such as a local-file
-module, grants authority by name alone.
+The supported module set is exactly **{`files`, `systemd`}**:
 
-Qualification fails if either station UID range or station GID range overlaps
-any corresponding module dynamic range, including one shared endpoint.
-Record the checked ranges in each module entry; do not invent host defaults
-or infer ranges from currently present users. Runtime must verify the same
-module implementation/configuration digests and ranges as well as the exact
-three lines. Module configuration drift with unchanged lines is also unknown.
-The approved account-directory provider and its module support matrix ship as
-part of the pinned reviewed backend; an unimplemented or unqualified module
-refuses rather than producing a best-effort NSS view. Fresh per-target local
-and NSS agreement is still mandatory at allocation/restoration/verification;
-the record does not snapshot live account data or turn NSS matches into receipts.
+| Module | Required qualified behavior |
+|---|---|
+| `files` | Protected local databases above are authoritative; the reviewed implementation has no independently synthesized UID/GID intervals. Explicit empty range arrays require that implementation/dependency proof. |
+| `systemd` | Reviewed module, dependencies and the complete bounded userdb closure below; recognition of the module alone cannot qualify it. |
+| Any other module | Unknown/unsupported, even if an earlier module answered successfully. |
+
+`nss_modules` lists exactly the modules selected by those three lines, once
+each in first-appearance order (`passwd`, then `group`, then `shadow`). The
+reviewed backend supports bare module lists with the normal NSS default action
+semantics. An action clause is supported only when its parser and all reachable
+status/action paths have an explicit reviewed equivalence proof in that pinned
+backend; unsupported syntax or semantics is unknown. Include all reachable
+module behavior; an earlier success cannot hide an unqualified source. No
+module label grants authority by itself.
+
+Each module needs a bounded complete lookup/agreement implementation and
+protected provenance for every implementation/dependency and configuration
+input. `implementation_digest` binds the reviewed module and its full resolved
+shared-library dependency closure, including exact protected paths and content
+digests. `configuration_digest` is SHA256 of a retained CCJ-1 canonical reviewed
+closure manifest, selected from a fixed backend-defined protected location,
+not a caller path. Its pinned closed schema and finite bounds reject unknown
+or duplicate fields and noncanonical encodings. The manifest has the record's
+root-owned, no-follow, regular single-link protection and is installed by the
+operator before qualification; boot renewal only reads it. Missing, unreadable, unsupported or
+unbounded manifest/dependency evidence is unknown. These existing fields bind
+the closure into I without adding members to the closed input/record formats.
+
+For `systemd`, the manifest must contain all of the following observations,
+provenance and bounds, verified under the maintained configuration exclusion:
+
+1. All four drop-in roots, `/etc/userdb`, `/run/userdb`, `/run/host/userdb` and
+   `/usr/lib/userdb`, each recorded as exactly absent or empty. Verify protected
+   root-owned ancestors and, when present, a root-owned directory not writable
+   by non-root; use descriptor-relative no-follow inspection and complete
+   bounded enumeration. Only precise ENOENT at a component of the no-follow
+   walk from a verified protected parent proves absence; a missing intermediate
+   directory is allowed, an I/O/permission error is not. A symlink, unreadable
+   path, partial enumeration, mount/configuration change or any entry is not
+   empty. Reject all children, including hidden files, aliases and membership-only
+   entries; do not filter by a recognized suffix.
+2. The complete set of service entries in protected `/run/systemd/userdb/`,
+   exactly equal to the recorded selected set. Require `io.systemd.DynamicUser`;
+   include `io.systemd.Multiplexer` and `io.systemd.NameServiceSwitch` exactly
+   when present. `io.systemd.Home` and `io.systemd.Machine` are optional only
+   with complete proven UID/GID bounds recorded as below. No other service is
+   allowed, including `io.systemd.DropIn` or an unknown custom provider, even
+   when the four directories are empty. Enumerate without following links;
+   verify socket type, protected ownership/ancestry and the reviewed serving
+   implementation/configuration, not merely an allowed socket filename.
+   Missing/unavailable required services, aliases and partial discovery are
+   unknown. Do not treat an unreachable endpoint as absent.
+3. For every selected service, its exact name, reviewed implementation and
+   dependency/configuration digests, effective UID/GID range provenance and
+   source reference. A source reference records the upstream document URL,
+   pinned version/revision and content digest, retained locally in the reviewed
+   closure; boot/runtime checks never fetch it. The configuration digest must
+   cover every provider input that can add identities or alter bounds. The
+   Multiplexer forwards only the recorded service closure; NameServiceSwitch
+   may bridge only the qualified local NSS closure above. Neither has an
+   independent allocator interval: record that forwarding role and its complete
+   provider set, preserving all forwarded bounds and fresh local-file checks.
+   Empty allocator arrays for a bridge cannot erase its providers' ranges.
+4. All synthesized UID/GID intervals, including root/nobody and every selected
+   provider's possible outputs, recorded in the module's range arrays as the
+   sorted nonoverlapping union. The manifest retains each contributing interval
+   and source; duplicates/overlap between contributors are merged only for the
+   aggregate arrays. Authoritative local-file identities forwarded by a service
+   remain covered by fresh complete local/NSS agreement, not by a claim that the
+   service can freely allocate those numbers. Use inclusive endpoints, including
+   singleton intervals; no station UID/GID interval may intersect this union.
+
+The reviewed numeric starting points are documented here; they are not proof
+of a deployed provider's complete bounds:
+
+| Source | Documented UID/GID intervals or role | Required bound |
+|---|---|---|
+| `nss-systemd` built-in synthesis | `[0,0]`, `[65534,65534]` | Include both in the module union even when local files currently supply those identities ([nss-systemd 257](https://www.freedesktop.org/software/systemd/man/257/nss-systemd.html)). |
+| `io.systemd.DynamicUser` | `[61184,65519]` for dynamic allocation | Verify the installed reviewed implementation/configuration enforces the recorded bounds; any reused static identity must come from the qualified local databases ([systemd.exec 257](https://www.freedesktop.org/software/systemd/man/257/systemd.exec.html)). |
+| `io.systemd.Home` | Automatic allocation `[60001,60513]` | The automatic pool alone is insufficient: explicit preferred UIDs and migrated records can lie outside it. Require complete protected provider-record/configuration bounds, otherwise unknown ([homectl 257](https://www.freedesktop.org/software/systemd/man/257/homectl.html)). |
+| `io.systemd.Machine` | Automatic container pool `[524288,1879048191]` | Require all configured container/user-namespace mappings and other supported synthesis ranges, not just the default pool ([systemd UID/GID allocation](https://systemd.io/UIDS-GIDS/); pin the reviewed revision/content in the manifest). |
+| `io.systemd.Multiplexer`, `io.systemd.NameServiceSwitch` | Forwarding/bridge roles | Verify the entire reachable provider set as above; these endpoints are not additional unbounded identity authorities ([systemd-userdbd 257](https://www.freedesktop.org/software/systemd/man/257/systemd-userdbd.service.html)). |
+
+Do not infer bounds from current users, a module hash or documented defaults
+alone. Any provider whose complete effective range cannot be proved is unknown;
+optional Home/Machine services do not acquire permission merely by recording
+their usual allocation pool. The four-root emptiness rule excludes arbitrary
+static userdb records, and the exact service set excludes unreviewed Varlink
+providers; both are necessary, alongside the dependency/configuration proof.
+
+Qualification compares every corresponding module interval to the entire
+station UID and GID ranges, including shared endpoints. Runtime rechecks the
+same manifest, source-bound ranges, all four directory states, exact service
+set and implementation/configuration closure, as well as the exact NSS lines,
+before using the account directory and through the existing exclusion/
+exact-basis protocol. Any change is unknown, including configuration or service
+changes with unchanged NSS lines; no automatic enlargement, fallback or
+re-pinning is permitted. Per-boot socket inode/PID churn is not itself a new
+semantic input, but each new endpoint must satisfy the same protected provider
+proof; inode equality alone never carries that proof across boots. Endpoint
+replacement during an operation invalidates its evidence and yields unknown.
+
+This proves only the bounded allowed identity sources for the reviewed local
+configuration while exclusion holds, with synthesized ranges disjoint from
+station allocation. It does not prove that every NSS implementation supports
+complete enumeration, that a provider can be trusted by name, or that arbitrary
+userdb/Home/Machine deployments are bounded. Missing terminal status, incomplete
+NSS enumeration or inability to maintain exclusion still makes agreement
+unknown. Fresh per-target local and NSS agreement remains mandatory at
+allocation/restoration/verification; this record is neither a live account
+snapshot, an ownership receipt nor protection against privileged configuration
+changes. Implementation and executable host qualification remain pending.
 
 ### 6.5 Local-v0 process fence
 
@@ -795,10 +892,14 @@ not crash or fail setup; every positive neighbor must run in the same harness.
 | `PersistenceQualificationRefused`: missing cron.deny entry, missing at.deny entry, effective allow-file admission or lingering enabled refuses `qualification_required` | `CompletePersistenceDenialQualifies`: exact reserved names denied in both mechanisms, effective precedence verified and no linger; host and per-target checks pass | Omit each deny/linger check separately; the corresponding named case must fail on forbidden qualification/activation. |
 | `QualificationRecordMismatchRefused`: alter record inputs/digest, policy input pin, policy content, executable/backend or skeleton after issuance; refuse `qualification_required` before writes | `QualificationRecordMatches`: protected canonical record with matching deployment, boot, all checks `ok` and exact input pin admits only the host gate | Skip one binding comparison; the corresponding negative must fail on forbidden admission. Normalize only the two attestation fields; changing another policy field must invalidate qualification. |
 | `NSSLineDriftRefused`: change any recorded passwd/group/shadow line, including spacing or action clauses, after qualification; host and account-directory results become unknown | `NSSConfigurationMatches`: exact unchanged lines, qualified module configuration and complete local/NSS agreement permit the relevant observation | Ignore one database line or normalize whitespace; the named drift assertion must fail. Also plant a module configuration/range change while lines remain equal. |
+| `UnsupportedNSSSourceRefused`: another module or unsupported action clause refuses as unknown even after an earlier successful files lookup | `SupportedNSSSourcesAgree`: default-action files/systemd configuration with a qualified bounded closure and complete local/NSS agreement passes only directory observation | Skip later modules after success or silently discard an action clause; the matching named assertion must fail on forbidden agreement. This does not qualify an unimplemented action parser. |
+| `SystemdUserdbDropInRefused`: add any entry under any of the four protected userdb roots, including a hidden file, alias or membership-only record; qualification/admission refuses before writes and preserves reservations | `SystemdMinimalClosureQualifies`: four roots absent/empty exactly as pinned, only the protected reviewed DynamicUser endpoint, root/nobody plus proven dynamic ranges disjoint from station ranges, all other host checks passing; admits only host qualification | Ignore one root or filter out membership/hidden entries; each named root/entry variant must fail the refusal assertion. Repeat a change after issuance with unchanged NSS lines; assert unknown and no lifecycle writes, not deletion of the planted fixture. |
+| `SystemdUnexpectedVarlinkRefused`: add an unrecorded service, `io.systemd.DropIn`, alias or an unbounded Home/Machine provider under the userdb service directory; refuse before writes | `SystemdMinimalClosureQualifies`; also qualify a recorded reviewed bridge only with its exact bounded provider closure, and Home/Machine only with complete proven ranges | Ignore extra services, trust an allowed filename, erase forwarded ranges or accept only an automatic Home/Machine pool; the matching named variant must fail on forbidden host admission. Removal/replacement of a required recorded endpoint after issuance must become unknown. |
+| `SynthesizedSingletonRangesPreserved`: omitting root/nobody singleton ranges or accepting a station overlap at their endpoint cannot qualify; inverted, overflowing or all-ones intervals are invalid | `SynthesizedSingletonRangesAccepted`: canonical module `[0,0]` and `[65534,65534]` survive encoding/decoding and disjoint nonzero station ranges pass; station ID zero still refuses | Reject zero as missing, discard singletons, or weaken station bounds; the corresponding positive/negative assertion must fail. These are record/range tests, not evidence of an installed provider. |
 | `DynamicUserRangeOverlapRefused`: station UID or GID interval overlaps a configured NSS module dynamic interval, including a shared endpoint; qualification fails | `DynamicUserRangesDisjoint`: proven complete module ranges are disjoint from both station ranges; the immediately adjacent nonoverlapping boundary passes | Skip the overlap check, ignore GIDs or use exclusive endpoints; the corresponding case must fail. Unknown module ranges separately refuse rather than count as empty. |
 | `QualificationFlagWithoutRecordRefused`: set `qualified=true` with missing record, missing pin, unsafe record, nonpassing/missing check or another boot; refuse before any OS/lifecycle write | `QualifiedFlagWithPassingRecord`: root issuer's durable protected all-`ok` same-boot record, verified inputs and exact policy pin pass only host qualification | Admit from the flag alone or omit one record prerequisite; named negative fails on forbidden host admission. A passing host neighbor still needs fresh per-target checks. |
 | `PreviousBootQualificationRefused`: retain a passing previous-boot record with the unchanged input pin, or invoke before the oneshot completes; refuse `qualification_required` | `CurrentBootRequalified`: oneshot repeats all checks and publishes a fully passing current-boot record, admitting only host qualification | Drop the boot comparison or treat unit ordering/flag as readiness; named negative must fail on forbidden admission. Missing, running and failed oneshot neighbors stay closed, including a record already visible from an interrupted publication. |
-| `BootQualificationInputDriftRefused`: change any normalized policy, binary, backend, skeleton, range, NSS line or module-closure input before/during the boot run; exit nonzero, publish no new record and preserve policy/pin bytes | `BootQualificationInputsUnchanged`: identical pinned inputs and all checks passing publish a current-boot record | Automatically adopt/re-pin changed inputs or omit the final input recheck; assert no record publication and no policy mutation on failure, including a changed-input race. |
+| `BootQualificationInputDriftRefused`: change any normalized policy, binary, backend, skeleton, range, NSS line or module-closure input before/during the boot run; exit nonzero, leave no admissible new record and preserve policy/pin bytes | `BootQualificationInputsUnchanged`: identical pinned inputs and all checks passing publish a current-boot record | Automatically adopt/re-pin changed inputs or omit the final input recheck; assert no new record is admissible and no policy mutation occurs on failure, including a changed-input race. |
 | `RebootMustNotRepin`: boot renewal attempts to rewrite the policy/pin or accept cached previous-boot check results; reject the attempt | `RebootPinUnchanged`: successive boots rerun every check and produce distinct boot/time records with identical inputs digest and byte-identical policy | Pin SHA256 of the whole boot record, rewrite the pin or skip checks; assert policy bytes unchanged, every check executed, new boot recorded and the old record rejected. No boot here is an executed host test. |
 | `NonOperatorRetirementRefused`: dispatcher or wrong pinned operator cannot waive export or enter retirement; no cleanup writes | `ExplicitOperatorRetirementAdmitted`: exact authenticated/confirmed operator act journals its scoped export waiver and unresolved broker obligation before forward retirement | Reuse dispatcher authority or omit exact-act confirmation; named negative fails on unauthorized retirement. |
 | `PreactiveProcessIncident`: any station UID process before active prevents activation and leaves an incident/reservation | `NeverLaunchedInventoryClean`: no station process and complete accounted UID-object inventory permit only the locally provisioned active state | Treat no-launcher configuration as proof without inventory; named negative fails on active append. |

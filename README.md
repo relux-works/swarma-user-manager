@@ -98,6 +98,9 @@ accepted. The executable can refuse an unqualified host earlier.
 The [qualification issuer and account-directory contract](spec/station-effect-receipts.md#63-root-issuer-and-closed-qualification-record)
 specifies a root-only `swarma-user-manager qualify` maintenance entry, canonical
 input-pinned evidence, per-boot records and exact recorded NSS configuration.
+The [account-directory matrix](spec/station-effect-receipts.md#64-qualified-local-account-directory-and-nss-configuration)
+supports only `files` and bounded `systemd`, with pinned empty/absent userdb
+roots, exact reviewed Varlink providers and source-backed UID/GID ranges.
 A root-owned networkless boot oneshot repeats every check without changing the
 pin. These entries and their production reader remain unimplemented; a
 `qualified` flag alone never admits.
