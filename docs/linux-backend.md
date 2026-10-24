@@ -532,10 +532,12 @@ profile; a few accessible library directories are insufficient evidence.
 Their complete pinned entries and file bytes must contain no launcher reference.
 `configuration` is a nonempty list of reviewed protected configuration file pins.
 The pinned qualification unit must specify root, oneshot, exact absolute
-`ExecStart=<root>/libexec/swarma-user-manager qualify --boot`, `PrivateNetwork=yes`
-and `RestrictAddressFamilies=AF_UNIX`; duplicate service keys, additional start
-commands and environment-file/pass-environment directives refuse. Hash review
-must also cover drop-ins and all effective unit load paths.
+`ExecStart=<root>/libexec/swarma-user-manager qualify --boot` and the landed
+service profile: `RestrictAddressFamilies=AF_UNIX`, `IPAddressDeny=any` and
+`SystemCallFilter=~io_uring_setup io_uring_enter io_uring_register`. Private network,
+IPC or temporary-file namespaces must not hide host inventory. Missing, duplicate,
+changed or extra service directives refuse; unit/drop-in load scope and ordering
+also remain part of the protected deployment review and pins.
 
 `inventory` contains `format:"local-v0-reviewed-host-scope/1"`, `files` (nonempty
 sorted outside-home roots), `shm`, `mqueue`, `cron`, `system_cron`, `at`, `linger`,
@@ -571,8 +573,10 @@ configuration/implementation fingerprints. Mutable account databases are checked
 around each directory observation, allowing legitimate account-tool mutations.
 
 The concrete production runtime currently implements the reviewed `files` NSS
-closure. `files systemd` remains unknown until the companion systemd provider is
-integrated. Unsupported loader/platform profiles, incomplete inventory, missing
+closure through the landed `SystemdNSSRuntime` interface. `files systemd`
+remains `directory_unknown: systemd_provider_completion_unavailable` until a
+direct per-provider completion collector is implemented. No separate systemd
+closure parser is installed by the Environment. Unsupported loader/platform profiles, incomplete inventory, missing
 journal genesis, missing root protection and unreviewed module behavior refuse.
 Fixture tests exercise protocol, failure paths and local primitives; they do not
 qualify a production host or establish privileged behavior.
@@ -581,21 +585,35 @@ qualify a production host or establish privileged behavior.
 
 This is a proposed owner-run root step, pending execution. Use a trusted root
 shell with a clean environment and admission stopped throughout steps 1–6.
+This procedure currently applies only to the reviewed `files` profile. The fixed
+systemd metadata closure file `/opt/swarma/etc/user-manager-systemd-closure.json`
+(root:root 0600) is documented above for that separate provider contract; installing
+it does not enable qualification of a `files systemd` host while direct provider
+completion is unavailable.
 
-1. Install reviewed binary and collector at `/opt/swarma/libexec/` as protected
-   root-owned executables; install the reviewed oneshot and its effective load
-   configuration. Admission consumers must require and order after the unit.
-   Install all pinned artifacts, complete inventory profile, skeleton controls
-   and protected deployment manifest. Prepare the existing journal through its
-   reviewed initialization procedure; qualification does not repair it.
-2. Create the protected 0700 qualification directory and empty 0600 deployment
-   lock. Install protected candidate policy P0 with `no_launcher:true`,
+1. Install the reviewed binary and collector at
+   `/opt/swarma/libexec/swarma-user-manager` and
+   `/opt/swarma/libexec/swarma-nss-probe` as protected root-owned executables.
+   Install [deploy/systemd/swarma-user-manager-qualify.service](../deploy/systemd/swarma-user-manager-qualify.service)
+   as root:root 0644 at `/etc/systemd/system/swarma-user-manager-qualify.service`.
+   Install [deploy/systemd/qualify-consumer.conf](../deploy/systemd/qualify-consumer.conf)
+   as root:root 0644 at `/etc/systemd/system/<consumer>.service.d/10-qualification.conf`
+   for every service that can invoke the manager. Review every effective unit/drop-in
+   load path; consumers must both require and order after the qualifier.
+   Install all pinned artifacts, complete inventory profile and skeleton controls;
+   install the closed root:root 0600 deployment manifest at
+   `/opt/swarma/etc/user-manager-deployment.json`. Prepare the existing journal
+   through its reviewed initialization procedure; qualification does not repair it.
+2. Create the protected root:root 0700
+   `/opt/swarma/lib/user-manager/qualification` directory and empty root:root 0600
+   `/opt/swarma/lib/user-manager/deployment.lock`. Install protected root:root 0600
+   candidate policy P0 at `/opt/swarma/etc/user-manager.json` with `no_launcher:true`,
    `qualified:false`, zero qualification digest, exact backend/skeleton hashes
    and all six local-v0 source versions equal to the backend digest.
 3. Exclude other root account/configuration writers and atomically install a
    root:root 0600 canonical marker `{format:"station-maintenance/1",boot_id,
-   admission_stopped:true}` at the fixed maintenance path, using current kernel
-   boot UUID. Hold this operator exclusion until admission resumes.
+   admission_stopped:true}` at `/opt/swarma/lib/user-manager/maintenance.json`,
+   using the current kernel boot UUID. Hold this operator exclusion until admission resumes.
 4. Run `/usr/bin/env -i /opt/swarma/libexec/swarma-user-manager qualify` from the
    trusted root shell. Require exit 0 and one inputs digest; verify the protected
    initial record and exact reviewed inputs. It cannot admit an account.

@@ -159,7 +159,7 @@ type reviewedFilesRuntime struct {
 }
 
 func (r reviewedFilesRuntime) CaptureModules(ctx context.Context, names []string, l linuxos.Limits) ([]linuxos.NSSModule, error) {
-	out, e := r.files.CaptureModules(ctx, names, l)
+	out, e := (&linuxos.SystemdNSSRuntime{Files: r.files}).CaptureModules(ctx, names, l)
 	if e != nil {
 		return nil, e
 	}
@@ -167,5 +167,5 @@ func (r reviewedFilesRuntime) CaptureModules(ctx context.Context, names []string
 	return out, nil
 }
 func (r reviewedFilesRuntime) Enumerate(ctx context.Context, names []string, l linuxos.Limits) (linuxos.NSSDatabases, error) {
-	return r.files.Enumerate(ctx, names, l)
+	return (&linuxos.SystemdNSSRuntime{Files: r.files}).Enumerate(ctx, names, l)
 }

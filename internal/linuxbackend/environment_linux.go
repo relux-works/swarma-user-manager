@@ -334,7 +334,8 @@ func (h *ProductionEnvironment) runtime(ctx context.Context, m DeploymentManifes
 		r.Close()
 		return nil, nil, e
 	}
-	// systemd remains explicitly unknown until its reviewed provider is integrated.
+	// The adapter delegates to the landed SystemdNSSRuntime gate: files works,
+	// while systemd stays unknown until direct provider completion is available.
 	return reviewedFilesRuntime{files: linuxos.FilesNSSRuntime{Collector: helper, Library: lib, Resolver: r, Configuration: []linuxos.ProtectedArtifact{}}, manifest: raw}, r.Close, nil
 }
 

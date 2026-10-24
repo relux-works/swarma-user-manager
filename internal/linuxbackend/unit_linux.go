@@ -3,8 +3,9 @@
 package linuxbackend
 
 import (
-	"github.com/relux-works/swarma-user-manager/internal/qualification"
 	"strings"
+
+	"github.com/relux-works/swarma-user-manager/internal/qualification"
 )
 
 // The reviewed unit bytes are independently pinned in backend_files. This check
@@ -40,11 +41,27 @@ func validateQualificationUnit(raw, binary string) error {
 		}
 		service[k] = v
 	}
-	if service["Type"] != "oneshot" || service["User"] != "root" || service["ExecStart"] != binary+" qualify --boot" || service["PrivateNetwork"] != "yes" || service["RestrictAddressFamilies"] != "AF_UNIX" {
+	required := map[string]string{
+		"Type": "oneshot", "User": "root", "Group": "root",
+		"UMask": "0077", "WorkingDirectory": "/",
+		"ExecStart": binary + " qualify --boot", "RemainAfterExit": "yes",
+		"Restart": "no", "TimeoutStartSec": "120",
+		"StandardInput": "null", "StandardOutput": "journal", "StandardError": "journal",
+		"Environment":             "PATH=/usr/sbin:/usr/bin LANG=C LC_ALL=C",
+		"UnsetEnvironment":        "LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT GLIBC_TUNABLES GCONV_PATH LOCPATH",
+		"RestrictAddressFamilies": "AF_UNIX", "IPAddressDeny": "any",
+		"SystemCallFilter":        "~io_uring_setup io_uring_enter io_uring_register",
+		"SystemCallArchitectures": "native", "NoNewPrivileges": "yes",
+		"RestrictSUIDSGID": "yes", "RestrictRealtime": "yes",
+		"LockPersonality": "yes", "RestrictNamespaces": "yes",
+	}
+	// Match the landed service profile without hiding host inventory behind
+	// PrivateNetwork/PrivateTmp/PrivateIPC or accepting IP/filter exceptions.
+	if len(service) != len(required) {
 		return qualification.ErrRequired
 	}
-	for k := range service {
-		if strings.HasPrefix(k, "Exec") && k != "ExecStart" || k == "EnvironmentFile" || k == "PassEnvironment" {
+	for key, value := range required {
+		if service[key] != value {
 			return qualification.ErrRequired
 		}
 	}

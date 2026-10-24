@@ -5,9 +5,12 @@ package linuxbackend
 import (
 	"context"
 	"encoding/binary"
+	"errors"
+	"os"
 	"strings"
 	"testing"
 
+	"github.com/relux-works/swarma-user-manager/internal/linuxos"
 	"github.com/relux-works/swarma-user-manager/internal/manager"
 	"github.com/relux-works/swarma-user-manager/internal/qualification"
 	"github.com/relux-works/swarma-user-manager/tools/genjournal"
@@ -130,19 +133,74 @@ func TestQualificationLoaderCache(t *testing.T) {
 	}
 }
 
-// Closed unit selection and kernel-level network denial are prerequisites; a
-// pinned file with another command, root identity or environment source refuses.
+// The production validator accepts the actual landed unit and refuses changes
+// to argv/root, IP denial, io_uring restrictions or host inventory visibility.
+// This validates bytes only, not systemd execution or kernel enforcement.
 func TestQualificationUnitProfile(t *testing.T) {
-	raw := "[Unit]\nDescription=Qualification\n[Service]\nType=oneshot\nUser=root\nExecStart=/opt/swarma/libexec/swarma-user-manager qualify --boot\nPrivateNetwork=yes\nRestrictAddressFamilies=AF_UNIX\n"
+	b, e := os.ReadFile("../../deploy/systemd/swarma-user-manager-qualify.service")
+	if e != nil {
+		t.Fatal(e)
+	}
+	raw := string(b)
 	bin := "/opt/swarma/libexec/swarma-user-manager"
-	for _, bad := range []string{strings.Replace(raw, " --boot", "", 1), strings.Replace(raw, "User=root", "User=daemon", 1), strings.Replace(raw, "PrivateNetwork=yes", "PrivateNetwork=no", 1), raw + "ExecStartPre=/bin/true\n", raw + "EnvironmentFile=/tmp/env\n", raw + "ExecStart=/bin/true\n"} {
-		if validateQualificationUnit(bad, bin) == nil {
-			t.Fatal("bad unit admitted")
+	for name, bad := range map[string]string{
+		"argv":              strings.Replace(raw, " --boot", "", 1),
+		"root":              strings.Replace(raw, "User=root", "User=daemon", 1),
+		"network-namespace": strings.Replace(raw, "[Service]", "[Service]\nPrivateNetwork=yes", 1),
+		"network-no":        strings.Replace(raw, "[Service]", "[Service]\nPrivateNetwork=no", 1),
+		"ip-denial":         strings.Replace(raw, "IPAddressDeny=any", "IPAddressDeny=localhost", 1),
+		"ip-exception":      strings.Replace(raw, "[Service]", "[Service]\nIPAddressAllow=localhost", 1),
+		"io-uring":          strings.Replace(raw, "SystemCallFilter=~io_uring_setup io_uring_enter io_uring_register\n", "", 1),
+		"private-tmp":       strings.Replace(raw, "[Service]", "[Service]\nPrivateTmp=yes", 1),
+		"private-ipc":       strings.Replace(raw, "[Service]", "[Service]\nPrivateIPC=yes", 1),
+		"extra-command":     strings.Replace(raw, "[Service]", "[Service]\nExecStartPre=/bin/true", 1),
+		"env-file":          strings.Replace(raw, "[Service]", "[Service]\nEnvironmentFile=/tmp/env", 1),
+		"duplicate-command": strings.Replace(raw, "[Service]", "[Service]\nExecStart=/bin/true", 1),
+	} {
+		t.Run(name, func(t *testing.T) {
+			if e := validateQualificationUnit(bad, bin); e != qualification.ErrRequired {
+				t.Fatal("bad unit admitted or wrong refusal", e)
+			}
+		})
+	}
+	t.Run("control", func(t *testing.T) {
+		if e := validateQualificationUnit(raw, bin); e != nil {
+			t.Fatal("landed unit refused", e)
+		}
+	})
+}
+
+// The production wrapper delegates to the landed unavailable systemd gate before
+// filesystem/provider access and never returns partial modules or data. The
+// files-only positive collector control is TestSystemdDirectoryAndCollector.
+func TestQualificationSystemdUnavailable(t *testing.T) {
+	p, _ := fixture()
+	l, e := limits(p.Limits)
+	if e != nil {
+		t.Fatal(e)
+	}
+	r := reviewedFilesRuntime{manifest: []byte("reviewed manifest")}
+	check := func(t *testing.T, e error) {
+		t.Helper()
+		var typed *linuxos.Error
+		if !errors.As(e, &typed) || typed.Code != "directory_unknown" || typed.Operation != "systemd_provider_completion_unavailable" {
+			t.Fatal("wrong systemd refusal", e)
 		}
 	}
-	if validateQualificationUnit(raw, bin) != nil {
-		t.Fatal("valid unit refused")
-	}
+	t.Run("capture", func(t *testing.T) {
+		out, e := r.CaptureModules(context.Background(), []string{"files", "systemd"}, l)
+		check(t, e)
+		if out != nil {
+			t.Fatal("unavailable capture returned modules")
+		}
+	})
+	t.Run("enumerate", func(t *testing.T) {
+		out, e := r.Enumerate(context.Background(), []string{"files", "systemd"}, l)
+		check(t, e)
+		if out != nil {
+			t.Fatal("unavailable enumeration returned data")
+		}
+	})
 }
 
 // The real production constructor does not adopt fixture callbacks or accept a
