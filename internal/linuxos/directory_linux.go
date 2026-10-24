@@ -3,6 +3,7 @@
 package linuxos
 
 import (
+	"bytes"
 	"context"
 	"reflect"
 	"sort"
@@ -158,13 +159,6 @@ func (d *QualifiedDirectory) Identity(ctx context.Context, uid, gid uint32, name
 	if e != nil {
 		return zero, e
 	}
-	remote, e := d.runtime.Enumerate(c, names, d.limits)
-	if e != nil {
-		return zero, refusal("directory_unknown", "nss_enumeration", e)
-	}
-	if e = validateDirectoryDatabases(remote, d.limits.Entries, true); e != nil {
-		return zero, e
-	}
 	local := NSSDatabases{}
 	for _, db := range []string{"passwd", "group", "shadow"} {
 		b, e := protectedRead(c, d.etc, db, 8<<20, db == "shadow")
@@ -174,6 +168,13 @@ func (d *QualifiedDirectory) Identity(ctx context.Context, uid, gid uint32, name
 		local[db] = b
 	}
 	if e = validateDirectoryDatabases(local, d.limits.Entries, false); e != nil {
+		return zero, e
+	}
+	remote, e := d.runtime.Enumerate(c, names, d.limits)
+	if e != nil {
+		return zero, refusal("directory_unknown", "nss_enumeration", e)
+	}
+	if e = validateDirectoryDatabases(remote, d.limits.Entries, true); e != nil {
 		return zero, e
 	}
 	ids := []ReservedIdentity{{UID: uid, GID: gid, Name: name}}
@@ -282,6 +283,14 @@ func (d *QualifiedDirectory) Identity(ctx context.Context, uid, gid uint32, name
 	}
 	if _, e = d.capture(c); e != nil {
 		return zero, e
+	}
+	// The deployment lock excludes cooperating writers only. Re-read all raw
+	// local DB bytes after the external collector and final module/config check.
+	for _, db := range []string{"passwd", "group", "shadow"} {
+		current, err := protectedRead(c, d.etc, db, 8<<20, db == "shadow")
+		if err != nil || !bytes.Equal(current, local[db]) {
+			return zero, refusal("directory_unknown", "database_drift", err)
+		}
 	}
 	if e = c.Err(); e != nil {
 		return zero, e

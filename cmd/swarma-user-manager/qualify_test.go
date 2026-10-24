@@ -69,3 +69,16 @@ func TestQualificationMaintenanceEntrypoint(t *testing.T) {
 		t.Fatal("maintenance boundary", e, stdout.String(), stderr.String())
 	}
 }
+
+// Every inherited SUDO_* entry, including empty or unfamiliar fields, excludes
+// maintenance; an ordinary own-unit invocation ID does not imply sudo use.
+func TestQualificationSudoEnvironment(t *testing.T) {
+	for _, key := range []string{"SUDO_UID=", "SUDO_USER=owner", "SUDO_GID=0", "SUDO_UNKNOWN="} {
+		if !sudoEnvironmentPresent([]string{"PATH=/usr/bin", key}) {
+			t.Fatal("sudo field ignored", key)
+		}
+	}
+	if sudoEnvironmentPresent([]string{"INVOCATION_ID=abc", "PATH=/usr/bin"}) {
+		t.Fatal("own unit rejected")
+	}
+}

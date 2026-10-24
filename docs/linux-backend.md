@@ -2,22 +2,18 @@
 
 The executable links `internal/linuxbackend` and the configured `local-v0`
 source through the core's unlocked preparation/flight boundary. The production
-constructor supplies no host authority. Operations requiring a host refuse
-`qualification_required` even if the policy says `qualified: true`.
-The entrypoint checks host qualification before handling even a terminal-result
-replay. Production `user.bump` remains closed by the core and by the adapter.
+constructor supplies a fixed production `Environment` backed by the qualification
+reader, reviewed deployment profile and complete account-directory provider.
+Missing or unsupported capabilities refuse `qualification_required` even if the
+policy says `qualified: true`. The entrypoint checks qualification before a
+terminal-result replay. Production `user.bump` remains closed by core and adapter.
 
-The retained root qualification record issuer/reader is not implemented yet.
-The account-directory implementation below requires reviewed runtime/exclusion
-capabilities before deployment. `Environment` is their explicit integration
-boundary, together with the root-approved manifest and qualified inventory
-scope. Its `Pin` must authenticate retained root-run evidence against the exact
-policy/backend/boot and maintain the no-launcher deployment restriction. Its
-local guard may perform bounded local validation only. `Accounts` must provide
-complete local/NSS agreement; the legacy boolean NSS collision API is
-insufficient. No arbitrary protected JSON file, process-local boolean or test
-callback is a production authority. The owner qualification step remains pending;
-this change introduces no new root script or maintenance command.
+The root issuer, boot renewal and reader are implemented; root deployment and
+qualification have not been executed. `Environment.Pin` authenticates retained
+root evidence and current deployment inputs on the unlocked preparation path.
+Only bounded local checks run under activation/state locks; unit queries and NSS
+collection stay outside them. No JSON file, process-local flag or fixture callback
+alone grants production authority.
 
 ## Translation and ownership
 
@@ -108,12 +104,13 @@ that disposable primitive harness is not a qualification-record issuer.
 
 `linuxos.QualifiedDirectory` implements the account boundary in
 [receipts §6.4](../spec/station-effect-receipts.md#64-qualified-local-account-directory-and-nss-configuration).
-The later Environment must supply authenticated `DirectoryInputs`, the complete
+The production Environment supplies authenticated `DirectoryInputs`, the complete
 policy UID/GID ranges and reserved-name set, a reviewed `NSSRuntime` and a
 `DirectoryFence` that excludes external account-database and module/configuration
 changes for the entire observation. An ordinary in-process mutex is insufficient.
-The qualification-record reader and this exclusion's deployment integration remain
-pending; the production constructor still supplies no admitting Environment.
+The issuer and qualification-record reader are implemented for the reviewed
+files-only profile; root installation, complete host scope and maintained
+exclusion remain deployment qualification gates.
 
 Each call captures protected `nsswitch.conf` again, requires the exact recorded
 physical passwd/group/shadow lines, captures current module implementation and
@@ -150,7 +147,7 @@ unsafe, non-ELF or over-budget objects. RPATH/RUNPATH and alternative dependency
 or audit tags are unsupported. `ELFResolver` must implement the actual reviewed
 loader resolution and include its cache/search/hwcaps/preload configuration in
 the configuration closure. These requirements are explicit capabilities for the
-later Environment; a caller-selected SONAME map or short artifact list is not
+production Environment; a caller-selected SONAME map or short artifact list is not
 production closure evidence. `CaptureConfigurationClosure` hashes a reviewed
 closed artifact set without inspecting account material. Capture functions only
 read; they neither issue records nor install policy.
@@ -178,8 +175,8 @@ are removed and shadow contains only a lock marker. It never emits password hash
 executes account tools, installs anything or grants authority on its own.
 
 The helper and its dynamic-loader closure still need reviewed root deployment;
-fixture tests do not qualify root account behavior. Production host admission,
-`qualify`, policy/record installation and `user.bump` remain closed.
+fixture tests do not qualify root account behavior. Production host admission remains closed until the owner installs and qualifies
+the reviewed deployment. `user.bump` remains closed independently.
 
 ### Directory review corrections
 
@@ -430,3 +427,186 @@ public host loader objects read-only, and the actual isolated helper. The static
 unit test rejects changed argv/root, network exceptions, hidden namespaces,
 extra commands and ordering without a success dependency. No fixture result
 qualifies real root account/provider behavior.
+
+## Production qualification
+
+`qualify` and `qualify --boot` are exact root-only maintenance forms, selected
+before stdin intake. Both require real/effective UID 0 and reject sudo-derived
+invocation or any inherited `SUDO_*` variable. The entrypoint captures its own
+unit invocation ID before clearing the environment, applies umask 0077, changes
+to `/`, and denies non-UNIX socket creation with a seccomp filter inherited by
+children. No caller path, environment search path or request chooses capabilities.
+
+Initial mode accepts only a protected candidate policy with `qualified:false`,
+a 64-zero qualification digest and `no_launcher:true`. It never edits policy.
+Boot mode requires an existing nonzero qualified pin, validates that this process
+is the qualification unit's root main PID in its exact kernel cgroup, and reruns
+every check. Neither mode repairs or bootstraps deployment files or journal state.
+
+The pinned registrar CCJ-1 encoder defines all canonical bytes. The normalized
+policy digest changes only `qualified` to false and `qualification_digest` to
+64 zeros, in the `station-qualification-policy/1` domain. Every other policy
+member, including `no_launcher`, stays bound. `station-qualification-inputs/1`
+contains exactly the specified policy, binary, backend and skeleton digests,
+physical NSS lines, module closure facts and station ranges. The binary digest
+is checked against the running executable, rather than a different installed file.
+
+`station-qualification/2` adds the inputs digest, current boot, audit issue time,
+complete reserved-name coverage, eleven closed check results and mandatory
+`issuer:{mode,invocation_id}`. Initial records carry an empty invocation ID and
+never admit. Boot issuer invocation IDs are nonzero 32-character lower-case hexadecimal systemd
+invocation IDs. The reader requires the latest current-boot unit invocation to
+be terminal and successful and its invocation ID to equal the boot record's ID.
+Missing/running/failed unit state, old same-boot success, initial records and
+previous-boot records refuse. Audit timestamps provide no authority. Reserved
+names are observation coverage, derived from the verified current journal and
+nonterminal/failed-bump reservations by exact generation; retired history cannot
+follow a reused UID. They are not stable inputs: new journal reservations do
+not require repinning, and fresh per-target checks still apply.
+
+The fixed record directory `<root>/lib/user-manager/qualification` is root:root
+0700. `record.json` is root:root 0600, single-link and opened without following
+links through protected ancestors. Issuing withdraws and syncs the prior record
+before checks. Publication exclusively creates `.record.json.tmp`, writes and
+syncs it, renames without replacement, and syncs the parent. Failure removes the
+issuer's candidate; a foreign temporary collision is preserved. A failed retry
+cannot retain an earlier admissible record. A guard rechecks exact record bytes
+locally and exposes the full record digest in prepared authority evidence.
+
+### Reviewed deployment schema
+
+`<root>/etc/user-manager-deployment.json` is root:root 0600, single-link, protected
+and no-follow. It is a closed CCJ-1 object; unknown, missing, duplicate, null,
+noncanonical and oversized inputs refuse. All members below are mandatory.
+Its SHA-256 equals policy `backend_digest`, also carried by every local-v0 source
+version and inputs `backend_digest`. No extra inputs member or authority flag is
+introduced. Changes require initial qualification and a new pin.
+
+| Member | Exact meaning |
+|---|---|
+| `format` | `station-deployment/1` |
+| `backend_version` | `local-v0-linux-qualification/1` |
+| `backend_files` | Sorted unique `{path,digest}` protected implementation/configuration pins. Must include `/usr/bin/systemctl`, `/usr/sbin/{groupadd,useradd,userdel,groupdel,nologin}` and `/etc/systemd/system/swarma-user-manager-qualify.service`. |
+| `lock_path` | Exactly `<root>/lib/user-manager/deployment.lock`; preinstalled empty root:root 0600 single-link file. |
+| `maintenance_path` | Exactly `<root>/lib/user-manager/maintenance.json`; protected current-boot stopped-admission marker described below. |
+| `nss_helper` | Exactly `<root>/libexec/swarma-nss-probe`; the reviewed protected native collector. |
+| `nss_library` | Canonical absolute path to the actual reviewed NSS files exporter, including libc on platforms where it exports these functions. A compatibility stub is insufficient. |
+| `loader` | Closed object `{format,cache,search_roots,resolutions,configuration}` detailed below. |
+| `skeleton` | Protected absolute path to the closed skeleton document below. |
+| `no_launcher` | Closed object `{absent_entries,service_roots,configuration}` detailed below. |
+| `inventory` | Closed complete host-scope profile detailed below. |
+
+Paths are clean absolute paths. Arrays are explicit, sorted and unique by path
+(or resolution name). File pins contain SHA-256 of exact protected file bytes.
+A tree pin is `{path,state,digest}`, with state `present` or `absent`. Present
+pins hash CCJ-1 of the entire sorted tree of `{path,kind,digest,target}` entries:
+relative paths; kinds `directory`, `file`, `link`; file content digests; inert
+symlink text; empty unused fields. Links do not grant permission to follow their
+target. Absent pins hash CCJ-1 `{"state":"absent"}` and require a protected
+existing parent plus actual leaf ENOENT. An unreadable or missing parent refuses.
+
+`loader.format` is `glibc-cache-closure/1`. `cache` pins `/etc/ld.so.cache`;
+`search_roots` pins every reviewed loader search tree; `configuration` pins the
+reviewed loader configuration files (explicit empty array allowed).
+`resolutions` is a nonempty sorted list of `{name,path}` for every interpreter
+and dependency. Resolution validates protected canonical link targets and exact
+cache selection, then captures the complete ELF loader dependency closure for
+the NSS helper/library and fixed backend programs. Only the reviewed new-format
+little-endian glibc cache with the current amd64/arm64 libc6 ABI flags and zero
+legacy OS-version field is supported. Missing/ambiguous entries, hwcap-dependent
+selection, `glibc-hwcaps` trees, `/etc/ld.so.preload`, unsupported dynamic loader
+tags and incomplete search scope refuse. The operator must review cache ABI,
+architecture, default search directories and loader configuration as one complete
+profile; a few accessible library directories are insufficient evidence.
+
+`no_launcher.absent_entries` must include `<root>/libexec/swarma-user-launcher`.
+`service_roots` must include `/etc/systemd/system`, `/run/systemd/system` and
+`/usr/lib/systemd/system`, plus every other load path in the reviewed deployment.
+Their complete pinned entries and file bytes must contain no launcher reference.
+`configuration` is a nonempty list of reviewed protected configuration file pins.
+The pinned qualification unit must specify root, oneshot, exact absolute
+`ExecStart=<root>/libexec/swarma-user-manager qualify --boot`, `PrivateNetwork=yes`
+and `RestrictAddressFamilies=AF_UNIX`; duplicate service keys, additional start
+commands and environment-file/pass-environment directives refuse. Hash review
+must also cover drop-ins and all effective unit load paths.
+
+`inventory` contains `format:"local-v0-reviewed-host-scope/1"`, `files` (nonempty
+sorted outside-home roots), `shm`, `mqueue`, `cron`, `system_cron`, `at`, `linger`,
+`user_units` and `user_runtime` (nonempty sorted arrays). All are absolute paths;
+per-user unit/runtime paths may contain `{name}` or `{uid}` substitutions using
+only validated reserved identities. Absent per-user roots require protected
+absence proofs and are rechecked. Complete process, System V IPC and POSIX IPC,
+files, spool and user-service observations remain necessary. The profile is an
+operator-reviewed declaration of complete host scope; the program cannot infer
+completeness from the subset of directories it can open. Unsupported spool
+owners/name resolution refuse instead of being ignored.
+
+The skeleton document is closed CCJ-1
+`{format:"station-skeleton/1",name,controls}`. Each sorted control is
+`{path,source,digest,executable}`: validated skeleton-relative target, absolute
+protected source, exact SHA-256 and executable boolean. The whole document's
+hash equals policy `skeleton_digest`; its name equals policy `skeleton`.
+The existing StationManifest validator checks the complete control layout.
+No caller-supplied tree or control source is accepted.
+
+### Exclusion and capability limits
+
+Maintenance holds the deployment lock exclusively and requires stopped admission.
+Runtime writers retain shared leases, so maintenance waits for them to release.
+This protocol binds cooperating station writers only. The operator must exclude
+other root configuration/account tools during qualification. Directory collection
+compares complete local/NSS views and re-reads protected passwd/group/shadow bytes
+before returning; persistent before/after drift becomes unknown. This is bounded
+change detection, not proof against a root writer changing and restoring bytes
+between observations. Local guard checks never call NSS, systemd or a collector.
+They revalidate record bytes, deployed policy, manifest, binary and immutable
+configuration/implementation fingerprints. Mutable account databases are checked
+around each directory observation, allowing legitimate account-tool mutations.
+
+The concrete production runtime currently implements the reviewed `files` NSS
+closure. `files systemd` remains unknown until the companion systemd provider is
+integrated. Unsupported loader/platform profiles, incomplete inventory, missing
+journal genesis, missing root protection and unreviewed module behavior refuse.
+Fixture tests exercise protocol, failure paths and local primitives; they do not
+qualify a production host or establish privileged behavior.
+
+### Owner qualification procedure
+
+This is a proposed owner-run root step, pending execution. Use a trusted root
+shell with a clean environment and admission stopped throughout steps 1–6.
+
+1. Install reviewed binary and collector at `/opt/swarma/libexec/` as protected
+   root-owned executables; install the reviewed oneshot and its effective load
+   configuration. Admission consumers must require and order after the unit.
+   Install all pinned artifacts, complete inventory profile, skeleton controls
+   and protected deployment manifest. Prepare the existing journal through its
+   reviewed initialization procedure; qualification does not repair it.
+2. Create the protected 0700 qualification directory and empty 0600 deployment
+   lock. Install protected candidate policy P0 with `no_launcher:true`,
+   `qualified:false`, zero qualification digest, exact backend/skeleton hashes
+   and all six local-v0 source versions equal to the backend digest.
+3. Exclude other root account/configuration writers and atomically install a
+   root:root 0600 canonical marker `{format:"station-maintenance/1",boot_id,
+   admission_stopped:true}` at the fixed maintenance path, using current kernel
+   boot UUID. Hold this operator exclusion until admission resumes.
+4. Run `/usr/bin/env -i /opt/swarma/libexec/swarma-user-manager qualify` from the
+   trusted root shell. Require exit 0 and one inputs digest; verify the protected
+   initial record and exact reviewed inputs. It cannot admit an account.
+5. Atomically install policy P changing only `qualified:true` and
+   `qualification_digest` to that digest, with file sync, rename and parent sync.
+   Keep the marker and stopped admission. Run `systemctl daemon-reload`, then
+   `systemctl restart swarma-user-manager-qualify.service`. Manual `qualify --boot`
+   outside its own unit refuses. The unit reruns every check and publishes a
+   boot-mode record with its own authenticated invocation ID.
+6. Require the latest invocation's terminal success, current-boot record and
+   exact matching invocation ID, unchanged pin and all checks ok. Remove and
+   sync the maintenance marker only after verification; then start admission.
+7. Reboot renewal may run without the marker only when a missing or previous-boot
+   record already closes admission. A same-boot retry requires stopped admission
+   and the marker again. Exercise missing/failed/running unit, previous boot,
+   changed input, failed retry and stale same-boot success refusal on the approved
+   isolated root fixture. Record exact commands, identities, logs and exit codes.
+
+Do not install these example schema descriptions as JSON: construct the exact
+closed canonical reviewed documents for the actual host. There is no automatic
+policy edit, repin, root script or deployment action in the maintenance command.

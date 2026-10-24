@@ -16,7 +16,7 @@ func run() int {
 	in := manager.VerifiedInvocation(os.Args[1:])
 	realUID := os.Getuid()
 	ownInvocation := os.Getenv("INVOCATION_ID")
-	sudoEnvironment := os.Getenv("SUDO_UID") != "" || os.Getenv("SUDO_USER") != "" || os.Getenv("SUDO_COMMAND") != ""
+	sudoEnvironment := sudoEnvironmentPresent(os.Environ())
 	os.Clearenv()
 	syscall.Umask(0077)
 	if os.Chdir("/") != nil {

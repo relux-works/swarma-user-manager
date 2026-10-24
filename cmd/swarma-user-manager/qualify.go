@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/relux-works/swarma-user-manager/internal/linuxbackend"
@@ -19,6 +20,17 @@ func maintenanceMode(args []string) (selected, boot bool) {
 		return true, true
 	}
 	return false, false
+}
+
+// Presence matters even for empty values and sudo fields not used by the
+// ordinary dispatcher identity parser.
+func sudoEnvironmentPresent(entries []string) bool {
+	for _, entry := range entries {
+		if strings.HasPrefix(entry, "SUDO_") {
+			return true
+		}
+	}
+	return false
 }
 func maintenanceAllowed(in manager.Invocation, realUID int, sudoEnvironment bool) bool {
 	return in.EUID == 0 && realUID == 0 && !in.Sudo && !sudoEnvironment

@@ -87,34 +87,34 @@ For one maximum-size local-storage qualification run:
 The Go station-account core implements closed `user.create`, `user.retire` and
 `user.bump` requests, caller-scoped durable effects and a journal-derived ledger.
 Its backend contract and recovery/qualification limits are in
-[the core documentation](docs/station-core.md). The entrypoint links the
-[Linux backend adapter](docs/linux-backend.md); its qualified host-record
-reader remains unavailable, so provisioning still refuses
-`qualification_required` even with a qualified policy flag.
+[the core documentation](docs/station-core.md). The entrypoint supplies the
+[production Linux environment](docs/linux-backend.md#production-qualification).
+Its root maintenance modes implement initial qualification and per-boot renewal;
+the reader requires a protected current record, unchanged inputs, the policy pin
+and the matching successful latest systemd invocation. A policy flag alone
+never admits. Root installation and qualification remain pending.
+
 The core refuses production bump with `bump_key_admission_unconfirmed` before
 its journal or backend access until the Keymaker provision/confirm contract is
-accepted. The executable can refuse an unqualified host earlier.
+accepted. Host qualification never authorizes account ownership or cleanup.
 
-The [qualification issuer and account-directory contract](spec/station-effect-receipts.md#63-root-issuer-and-closed-qualification-record)
-specifies a root-only `swarma-user-manager qualify` maintenance entry, canonical
-input-pinned evidence, per-boot records and exact recorded NSS configuration.
-The [account-directory matrix](spec/station-effect-receipts.md#64-qualified-local-account-directory-and-nss-configuration)
-supports only `files` and bounded `systemd`, with pinned empty/absent userdb
-roots, exact reviewed Varlink providers and source-backed UID/GID ranges.
-A root-owned networkless boot oneshot repeats every check without changing the
-pin. These entries and their production reader remain unimplemented; a
-`qualified` flag alone never admits.
-The [account-directory implementation](docs/linux-backend.md#qualified-account-directory-implementation)
-now captures exact NSS lines and closure facts and compares complete local/NSS
-observations for `files`. The [bounded direct userdb collector](docs/linux-backend.md#direct-provider-completion-and-nss-agreement)
-opens `files systemd` only after each recorded allocator completes all three
-Varlink enumeration calls, closed records fit its ranges, and NSS agrees.
-Aggregate NSS still loses some provider errors and remains an agreement view.
-The reviewed boot unit is a repository artifact; deployment and production
-qualification remain pending.
+The [account-directory contract](spec/station-effect-receipts.md#64-qualified-local-account-directory-and-nss-configuration)
+selects `files` and bounded `systemd`. The implementation compares protected
+local databases with independent NSS observations for `files`. The
+[direct userdb collector](docs/linux-backend.md#direct-provider-completion-and-nss-agreement)
+admits `files systemd` only after the reviewed closure matches, each recorded
+allocator completes all three Varlink calls, records fit its ranges, and NSS
+agrees. Unknown metadata or provider completion refuses admission. Aggregate NSS
+alone cannot prove completion. The
+[boot unit and consumer drop-in](docs/linux-backend.md#boot-qualification-unit-artifact)
+are repository artifacts; installation and root qualification remain pending.
+The [owner procedure](docs/linux-backend.md#owner-qualification-procedure)
+describes protected deployment inputs and the stopped-admission pin/restart flow.
 
 | Tool | Purpose | Command | Output |
 |---|---|---|---|
+| Qualification maintenance (owner root shell) | Produce a candidate inputs digest, then renew through the unit | `/opt/swarma/libexec/swarma-user-manager qualify`; `systemctl restart swarma-user-manager-qualify.service` | Initial mode prints one digest; protected `/opt/swarma/lib/user-manager/qualification/record.json`; root step pending |
+| Qualification contract tests | Closed codec, issuer/unit binding, retry withdrawal, protected publication and deployment negatives | `go test -p 1 ./internal/qualification ./internal/linuxos ./internal/linuxbackend ./internal/manager ./cmd/swarma-user-manager -run '^TestQualification' -count=1` | Named verdicts; isolated Go fixtures; no live qualification |
 | Station core build | Build the bounded one-request entrypoint | `go build -o .temp/swarma-user-manager ./cmd/swarma-user-manager` | Binary in `.temp/`; closed result JSON on stdout |
 | NSS collector build (Linux, Go with cgo and C compiler) | Build the status-aware read-only NSS ABI helper | `go build -o .temp/swarma-nss-probe ./cmd/swarma-nss-probe` | Helper binary in `.temp/`; bounded sanitized JSON; systemd ABI mode is diagnostic only, never completeness authority; no password hashes |
 | Account-directory tests | Exact NSS lines, full agreement, module closure/range drift, direct NSS statuses | `go test -p 1 ./internal/linuxos -run '^(TestDirectory|TestSystemd|TestUserDB)' -count=1`; `go test -p 1 ./internal/nssprobe -count=1` | Named verdicts; test-owned Go temporary fixtures |

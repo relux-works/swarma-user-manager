@@ -25,9 +25,12 @@ without following links under protected ancestors. Failure, including a false
 `qualified` flag, returns `qualification_required`.
 
 The closed `station-policy/2` object retains the v1 root, ranges, quota, class,
-skeleton, bump flag, limits and callers. It additionally requires `qualified`,
+skeleton, bump flag, limits and callers. It additionally requires `no_launcher`, `qualified`,
 `qualification_digest`, `backend_digest`, `skeleton_digest`, positive `fence_epoch`, `sources` and
-`operators`. Digests are lowercase SHA-256. Each source selection is exactly
+`operators`. Production qualification requires `no_launcher:true`. Initial root
+maintenance alone may read a protected unqualified candidate policy; normal
+request intake still requires the qualified flag and authenticated record.
+Digests are lowercase SHA-256. Each source selection is exactly
 `{purpose,source,version}`. All six purposes must be configured, without
 duplicates: `host_qualification`, `cleanup_admission`, `managed_content`,
 `persistence_denial`, `process_fence`, `activation_guard`. Each operator scope

@@ -128,7 +128,7 @@ func issued(t *testing.T) (Protocol, manager.Policy, *host, *memStorage, *testUn
 // These controls exercise fixture capabilities, not privileged host deployment.
 // An unchanged complete same-boot record admits; every listed missing binding refuses.
 func TestQualificationRecordBindings(t *testing.T) {
-	for _, mode := range []string{"previous-boot", "unit-missing", "unit-failed", "input-drift", "flag-without-record", "nonpassing", "pin-drift", "policy-drift", "valid"} {
+	for _, mode := range []string{"previous-boot", "unit-missing", "unit-failed", "input-drift", "flag-without-record", "nonpassing", "pin-drift", "policy-drift", "policy-unqualified", "launcher-flag", "valid"} {
 		t.Run(mode, func(t *testing.T) {
 			s, p, h, m, u := issued(t)
 			switch mode {
@@ -148,6 +148,10 @@ func TestQualificationRecordBindings(t *testing.T) {
 				p.QualificationDigest = strings.Repeat("d", 64)
 			case "policy-drift":
 				p.Quota++
+			case "policy-unqualified":
+				p.Qualified = false
+			case "launcher-flag":
+				p.NoLauncher = false
 			case "names-drift":
 				h.names = []string{"worker-two"}
 			}
@@ -271,7 +275,7 @@ func TestQualificationClosedCodec(t *testing.T) {
 	}
 	delete(omitted, "station_names")
 	missing, _ := Canonical(omitted)
-	for _, b := range [][]byte{append(append([]byte{}, valid...), '\n'), bytes.Replace(valid, []byte(`"format":"station-qualification/2"`), []byte(`"format":"station-qualification/1"`), 1), append([]byte(`{"extra":0,`), valid[1:]...), append([]byte(`{"boot_id":"`+bootOne+`",`), valid[1:]...), missing, bytes.Replace(valid, []byte(`"issued_at_unix_ms":1000`), []byte(`"issued_at_unix_ms":9223372036854775808`), 1)} {
+	for _, b := range [][]byte{append(append([]byte{}, valid...), '\n'), bytes.Replace(valid, []byte(`"format":"station-qualification/2"`), []byte(`"format":"station-qualification/1"`), 1), append([]byte(`{"extra":0,`), valid[1:]...), append([]byte(`{"boot_id":"`+bootOne+`",`), valid[1:]...), missing, bytes.Replace(valid, []byte(`"reason":"","result":"ok"`), []byte(`"result":"ok"`), 1), bytes.Replace(valid, []byte(`"issued_at_unix_ms":1000`), []byte(`"issued_at_unix_ms":9223372036854775808`), 1)} {
 		if _, e := Decode(b, p); e != ErrRequired {
 			t.Fatalf("bad record accepted: %s", b)
 		}

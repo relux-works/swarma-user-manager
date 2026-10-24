@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/binary"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/relux-works/swarma-user-manager/internal/linuxos"
@@ -67,7 +68,7 @@ func (r *deploymentResolver) ResolveELF(ctx context.Context, name string) (linux
 // This deliberately bounded glibc cache profile admits one unambiguous path
 // with no hwcap selection. Unreviewed cache formats/variants remain unsupported.
 func cacheResolve(b []byte, name string) (string, error) {
-	if len(b) < 48 || string(b[:20]) != "glibc-ld.so.cache1.1" || b[28]&3 != 2 {
+	if cacheABIFlags() == 0 || len(b) < 48 || string(b[:20]) != "glibc-ld.so.cache1.1" || b[28] != 2 {
 		return "", qualification.ErrRequired
 	} // little-endian reviewed profile
 	n := uint64(binary.LittleEndian.Uint32(b[20:24]))
@@ -99,7 +100,7 @@ func cacheResolve(b []byte, name string) (string, error) {
 			continue
 		}
 		v, ok := read(binary.LittleEndian.Uint32(row[8:12]))
-		if !ok || !absolute(v) || binary.LittleEndian.Uint64(row[16:24]) != 0 {
+		if !ok || !absolute(v) || binary.LittleEndian.Uint32(row[:4]) != cacheABIFlags() || binary.LittleEndian.Uint32(row[12:16]) != 0 || binary.LittleEndian.Uint64(row[16:24]) != 0 {
 			return "", qualification.ErrRequired
 		}
 		if found != "" && found != v {
@@ -111,6 +112,19 @@ func cacheResolve(b []byte, name string) (string, error) {
 		return "", qualification.ErrRequired
 	}
 	return found, nil
+}
+
+// Only the current reviewed libc6 ABI is supported. A cache entry for another
+// ABI may be skipped by the real loader; it cannot establish our resolution.
+func cacheABIFlags() uint32 {
+	switch runtime.GOARCH {
+	case "amd64":
+		return 0x303
+	case "arm64":
+		return 0xa03
+	default:
+		return 0
+	}
 }
 func newResolver(ctx context.Context, m DeploymentManifest, l linuxos.Limits) (*deploymentResolver, error) {
 	if linuxos.ProtectedAbsent("/etc/ld.so.preload") != nil {

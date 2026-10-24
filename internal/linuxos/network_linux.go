@@ -46,9 +46,12 @@ func DenyNetwork() error {
 	if e := unix.Prctl(unix.PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0); e != nil {
 		return e
 	}
-	_, _, e := unix.Syscall(unix.SYS_SECCOMP, unix.SECCOMP_SET_MODE_FILTER, unix.SECCOMP_FILTER_FLAG_TSYNC, uintptr(unsafe.Pointer(&p)))
+	result, _, e := unix.Syscall(unix.SYS_SECCOMP, unix.SECCOMP_SET_MODE_FILTER, unix.SECCOMP_FILTER_FLAG_TSYNC, uintptr(unsafe.Pointer(&p)))
 	if e != 0 {
 		return e
+	}
+	if result != 0 {
+		return refusal("qualification_failed", "network_thread_sync", nil)
 	}
 	return nil
 }

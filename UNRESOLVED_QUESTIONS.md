@@ -14,7 +14,7 @@ later-phase questions; this register does not resolve or renumber them.
 | Architecture Q3 — journal/ledger authority: decided | The generation journal is authoritative. `ledger.json` is a derived view rebuilt from the verified journal on divergence; the journal wins ([helper.md §4.5](spec/helper.md#45-userlist-and-the-ledger)). |
 | Station Q3 — effect encoding: specified for review | The [OS-effect receipt contract](spec/station-effect-receipts.md) selects a versioned closed store, write-ahead object identities, receipt-backed recovery/quarantine, unlocked backend I/O and exact reserved-identity restoration. This resolves the encoding specification slice, not review, implementation/migration, cleanup authority or root qualification. Unreceipted objects remain fenced; name/UID matches are not ownership. |
 | Station v0 authority sources: selected | The [six local-v0 providers and shared interface](spec/station-effect-receipts.md#6-accepted-local-v0-authority-sources) select root policy qualification, operator-only per-act retirement/export waiver, approved skeleton, cron/at deny plus no linger, no-launcher process fence/full inventory and local locked activation guard. Root can bypass the process restriction; v0 retirement has no export confirmation. Implementation and qualification are still required. |
-| Qualification issuer and account directory: specified for review | [Receipts §§6.3–6.5](spec/station-effect-receipts.md#63-root-issuer-and-closed-qualification-record) select root-only `qualify`, a stable policy/binary/backend/skeleton/range/NSS input pin with fresh protected boot-bound records and a networkless root boot oneshot, exact NSS lines, the files/systemd-only matrix with protected empty/absent userdb roots, exact Varlink closure and source-backed inclusive module ranges, authoritative protected local databases with full NSS agreement, and the existing fresh no-launcher inventory fence. This settles issuer/configuration selection; implementation and root/boot-unit qualification remain open. |
+| Qualification issuer and account directory: specified for review | [Receipts §§6.3–6.5](spec/station-effect-receipts.md#63-root-issuer-and-closed-qualification-record) select root-only `qualify`, a stable policy/binary/backend/skeleton/range/NSS input pin with fresh protected boot-bound records and a networkless root boot oneshot, exact NSS lines, the files/systemd-only matrix with protected empty/absent userdb roots, exact Varlink closure and source-backed inclusive module ranges, authoritative protected local databases with full NSS agreement, and the existing fresh no-launcher inventory fence. This settles issuer/configuration selection; the files-only issuer/reader implementation still requires review and root/boot-unit qualification. |
 
 Architecture Q3 above is distinct from station publication gate Q3 below;
 closing the authority decision does not close cleanup authority. The effect
@@ -53,7 +53,8 @@ authenticated exact-pair Keymaker re-admission/binding receipts with a pinned
 activation guard, and external restore/migration custody. Production bump is
 closed as `bump_key_admission_unconfirmed` until the joint Keymaker contract
 is accepted; policy cannot enable it. The binary links the Linux
-backend but has no qualified host Environment and refuses new work; fake tests do not close these deployment gates.
+backend and supplies the reviewed files-only Environment. It refuses new work
+without protected matching qualification evidence; tests do not qualify a host.
 A writer crash retaining `writer.pending` requires the generation format's
 explicit root reconciliation before same-effect recovery can proceed.
 
@@ -72,17 +73,29 @@ effective cron/at denial/allow precedence for every station name,
 and logind/no-running-manager checks remain pending host qualification. These
 checks do not enable bump, policy installation or account activation.
 
-The Linux adapter is linked but its retained root qualification-record provider
-remains unavailable. The qualified directory boundary supports files with explicit
-reviewed loader/configuration and exclusion capabilities. The
-[bounded userdb collector and repository boot-unit artifacts](docs/linux-backend.md#systemd-userdb-closure-and-runtime)
-now require direct clean completion from every recorded allocator, strict ranges
-and records, plus independent NSS agreement. Aggregate NSS still cannot prove
-completion. Unsupported record schemas or nonterminating providers remain unknown.
+The Linux adapter links the issuer and retained root qualification-record reader.
+The qualified directory boundary supports files with explicit reviewed loader,
+configuration and exclusion capabilities. The
+[bounded direct userdb collector](docs/linux-backend.md#direct-provider-completion-and-nss-agreement)
+requires a matching protected closure, clean completion from every recorded
+allocator, strict ranges and records, and independent NSS agreement. Unknown
+metadata, unsupported records and nonterminating providers refuse admission.
 Actual provider deployment, complete reviewed range provenance,
 maintained exclusion and root/boot qualification remain pending. The production adapter
 refuses without them; `qualified: true` alone never admits. Approved skeleton
-reading, full inventory-scope configuration and maintained local guards must be
-published with those providers. Lost live stage/publication handles require
+reading, full inventory-scope configuration and maintained local guards are
+implemented; their deployed completeness still requires review. Lost live stage/publication handles require
 qualified continuity or root maintenance, never pathname/inode adoption. See
 [the adapter boundary](docs/linux-backend.md).
+
+
+## Qualification deployment gates
+
+The issuer, protected record reader and reviewed production environment
+are implemented. Privileged installation, real root account behavior and live
+unit renewal remain pending the owner procedure in `docs/linux-backend.md`.
+The systemd closure and direct collector are implemented; a `files systemd` host
+requires protected provider capabilities and clean completion from each allocator. The actual loader ABI/search closure, full inventory roots, effective
+unit/drop-in load scope and exclusion of other root writers require owner review;
+missing facts refuse. Unsupported cron-owner resolution also remains refusal.
+These gates do not resolve Keymaker bump admission or cleanup authority.

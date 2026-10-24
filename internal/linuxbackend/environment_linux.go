@@ -16,6 +16,7 @@ import (
 	"github.com/relux-works/swarma-user-manager/internal/linuxos"
 	"github.com/relux-works/swarma-user-manager/internal/manager"
 	"github.com/relux-works/swarma-user-manager/internal/qualification"
+	"github.com/relux-works/swarma-user-manager/tools/genjournal"
 )
 
 type ProductionEnvironment struct {
@@ -354,23 +355,67 @@ func (h *ProductionEnvironment) reservedNames(ctx context.Context) ([]string, []
 	if e != nil {
 		return nil, nil, e
 	}
-	names := map[string]bool{}
-	accounts := []manager.Account{}
+	var names []string
+	var accounts []manager.Account
+	e = genjournal.Checkpoint(ctx, filepath.Join(h.policy.Root, "lib/user-manager/generations"), state.Floor, func(view genjournal.View) error {
+		var err error
+		names, accounts, err = qualificationReservations(h.policy, state, view)
+		return err
+	})
+	return names, accounts, e
+}
+
+// Match the core's generation-bound charge predicate: current nonremoved rows,
+// nonterminal effects and failed retained bumps. Historical UID reuse is never
+// a relation between the old allocation and the current physical account.
+func qualificationReservations(p manager.Policy, state manager.State, view genjournal.View) ([]string, []manager.Account, error) {
+	type identity struct {
+		uid        int64
+		generation string
+	}
+	charged := map[identity]bool{}
+	for _, row := range view.Rows {
+		if row.State != "removed" {
+			charged[identity{row.UID, row.Generation}] = true
+		}
+	}
+	for _, effect := range state.Effects {
+		if !effect.Terminal || effect.Request.Op == "user.bump" && effect.Failure != "" {
+			charged[identity{effect.Account.UID, effect.Account.Generation}] = true
+		}
+	}
+	found := map[identity]bool{}
+	byName := map[string]manager.Account{}
 	for _, effect := range state.Effects {
 		a := effect.Account
-		if accountID(h.policy, a) != nil {
+		key := identity{a.UID, a.Generation}
+		if !charged[key] {
+			continue
+		}
+		if accountID(p, a) != nil {
 			return nil, nil, qualification.ErrRequired
 		}
-		names[a.Username] = true
-		accounts = append(accounts, a)
+		if old, exists := byName[a.Username]; exists && (old.UID != a.UID || old.GID != a.GID || old.Home != a.Home) {
+			return nil, nil, qualification.ErrRequired
+		}
+		byName[a.Username] = a
+		found[key] = true
 	}
-	sorted := make([]string, 0, len(names))
-	for n := range names {
-		sorted = append(sorted, n)
+	if len(found) != len(charged) {
+		return nil, nil, qualification.ErrRequired
 	}
-	sort.Strings(sorted)
-	return sorted, accounts, nil
+	names := make([]string, 0, len(byName))
+	for name := range byName {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	accounts := make([]manager.Account, 0, len(names))
+	for _, name := range names {
+		accounts = append(accounts, byName[name])
+	}
+	return names, accounts, nil
 }
+
 func (h *ProductionEnvironment) Capture(ctx context.Context, p manager.Policy) (qualification.Inputs, []string, error) {
 	m, raw, e := loadDeployment(ctx, p)
 	if e != nil {

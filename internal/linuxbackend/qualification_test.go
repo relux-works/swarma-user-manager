@@ -8,7 +8,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/relux-works/swarma-user-manager/internal/manager"
 	"github.com/relux-works/swarma-user-manager/internal/qualification"
+	"github.com/relux-works/swarma-user-manager/tools/genjournal"
 )
 
 func manifestFixture() DeploymentManifest {
@@ -85,7 +87,7 @@ func cacheFixture(paths []string) []byte {
 	binary.LittleEndian.PutUint32(b[24:], uint32(len(str)))
 	for j := range paths {
 		row := b[48+24*j : 48+24*(j+1)]
-		binary.LittleEndian.PutUint32(row, 0x303)
+		binary.LittleEndian.PutUint32(row, cacheABIFlags())
 		binary.LittleEndian.PutUint32(row[4:], uint32(start))
 		binary.LittleEndian.PutUint32(row[8:], uint32(offset[j]))
 	}
@@ -96,7 +98,7 @@ func cacheFixture(paths []string) []byte {
 // unknown versions, missing names and invalid offsets cannot turn into a map hit.
 func TestQualificationLoaderCache(t *testing.T) {
 	good := cacheFixture([]string{"/usr/lib/libc.so.6"})
-	for _, mode := range []string{"ambiguous", "hwcaps", "bad-offset", "missing", "unknown-format", "valid"} {
+	for _, mode := range []string{"ambiguous", "hwcaps", "wrong-abi", "kernel-version", "bad-offset", "missing", "unknown-format", "valid"} {
 		t.Run(mode, func(t *testing.T) {
 			b := append([]byte{}, good...)
 			name := "libc.so.6"
@@ -105,6 +107,10 @@ func TestQualificationLoaderCache(t *testing.T) {
 				b = cacheFixture([]string{"/usr/lib/libc.so.6", "/other/libc.so.6"})
 			case "hwcaps":
 				binary.LittleEndian.PutUint64(b[64:], 1)
+			case "wrong-abi":
+				binary.LittleEndian.PutUint32(b[48:], 3)
+			case "kernel-version":
+				binary.LittleEndian.PutUint32(b[60:], 1)
 			case "bad-offset":
 				binary.LittleEndian.PutUint32(b[52:], 0xffffffff)
 			case "missing":
@@ -150,5 +156,62 @@ func TestQualificationProductionMissingRefuses(t *testing.T) {
 	}
 	if _, e := h.Issue(context.Background(), false); e == nil {
 		t.Fatal("missing production qualified")
+	}
+}
+
+// Coverage follows exact generation lifetimes: retired history sharing a reused
+// UID is excluded, while current, nonterminal and failed-bump reservations remain.
+// A current journal identity without a matching protected effect refuses.
+func TestQualificationReservationCoverage(t *testing.T) {
+	for _, mode := range []string{"reused", "retained-bump", "pending", "missing-effect", "empty"} {
+		t.Run(mode, func(t *testing.T) {
+			p, in := fixture()
+			old := in.Reservation
+			old.Terminal = true
+			current := old
+			current.Account.Generation = strings.Repeat("e", 32)
+			current.Account.Username = "worker-current"
+			current.Account.Home = p.Root + "/workers/worker-current"
+			state := manager.State{Effects: []manager.Effect{old, current}}
+			view := genjournal.View{Rows: []genjournal.Row{{UID: current.Account.UID, Generation: current.Account.Generation, State: "active"}}}
+			want := "worker-current"
+			switch mode {
+			case "retained-bump":
+				state.Effects = []manager.Effect{old}
+				state.Effects[0].Request.Op = "user.bump"
+				state.Effects[0].Failure = "backend_failed"
+				view.Rows[0].State = "removed"
+				want = old.Account.Username
+			case "pending":
+				state.Effects = []manager.Effect{old}
+				state.Effects[0].Terminal = false
+				view.Rows[0].State = "removed"
+				want = old.Account.Username
+			case "missing-effect":
+				state.Effects = nil
+			case "empty":
+				state.Effects = nil
+				view.Rows = nil
+			}
+			names, accounts, e := qualificationReservations(p, state, view)
+			if mode == "missing-effect" {
+				if e != qualification.ErrRequired || names != nil || accounts != nil {
+					t.Fatal("uncovered current identity", names, e)
+				}
+				return
+			}
+			if e != nil {
+				t.Fatal(e)
+			}
+			if mode == "empty" {
+				if names == nil || accounts == nil || len(names) != 0 || len(accounts) != 0 {
+					t.Fatal("empty complete scope", names, accounts)
+				}
+				return
+			}
+			if len(names) != 1 || names[0] != want || len(accounts) != 1 || accounts[0].Username != want {
+				t.Fatal("historical/current reservation mixed", names, accounts)
+			}
+		})
 	}
 }
