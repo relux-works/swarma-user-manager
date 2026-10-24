@@ -12,16 +12,35 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+// MailSpoolPolicy is trusted host policy, never request data. StationRanges must
+// include every configured UID and GID interval. Zero SystemBoundary means the
+// current Linux profile's exclusive system-account boundary, 1000.
+type MailSpoolPolicy struct {
+	SystemBoundary uint32
+	StationRanges  []IDInterval
+	Limits         Limits
+}
+
 // CheckMailSpoolAbsent proves the configured mailbox absent after useradd.
 // MAIL_DIR takes precedence; MAIL_FILE is relative to the derived home.
-// Even a missing mailbox refuses when its immediate parent is not protected.
-func CheckMailSpoolAbsent(ctx context.Context, name, home string) (err error) {
+// Even a missing mailbox refuses without a qualified immediate parent.
+func CheckMailSpoolAbsent(ctx context.Context, name, home string, policy MailSpoolPolicy) (err error) {
+	c, cancel, e := budget(ctx, policy.Limits)
+	if e != nil {
+		return e
+	}
+	defer cancel()
+	if e = policy.validate(); e != nil {
+		return e
+	}
 	etc, e := OpenRoot("/etc")
 	if e != nil {
 		return e
 	}
 	defer closed(etc.f, &err)
-	return checkMailSpoolAbsent(ctx, etc, name, home, ProtectedAbsent)
+	return checkMailSpoolAbsent(c, etc, name, home, func(path string) error {
+		return qualifiedMailSpoolAbsent(c, etc, path, policy)
+	})
 }
 
 func mailSpoolPath(config []byte, name, home string) (string, error) {

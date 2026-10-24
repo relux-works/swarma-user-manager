@@ -240,6 +240,26 @@ useradd --uid <selected-uid> --gid <selected-gid> --no-user-group
         --key CREATE_HOME=no -- <derived-name>
 ```
 
+### Verified platform tools
+
+A backend flag is used only after verification on the real OS version, by a
+real-version parse check or an authorized root run. Qualification binds the
+actual OS and tool-package versions; a parse check alone does not qualify
+privileged effects. Other OS/version combinations need their own evidence.
+
+| OS and version | Tool package and version | Tool and every passed flag | Verification | Date (UTC) |
+|---|---|---|---|---|
+| Ubuntu 26.04.1 LTS (26.04) | passwd 1:4.17.4-2ubuntu3 | groupadd: `--gid`, `--` | Installed-version non-root parse; reached /etc/group lock refusal, exit 10 | 2026-10-24 |
+| Ubuntu 26.04.1 LTS (26.04) | passwd 1:4.17.4-2ubuntu3 | useradd: `--uid`, `--gid`, `--no-user-group`, `--home-dir`, `--no-create-home`, `--shell /usr/sbin/nologin`, `--password !`, `--no-log-init`, `--groups` (one empty argument), `--key CREATE_HOME=no`, `--` | Installed-version non-root parse; reached /etc/passwd lock refusal, exit 1 | 2026-10-24 |
+| Ubuntu 26.04.1 LTS (26.04) | passwd 1:4.17.4-2ubuntu3 | userdel: `--` | Installed-version non-root parse; reached /etc/passwd lock refusal, exit 1 | 2026-10-24 |
+| Ubuntu 26.04.1 LTS (26.04) | passwd 1:4.17.4-2ubuntu3 | groupdel: `--` | Installed-version non-root parse; reached /etc/group lock refusal, exit 10 | 2026-10-24 |
+
+`TestAccountToolNonRootParsing` substitutes only an existing primary GID for
+useradd and existing removal names to reach the lock boundary. It preserves all
+flags and empty argument elements, skips absent tools, and refuses privileged
+probe execution. Its invalid-key control rejects `CREATE_MAIL_SPOOL=no` with
+exit 3. That /etc/default/useradd setting is not passed as a login.defs override.
+
 The empty `--groups` value is one empty argv element, not shell syntax; `!` is
 one literal locked-password argument. Run no shell. A distro that does not
 support these options or creates extra state refuses qualification rather
@@ -260,9 +280,40 @@ compensation ends in `removed`; unresolved absence, removal or inventory keeps
 it in `creating` with `cleanup_pending` and its reservation held. Do not adopt or
 delete an unreceipted mailbox merely because it has the derived name. Recheck
 mailbox absence before declaring `removed`; account/group removal alone does
-not release the reservation. A host
-whose mail parent is group-writable needs owner-reviewed qualification changes,
-not a relaxed absence check.
+not release the reservation.
+
+For the mailbox's immediate parent only, the supported Linux profile admits a
+root-owned directory of exactly mode 0755 with group root or the distribution
+`mail` group, or exactly mode 2775 with group `mail`. Root-group 2775, world
+write, other modes/special bits, ACLs/capabilities and unprotected ancestors
+refuse. Resolve `mail` by name from the protected captured local group database:
+its unique nonzero system GID must be below the trusted system boundary and
+outside every configured station UID/GID interval. Require a matching gshadow
+row with a locked credential (prefix `!` or `*`), including for group root.
+
+For group-writable 2775, every writer in the union of primary GID membership,
+local group members, gshadow members and gshadow administrators must resolve to
+a local passwd/shadow account with UID below the system boundary (1000 in the
+current policy profile), outside every station interval, a locked shadow
+password, and exactly one of `/usr/sbin/nologin`, `/sbin/nologin`, `/bin/false`
+or `/usr/bin/false` as shell. Unknown writers refuse. Mode 0755 grants no group
+write access; root's existing owner authority does not require a non-login root
+shell. A different system boundary must come from explicit trusted host policy.
+The production adapter passes both complete UID and GID ranges, never just their
+intersection. Generic protected-directory/configuration rules remain strict.
+
+Record accepted parent identity, mode/ownership and sorted writer identities,
+UID/GID, shell, lock verdict and membership sources in the private observation.
+Keep raw credential databases private. Recapture the protected local account
+databases and parent metadata around the no-follow ENOENT probe; reopen the
+configured parent pathname as well. Any database, metadata, writer-set or path
+identity drift refuses. Reapply this proof before `removed`.
+
+Residual risk: a process already running as an admitted system writer can still
+create a mailbox despite its locked password and non-login shell. This is not a
+station capability. The backend detects a present mailbox at its post-create
+check and before `removed`; it cannot guarantee continuous absence between
+those observations. Unknown or present mail keeps the cleanup reservation.
 No authorized_keys, PAM login, sudo group, auto-home/mail skeleton, cron/at job,
 user systemd service or lingering permission is created.
 

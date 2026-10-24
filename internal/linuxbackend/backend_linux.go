@@ -64,7 +64,16 @@ var _ manager.Backend = (*Backend)(nil)
 func New(p manager.Policy) *Backend { return NewWithEnvironment(p, nil, nil) }
 func NewWithEnvironment(p manager.Policy, h Environment, evidence EvidenceStore) *Backend {
 	b := &Backend{policy: p, host: h, evidence: evidence, open: openAnchor, reservations: map[string]manager.RestoreInput{}, stages: map[string]*stage{}, tool: linuxos.RunAccountTool}
-	b.mailAbsent = linuxos.CheckMailSpoolAbsent
+	b.mailAbsent = func(ctx context.Context, name, home string) error {
+		l, e := limits(p.Limits)
+		if e != nil {
+			return e
+		}
+		return linuxos.CheckMailSpoolAbsent(ctx, name, home, linuxos.MailSpoolPolicy{Limits: l, StationRanges: []linuxos.IDInterval{
+			{Min: uint32(p.UIDMin), Max: uint32(p.UIDMax)},
+			{Min: uint32(p.GIDMin), Max: uint32(p.GIDMax)},
+		}})
+	}
 	b.policyProtection = checkPolicyProtection
 	b.persistenceChecks = b.localPersistenceChecks
 	b.observe = func(ctx context.Context, id linuxos.ReservedIdentity, l linuxos.Limits) (linuxos.AccountSet, error) {

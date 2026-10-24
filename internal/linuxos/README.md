@@ -64,16 +64,25 @@ cannot remove any entry returns `delete_budget_insufficient`; retain the fence
 and increase the entry budget instead of retrying identical zero-work batches.
 
 `CheckMailSpoolAbsent` reads protected `/etc/login.defs` and proves the derived
-mailbox absent through its protected immediate parent. MAIL_DIR takes precedence
-over home-relative MAIL_FILE; the default is `/var/mail/<name>`. Group-writable
-mail parents cannot provide this proof. The backend preserves the verified
-account receipt on a failed mailbox postcondition so ordinary compensation keeps
-its deletion authority. Root qualification persists its rollback marker before
-checking mailbox absence and refuses a clean rollback marker if that absence
-still cannot be proved. The backend also rechecks it before declaring removed.
-Rebuild its candidate with Go 1.26.10:
-`go test -c -trimpath -o /absolute/scratch/linuxos.test ./internal/linuxos`.
-The launcher needs the newly approved binary hash; its protocol is unchanged.
+mailbox absent through its qualified immediate parent. MAIL_DIR takes precedence
+over home-relative MAIL_FILE; the default is `/var/mail/<name>`. Trusted
+`MailSpoolPolicy` supplies bounded work, all station UID/GID intervals and an
+exclusive system-ID boundary (default 1000). Only this mailbox check admits
+root:mail 2775: the named local mail GID must be system-scoped outside every
+station interval, with a locked gshadow credential. Every primary, listed or
+admin writer must be a shadow-locked, non-login system account outside those
+intervals. Root/root-or-mail 0755 confers no group write access; root-group 2775
+and every other mode refuse. Ancestors, generic protected readers and ACL rules
+remain strict. Private evidence records parent metadata and sorted writers;
+database, metadata, writer or reopened-path drift refuses.
+
+An existing process as a permitted system writer can create mail; the check
+proves absence only at the post-create and before-removed observations. The
+backend preserves the verified account receipt on postcondition failure, and
+root qualification persists its rollback marker first and refuses a clean
+marker if mailbox absence remains unproved. Rebuild the candidate with Go
+1.26.10: `go test -c -trimpath -o /absolute/scratch/linuxos.test ./internal/linuxos`.
+The launcher needs the new approved binary hash; its protocol is unchanged.
 
 ## Receipt primitive boundary
 

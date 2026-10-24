@@ -79,6 +79,9 @@ func qualificationWrite(d *Dir, state qualificationState) (err error) {
 	}
 	return d.f.Sync()
 }
+func qualificationMailPolicy(p qualificationPolicy) MailSpoolPolicy {
+	return MailSpoolPolicy{Limits: testLimits(), StationRanges: []IDInterval{{Min: p.Min, Max: p.Max}}}
+}
 func qualificationAllocation(s qualificationState, p qualificationPolicy) (Allocation, error) {
 	if s.UID < p.Min || s.UID > p.Max || !strings.HasPrefix(s.Name, "worker-linuxos-qual-") || !component(s.Name) {
 		return Allocation{}, refusal("qualification_state_invalid", "identity", nil)
@@ -172,7 +175,7 @@ func qualificationRollback(ctx context.Context, d *Dir, s *qualificationState, p
 	// A successful useradd may have created mail outside the owned home. Do
 	// not label rollback clean or delete an unreceipted mailbox by its name.
 	if s.UserCreated {
-		if e = CheckMailSpoolAbsent(ctx, a.name, a.home); e != nil {
+		if e = CheckMailSpoolAbsent(ctx, a.name, a.home, qualificationMailPolicy(p)); e != nil {
 			return e
 		}
 	}
@@ -314,7 +317,7 @@ func TestRootQualification(t *testing.T) {
 	}
 	// Persist UserCreated first so a failed mailbox proof still runs guarded
 	// rollback for both successfully created namespaces.
-	if e = CheckMailSpoolAbsent(ctx, a.name, a.home); e != nil {
+	if e = CheckMailSpoolAbsent(ctx, a.name, a.home, qualificationMailPolicy(policy)); e != nil {
 		t.Fatal(e)
 	}
 	u, e := user.Lookup(a.name)
