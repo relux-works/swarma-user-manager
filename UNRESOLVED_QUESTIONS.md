@@ -73,10 +73,13 @@ and logind/no-running-manager checks remain pending host qualification. These
 checks do not enable bump, policy installation or account activation.
 
 The Linux adapter is linked but its retained root qualification-record provider
-remains unavailable. The qualified directory boundary and files/systemd status-aware
-collector are implemented with explicit reviewed loader/configuration and exclusion
-capabilities. The [bounded userdb closure and repository boot-unit artifacts](docs/linux-backend.md#systemd-userdb-closure-and-runtime)
-are implemented; actual provider deployment, complete reviewed range provenance,
+remains unavailable. The qualified directory boundary supports files with explicit
+reviewed loader/configuration and exclusion capabilities. Systemd remains unknown
+until each provider and forwarding contributor has directly verified clean
+terminal results: aggregate NSS can hide an error after a returned record.
+The [bounded userdb closure and repository boot-unit artifacts](docs/linux-backend.md#systemd-userdb-closure-and-runtime)
+are implemented as metadata checks and reviewed files; they do not prove stream
+completion. Actual provider deployment, complete reviewed range provenance,
 maintained exclusion and root/boot qualification remain pending. The production adapter
 refuses without them; `qualified: true` alone never admits. Approved skeleton
 reading, full inventory-scope configuration and maintained local guards must be

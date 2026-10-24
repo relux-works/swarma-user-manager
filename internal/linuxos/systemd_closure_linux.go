@@ -64,8 +64,11 @@ type UserDBProviderClosure struct {
 	Resolver       ELFResolver
 }
 
-// SystemdNSSRuntime composes the status-aware collector with a bounded userdb
-// closure. Supply fixed protected /etc, /run and /usr/lib anchors (separate mount
+// SystemdNSSRuntime currently delegates only files. Aggregate systemd NSS can
+// hide a provider failure after a record; without direct provider completion
+// evidence, both public entry points keep systemd unknown. The private closure
+// validator retains metadata checks for review, never admission authority.
+// Supply fixed protected /etc, /run and /usr/lib anchors (separate mount
 // roots), not a caller-controlled filesystem root. Do not copy after first use.
 // A DirectoryFence must exclude provider/configuration/account changes throughout
 // observation. No constructor/default claims that a deployment meets that fence.
@@ -359,6 +362,8 @@ func userDBSockets(ctx context.Context, root *Dir, services []UserDBService, l L
 	return ctx.Err()
 }
 
+// captureSystemd validates closure metadata only. It cannot prove per-provider
+// stream completion and must not be used to admit systemd through NSSRuntime.
 func (r *SystemdNSSRuntime) captureSystemd(ctx context.Context, l Limits) (NSSModule, error) {
 	fail := func(e error) (NSSModule, error) {
 		return NSSModule{}, refusal("directory_unknown", "userdb_closure", e)
@@ -465,49 +470,19 @@ func (r *SystemdNSSRuntime) CaptureModules(ctx context.Context, names []string, 
 	if r == nil {
 		return nil, refusal("directory_unknown", "userdb_runtime", nil)
 	}
-	if onlyFiles(names) {
-		return r.Files.CaptureModules(ctx, names, l)
+	if !onlyFiles(names) {
+		return nil, refusal("directory_unknown", "systemd_provider_completion_unavailable", nil)
 	}
-	if !reflect.DeepEqual(names, []string{"files", "systemd"}) {
-		return nil, refusal("directory_unknown", "module_unsupported_or_unqualified", nil)
-	}
-	c, cancel, e := budget(ctx, l)
-	if e != nil {
-		return nil, e
-	}
-	defer cancel()
-	files, e := r.Files.CaptureModules(c, []string{"files"}, l)
-	if e != nil {
-		return nil, e
-	}
-	systemd, e := r.captureSystemd(c, l)
-	if e != nil {
-		return nil, e
-	}
-	return append(files, systemd), nil
+	return r.Files.CaptureModules(ctx, names, l)
 }
 func (r *SystemdNSSRuntime) Enumerate(ctx context.Context, names []string, l Limits) (NSSDatabases, error) {
-	c, cancel, e := budget(ctx, l)
-	if e != nil {
-		return nil, e
+	if r == nil {
+		return nil, refusal("directory_unknown", "userdb_runtime", nil)
 	}
-	defer cancel()
-	before, e := r.CaptureModules(c, names, l)
-	if e != nil {
-		return nil, e
+	if !onlyFiles(names) {
+		return nil, refusal("directory_unknown", "systemd_provider_completion_unavailable", nil)
 	}
-	if onlyFiles(names) {
-		return r.Files.Enumerate(c, names, l)
-	}
-	data, e := enumerateNSS(c, r.Files.Collector, []ProtectedArtifact{r.Files.Library, r.Library}, l)
-	if e != nil {
-		return nil, e
-	}
-	after, e := r.CaptureModules(c, names, l)
-	if e != nil || !reflect.DeepEqual(before, after) {
-		return nil, refusal("directory_unknown", "userdb_enumeration_drift", e)
-	}
-	return data, nil
+	return r.Files.Enumerate(ctx, names, l)
 }
 
 // Ancestor directory timestamps/link counts also change for unrelated accounts

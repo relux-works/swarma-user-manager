@@ -93,7 +93,9 @@ func (r FilesNSSRuntime) Enumerate(ctx context.Context, names []string, l Limits
 }
 
 // enumerateNSS holds the executable and each reviewed module descriptor through
-// subprocess completion. Only the two fixed module layouts are accepted.
+// subprocess completion. Only the two fixed module layouts are accepted. The
+// two-module form is an additional diagnostic agreement view, not evidence of
+// systemd provider completion; public SystemdNSSRuntime refuses that selection.
 func enumerateNSS(ctx context.Context, collector ProtectedArtifact, libraries []ProtectedArtifact, l Limits) (out NSSDatabases, err error) {
 	if len(libraries) != 1 && len(libraries) != 2 {
 		return nil, refusal("directory_unknown", "collector_modules", nil)

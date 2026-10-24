@@ -59,9 +59,9 @@ func TestProbeBoundsAndUnavailable(t *testing.T) {
 	}
 }
 
-// Both module ABIs must terminate cleanly: success in files cannot hide a later
-// systemd failure. Exact duplicate projected rows are harmless; conflicting rows
-// remain visible for the parent directory's disagreement/duplicate rejection.
+// ABI-visible errors must discard the entire diagnostic view; this cannot see
+// failures already masked by real libnss_systemd. Only cross-module identical
+// projections may coalesce; conflicting rows remain for directory rejection.
 func TestProbeFilesSystemdCompletion(t *testing.T) {
 	files := libraryFixture(t, 0)
 	for _, mode := range []int{1, 2, 3, 5, 0} {
@@ -104,5 +104,70 @@ func TestProbeFilesSystemdCompletion(t *testing.T) {
 				t.Fatal("partial budget admitted", got, e)
 			}
 		})
+	}
+}
+
+// Each provider must reject repeated names or numbers before cross-module
+// merging, including different projections of the same identity. Shadow has
+// names only. TestProbeFilesSystemdCompletion retains the cross-module identical
+// row positive control and the conflicting-projection control.
+func TestProbeProviderDuplicateRows(t *testing.T) {
+	files := libraryFixture(t, 0)
+	for _, provider := range []string{"files", "systemd"} {
+		for _, database := range []string{"passwd", "group", "shadow"} {
+			for _, variant := range []string{"identical", "name", "number"} {
+				if database == "shadow" && variant != "identical" {
+					continue
+				}
+				t.Run(provider+"/"+database+"/"+variant, func(t *testing.T) {
+					dir := t.TempDir()
+					b, e := os.ReadFile("testdata/module.c")
+					if e != nil {
+						t.Fatal(e)
+					}
+					text := string(b)
+					counter := map[string]string{"passwd": "pw", "group": "gr", "shadow": "sp"}[database]
+					text = strings.Replace(text, "if("+counter+"++)", "if("+counter+"++ > 1)", 1)
+					if variant != "identical" {
+						var field, value, marker string
+						if database == "passwd" {
+							field, value, marker = "p->pw_uid", "24001", ".pw_shell=\"/usr/sbin/nologin\"};"
+							if variant == "number" {
+								field, value = "p->pw_name", "\"worker-second\""
+							}
+						} else {
+							field, value, marker = "g->gr_gid", "24001", ".gr_mem=members};"
+							if variant == "number" {
+								field, value = "g->gr_name", "\"worker-second\""
+							}
+						}
+						if !strings.Contains(text, marker) {
+							t.Fatal("identity variant not applied")
+						}
+						text = strings.Replace(text, marker, marker+"if("+counter+"==2)"+field+"="+value+";", 1)
+					}
+					if provider == "systemd" {
+						text = strings.ReplaceAll(text, "_nss_files_", "_nss_systemd_")
+					}
+					src, path := filepath.Join(dir, "module.c"), filepath.Join(dir, "module.so")
+					if e = os.WriteFile(src, []byte(text), 0600); e != nil {
+						t.Fatal(e)
+					}
+					cmd := exec.Command("/usr/bin/cc", "-shared", "-fPIC", "-o", path, src)
+					if b, e := cmd.CombinedOutput(); e != nil {
+						t.Fatalf("compile duplicate fixture: %v %s", e, b)
+					}
+					var got Snapshot
+					if provider == "files" {
+						got, e = ReadFiles(path, 100)
+					} else {
+						got, e = ReadFilesSystemd(files, path, 100)
+					}
+					if e != errUnknown || got != (Snapshot{}) {
+						t.Fatal("duplicate provider identity admitted", got, e)
+					}
+				})
+			}
+		}
 	}
 }

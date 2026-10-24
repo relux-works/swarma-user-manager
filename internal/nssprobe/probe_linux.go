@@ -2,6 +2,7 @@
 
 // Package nssprobe collects direct NSS module terminal statuses in a disposable
 // subprocess. The parent enforces deadlines and authenticates the ELF closure.
+// Aggregate systemd statuses are diagnostic only: they can mask provider errors.
 // cgo is necessary for NSS's C structs and function-pointer ABI; os/user and
 // getent do not expose the completion/error distinction required here.
 package nssprobe
@@ -80,8 +81,11 @@ var errUnknown = errors.New("nss_probe_unknown")
 
 func ReadFiles(path string, limit int) (Snapshot, error) { return readModule(path, 0, limit) }
 
-// ReadFilesSystemd queries both reviewed ABIs rather than trusting glibc getent's
-// exit code. Duplicate identical projections are coalesced, never conflicts.
+// ReadFilesSystemd collects an additional ABI agreement view, NOT proof of
+// systemd provider completion: libnss_systemd may hide post-record errors. The
+// production SystemdNSSRuntime must refuse systemd until direct provider terminal
+// evidence exists. Each module rejects repeated names/numbers before identical
+// cross-module projected rows coalesce. Conflicting cross-module rows remain.
 func ReadFilesSystemd(files, systemd string, limit int) (Snapshot, error) {
 	a, e := readModule(files, 0, limit)
 	if e != nil {
@@ -129,6 +133,7 @@ func readModule(path string, module int, limit int) (Snapshot, error) {
 			return Snapshot{}, errUnknown
 		}
 		bad := false
+		seenNames, seenIDs := map[string]bool{}, map[string]bool{}
 		for {
 			status := C.next(p, C.int(kind))
 			if status == 0 {
@@ -180,6 +185,16 @@ func readModule(path string, module int, limit int) (Snapshot, error) {
 			}
 			if bad {
 				break
+			}
+			// Identity repetitions within one provider are ambiguous, including
+			// identical projections. No group-fragment merge is supported.
+			if seenNames[fields[0]] || kind != 2 && seenIDs[fields[2]] {
+				bad = true
+				break
+			}
+			seenNames[fields[0]] = true
+			if kind != 2 {
+				seenIDs[fields[2]] = true
 			}
 			tables[kind].WriteString(strings.Join(fields, ":") + "\n")
 			if tables[0].Len()+tables[1].Len()+tables[2].Len() > 8<<20 {

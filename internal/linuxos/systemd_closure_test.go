@@ -107,7 +107,24 @@ func newSystemdFixture(t *testing.T) *systemdFixture {
 	return f
 }
 func (f *systemdFixture) capture() ([]NSSModule, error) {
-	return f.runtime.CaptureModules(context.Background(), []string{"files", "systemd"}, testLimits())
+	return f.captureMetadata(context.Background(), testLimits())
+}
+func (f *systemdFixture) captureMetadata(ctx context.Context, l Limits) ([]NSSModule, error) {
+	// Exercise private metadata validation, not public host admission.
+	c, cancel, e := budget(ctx, l)
+	if e != nil {
+		return nil, e
+	}
+	defer cancel()
+	files, e := f.runtime.Files.CaptureModules(c, []string{"files"}, l)
+	if e != nil {
+		return nil, e
+	}
+	module, e := f.runtime.captureSystemd(c, l)
+	if e != nil {
+		return nil, e
+	}
+	return append(files, module), nil
 }
 func requireSystemdUnknown(t *testing.T, m []NSSModule, e error) {
 	t.Helper()
@@ -323,7 +340,7 @@ func TestSystemdProtectedRoots(t *testing.T) {
 			if mode == "budget" {
 				l.Entries = 0
 			}
-			got, e := f.runtime.CaptureModules(ctx, []string{"files", "systemd"}, l)
+			got, e := f.captureMetadata(ctx, l)
 			if strings.HasSuffix(mode, "control") {
 				if e != nil || len(got) != 2 {
 					t.Fatal("protected control", got, e)
@@ -394,9 +411,10 @@ func TestSystemdProviderProvenanceAndRanges(t *testing.T) {
 	}
 }
 
-// A real helper executes both direct NSS ABI modules through retained handles;
-// the directory accepts matched files/systemd inputs and rejects a later drop-in.
-// This is an owned fixture, not qualification of this host's services or fence.
+// The helper provides a diagnostic two-module agreement view, not completion
+// authority. The public runtime admits the files-only control, refuses even
+// matched files/systemd inputs, and private metadata detects a later drop-in.
+// This owned fixture does not qualify the host's services or fence.
 func TestSystemdDirectoryAndCollector(t *testing.T) {
 	f := newSystemdFixture(t)
 	artifacts := filepath.Join(f.root, "artifacts")
@@ -447,12 +465,12 @@ func TestSystemdDirectoryAndCollector(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	data, e := f.runtime.Enumerate(context.Background(), []string{"files", "systemd"}, testLimits())
+	data, e := enumerateNSS(context.Background(), f.runtime.Files.Collector, []ProtectedArtifact{f.runtime.Files.Library, f.runtime.Library}, testLimits())
 	if e != nil {
 		t.Fatal(e)
 	}
 	etcpath := filepath.Join(f.root, "etc")
-	conf, _, e := ParseNSSConfiguration([]byte("passwd: files systemd\ngroup: files systemd\nshadow: files systemd\n"), 100)
+	conf, _, e := ParseNSSConfiguration([]byte("passwd: files\ngroup: files\nshadow: files\n"), 100)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -465,22 +483,35 @@ func TestSystemdDirectoryAndCollector(t *testing.T) {
 		t.Fatal(e)
 	}
 	fence := &directoryFenceFixture{}
-	d, e := NewQualifiedDirectory(f.runtime.Etc, DirectoryInputs{Configuration: conf, Modules: modules, UIDRange: IDInterval{24000, 24009}, GIDRange: IDInterval{24000, 24009}, ReservedNames: []string{"worker-fixture"}}, f.runtime, fence, testLimits())
+	d, e := NewQualifiedDirectory(f.runtime.Etc, DirectoryInputs{Configuration: conf, Modules: modules[:1], UIDRange: IDInterval{24000, 24009}, GIDRange: IDInterval{24000, 24009}, ReservedNames: []string{"worker-fixture"}}, f.runtime, fence, testLimits())
 	if e != nil {
 		t.Fatal(e)
 	}
 	got, e := queryDirectory(d)
 	if e != nil || len(got.Accounts) != 1 || !got.Accounts[0].PasswordLocked {
-		t.Fatal("files/systemd directory positive", got, e)
+		t.Fatal("files-only directory positive", got, e)
 	}
+	conf, _, e = ParseNSSConfiguration([]byte("passwd: files systemd\ngroup: files systemd\nshadow: files systemd\n"), 100)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if e = os.WriteFile(filepath.Join(etcpath, "nsswitch.conf"), []byte(conf.Passwd+conf.Group+conf.Shadow), 0600); e != nil {
+		t.Fatal(e)
+	}
+	d, e = NewQualifiedDirectory(f.runtime.Etc, DirectoryInputs{Configuration: conf, Modules: modules, UIDRange: IDInterval{24000, 24009}, GIDRange: IDInterval{24000, 24009}}, f.runtime, fence, testLimits())
+	if e != nil {
+		t.Fatal(e)
+	}
+	got, e = queryDirectory(d)
+	requireDirectoryUnknown(t, got, e)
 	if e = os.Mkdir(filepath.Join(etcpath, "userdb"), 0700); e != nil {
 		t.Fatal(e)
 	}
 	if e = os.WriteFile(filepath.Join(etcpath, "userdb", "x.membership"), nil, 0600); e != nil {
 		t.Fatal(e)
 	}
-	got, e = queryDirectory(d)
-	requireDirectoryUnknown(t, got, e)
+	metadata, e := f.capture()
+	requireSystemdUnknown(t, metadata, e)
 }
 
 // Ordinary account database replacement and unrelated protected ancestor children
@@ -507,7 +538,8 @@ func TestSystemdUnrelatedDirectoryChanges(t *testing.T) {
 }
 
 // The exact canonical manifest is an input hash, including source metadata;
-// changing a valid manifest cannot preserve the recorded directory module pin.
+// changing a valid manifest cannot preserve its metadata pin. Neither valid
+// metadata pin enables public systemd admission while completion is unavailable.
 // The synthesized root/nobody singletons remain in the independent range union.
 func TestSystemdManifestDigestBinding(t *testing.T) {
 	f := newSystemdFixture(t)
@@ -530,10 +562,6 @@ func TestSystemdManifestDigestBinding(t *testing.T) {
 	if before[1].ConfigurationDigest != digestBytes(raw) || !reflect.DeepEqual(before[1].UIDRanges, want) || !reflect.DeepEqual(before[1].GIDRanges, want) {
 		t.Fatal("manifest/range pin", before[1])
 	}
-	d, e := NewQualifiedDirectory(f.runtime.Etc, DirectoryInputs{Configuration: conf, Modules: before, UIDRange: IDInterval{24000, 24009}, GIDRange: IDInterval{24000, 24009}}, f.runtime, &directoryFenceFixture{}, testLimits())
-	if e != nil {
-		t.Fatal(e)
-	}
 	f.manifest.Services[0].Source.Revision = "new-reviewed-revision"
 	f.writeManifest(t)
 	after, e := f.capture()
@@ -547,9 +575,9 @@ func TestSystemdManifestDigestBinding(t *testing.T) {
 	if after[1].ConfigurationDigest != digestBytes(raw) || after[1].ConfigurationDigest == before[1].ConfigurationDigest {
 		t.Fatal("changed manifest did not change pin", after)
 	}
-	names, e := d.capture(context.Background())
-	var typed *Error
-	if names != nil || !errors.As(e, &typed) || typed.Code != "directory_unknown" || typed.Operation != "module_drift" {
-		t.Fatal("stale manifest pin admitted", names, e)
+	modules, e := f.runtime.CaptureModules(context.Background(), []string{"files", "systemd"}, testLimits())
+	requireSystemdCompletionUnavailable(t, e)
+	if modules != nil {
+		t.Fatal("metadata pin admitted without provider completion")
 	}
 }

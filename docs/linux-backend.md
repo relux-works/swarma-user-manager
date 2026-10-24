@@ -132,13 +132,15 @@ this initial qualified profile, with protected ancestors and no ACLs/capabilitie
 | Module | Reviewed implementation boundary | Qualification state |
 |---|---|---|
 | `files` | Direct `_nss_files_*` enumeration in the isolated `swarma-nss-probe` helper; complete passwd/group/shadow status and membership checks. On modern glibc the exporting implementation is libc, not the legacy stub library. | Usable with a reviewed protected collector/library/loader configuration closure and authenticated inputs/exclusion. No implicit host resolver is supplied. |
-| `systemd` | `SystemdNSSRuntime` checks the closed userdb manifest, protected empty/absent roots, exact Varlink set, provider artifacts/sources and inclusive ranges; the direct ABI collector enumerates both modules. | Usable only with the reviewed capabilities below and authenticated inputs/exclusion. Default ranges or socket filenames alone never qualify it. |
+| `systemd` | Private metadata checks cover the manifest, userdb roots, endpoint set, artifacts/sources and ranges; aggregate NSS is only an additional agreement view. | Unknown. Both public `SystemdNSSRuntime` methods refuse until a direct per-provider completion collector exists, including forwarding contributors. |
 | Any other module | No bounded complete implementation is published. | Refuse. |
 
 Capture understands module names and closed NSS status/action syntax and records
-every reachable module, even one following a return action. This runtime admits
-only plain `files` or `files systemd` lines; action clauses are captured but
-refused until their effective lookup/enumeration equivalence is reviewed. Bytes,
+every reachable module, even one following a return action. Line validation
+recognizes plain `files` and `files systemd`; only `files` currently has a public
+complete runtime. Systemd capture/enumeration refuse independently of recognized
+syntax. Action clauses are captured but refused until their effective
+lookup/enumeration equivalence is reviewed. Bytes,
 whitespace, comments and final LF remain part of the pin. Missing/duplicate lines,
 continuations, NUL/CR, invalid UTF-8 and unsupported syntax refuse.
 
@@ -167,7 +169,9 @@ root `[0,0]` and nobody `[65534,65534]`, without allowing station ID zero.
 The helper uses a small cgo NSS ABI shim because Go's `os/user` and
 [glibc `getent`](https://sourceware.org/git/?p=glibc.git;a=blob;f=nss/getent.c;hb=HEAD)
 do not expose the complete terminal-status contract. It checks direct module
-SUCCESS/NOTFOUND/UNAVAIL/TRYAGAIN results and rejects partial enumeration. It runs
+SUCCESS/NOTFOUND/UNAVAIL/TRYAGAIN results and rejects ABI-visible errors. This
+proves files-module completion under its reviewed implementation contract; it
+cannot recover failures already masked inside libnss_systemd. It runs
 under a parent deadline with empty environment, bounded output and held executable
 and library descriptors. It emits sanitized database projections: password fields
 are removed and shadow contains only a lock marker. It never emits password hashes,
@@ -203,9 +207,16 @@ before comparison, including passwd entries introduced by in-range group names.
 
 ## Systemd userdb closure and runtime
 
-`*linuxos.SystemdNSSRuntime` implements `NSSRuntime` for exactly `files` or
-`files systemd`; `FilesNSSRuntime` remains the files-only implementation. The
-reviewed deployment supplies these capabilities, never record-decoded paths:
+`*linuxos.SystemdNSSRuntime` delegates `files` to `FilesNSSRuntime`. Both public
+methods refuse every non-files selection as
+`directory_unknown: systemd_provider_completion_unavailable`, with no modules or
+account data. Valid manifests, root peer credentials, matching ABI snapshots or
+authenticated old inputs cannot bypass this gate. No direct provider-completion
+collector is implemented in this revision.
+
+The retained private closure validator exercises the metadata contract below,
+without admitting a host. These reviewed capabilities are never record-decoded
+paths:
 
 | Field | Required input |
 |---|---|
@@ -269,12 +280,12 @@ the aggregate ranges. Inclusive sorted unions preserve singleton intervals.
 The directory's existing validator refuses either station range overlapping
 those module ranges, including one shared endpoint.
 
-`systemd.configuration_digest` is SHA256 of the exact canonical manifest
-bytes. Current provider artifacts and sources must still match its declared
-digests, so hashing a stale manifest is insufficient. Runtime comparison with
-the authenticated qualification inputs detects manifest/range changes. The
-runtime additionally retains current-process endpoint/directory identities and
-refuses replacement; these ephemeral facts are outside the stable boot input
+The private metadata validator computes `systemd.configuration_digest` as SHA256
+of the exact canonical manifest bytes. Current provider artifacts and sources
+must still match its declared digests; a stale manifest is insufficient. A valid
+manifest change alters that metadata pin, but no pin enables public systemd
+admission. Repeated metadata checks retain current-process endpoint/directory
+identities and refuse replacement; these ephemeral facts are outside the stable boot input
 pin. Ordinary unrelated ancestor-directory contents/timestamps are not pinned.
 A new boot requires new observations, not reused inode/PID authority. The
 existing `DirectoryFence` must exclude account, source and provider changes
@@ -290,16 +301,43 @@ its exclusion must establish which service owns each endpoint and that the
 listed artifacts are its complete configuration. Missing that evidence is
 unknown; this API supplies no implicit deployment approval or host defaults.
 
-The collector uses direct `_nss_files_*` and `_nss_systemd_*` enumeration for
-passwd/group/shadow with independent terminal-status checks. Earlier files
-success cannot hide a later systemd failure. Exact identical sanitized rows
-are coalesced; conflicting name/number rows remain visible and refuse through
-the directory validator. Both implementations, loader dependencies and the
-collector remain pinned. Upstream's
-[systemd NSS implementation](https://raw.githubusercontent.com/systemd/systemd/v257/src/nss-systemd/nss-systemd.c)
-provides all three enumeration ABIs and suppresses fallback root/nobody during
-iteration; root/nobody point synthesis still belongs in the recorded ranges.
-Fixtures exercise this transport, not the installed host module's behavior.
+### Provider completion remains unavailable
+
+The helper's `--files-systemd` mode is a diagnostic agreement view only. Direct
+NSS ABI terminal checks are insufficient for this module: the upstream
+[userdb iterator](https://raw.githubusercontent.com/systemd/systemd/v257/src/shared/userdb.c)
+can suppress a provider error after returning records, and the
+[NSS implementation](https://raw.githubusercontent.com/systemd/systemd/v257/src/nss-systemd/nss-systemd.c)
+then presents normal exhaustion. A complete stream and record followed by
+`ServiceNotAvailable` can produce identical sanitized snapshots. Socket
+connections, declared ranges and artifact hashes do not restore the lost result.
+Systemd therefore remains unknown until direct completion evidence exists.
+
+Supporting it later requires bounded direct NUL-framed Varlink enumeration of
+each selected provider's GetUserRecord, GetGroupRecord and GetMemberships calls,
+with per-call terminal evidence, strict framing/fields, and refusal of errors,
+truncation and timeouts. Forwarding services cannot replace their contributors'
+independent completion. NSS can then supply an additional agreement view. This
+revision does not implement or claim that direct collector.
+
+Before combining the diagnostic views, each individual module rejects repeated
+names and repeated UID/GID values (shadow has names only), even for identical
+projected rows. No group-fragment merge exception exists. Only an identical
+sanitized row appearing once in files and once in systemd is coalesced across
+modules. Conflicting cross-module rows remain visible to the directory validator;
+this projection rule never supplies systemd completion authority.
+
+`TestSystemdRecordThenServiceNotAvailable` runs the installed real
+`/usr/lib/x86_64-linux-gnu/libnss_systemd.so.2`, with only equal-length path changes
+in a test-owned copy. Its services target a passed temporary directory descriptor;
+all drop-in roots target missing `/proc/0` paths. No installed service or module
+is modified. Complete and post-record-error controls return identical ABI views;
+immediate error returns no view. All three remain inadmissible through the public
+runtime. The test requires that real module and records its original/copy hashes;
+its files module is empty, so the witness records must come from real systemd.
+`TestReviewSystemdDuplicateEnumeration` retains the three database repetitions and
+the identical cross-module control against the actual helper, while the files-only
+directory control remains admissible. None of these fixtures qualifies a host.
 
 ## Boot qualification unit artifact
 
