@@ -20,7 +20,10 @@ const ImplementationFileBytes int64 = 64 << 20
 const ImplementationTotalBytes int64 = 256 << 20
 
 func openImplementation(ctx context.Context, a ProtectedArtifact, max int64) (_ *os.File, file ClosureFile, size int64, err error) {
-	if max < 1 || max > ImplementationFileBytes || a.Directory == nil || !filepath.IsAbs(a.Path) || filepath.Clean(a.Path) != a.Path || filepath.Base(a.Path) != a.Name {
+	if max < 1 {
+		return nil, file, 0, refusal("directory_unknown", "implementation_byte_limit", nil)
+	}
+	if max > ImplementationFileBytes || a.Directory == nil || !filepath.IsAbs(a.Path) || filepath.Clean(a.Path) != a.Path || filepath.Base(a.Path) != a.Name {
 		return nil, file, 0, refusal("directory_unknown", "implementation_input", nil)
 	}
 	if e := ctx.Err(); e != nil {

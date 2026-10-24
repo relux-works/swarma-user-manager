@@ -13,7 +13,7 @@ import (
 // Only clean token-free absolute RUNPATH entries admit; neighboring relative,
 // empty, token and legacy RPATH encodings refuse before dependency lookup.
 func TestLoaderAbsoluteRunpath(t *testing.T) {
-	for _, mode := range []string{"token", "relative", "empty-first", "empty-last", "empty-middle", "unclean", "rpath", "absolute"} {
+	for _, mode := range []string{"token", "lib-token", "platform-token", "unknown-token", "relative", "empty-first", "empty-last", "empty-middle", "unclean", "rpath", "duplicate", "absolute"} {
 		t.Run(mode, func(t *testing.T) {
 			path := t.TempDir()
 			d := fixtureDir(t, path)
@@ -27,6 +27,14 @@ func TestLoaderAbsoluteRunpath(t *testing.T) {
 			switch mode {
 			case "token":
 				runpath = "$ORIGIN"
+			case "lib-token":
+				runpath = "/$LIB"
+			case "platform-token":
+				runpath = "/$PLATFORM"
+			case "unknown-token":
+				runpath = "/unreviewed/$UNKNOWN"
+			case "duplicate":
+				runpath = path + ":" + path
 			case "relative":
 				runpath = "relative"
 			case "empty-first":
@@ -42,7 +50,7 @@ func TestLoaderAbsoluteRunpath(t *testing.T) {
 			}
 			compileDirectoryFixture(t, root, source, "-Wl,"+tags+",-rpath,"+runpath)
 			files, digest, e := CaptureImplementationClosure(context.Background(), []ProtectedArtifact{{d, "root.so", root}}, closureResolverFixture{}, testLimits())
-			if mode == "absolute" {
+			if mode == "absolute" || mode == "duplicate" {
 				if e != nil || len(files) != 1 || digest == "" {
 					t.Fatalf("absolute RUNPATH refused: %v", e)
 				}

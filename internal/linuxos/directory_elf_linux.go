@@ -158,6 +158,17 @@ func loaderDependencies(object *elf.File, reader io.ReaderAt, fileSize uint64) (
 			}
 		}
 	}
+	// glibc fillin_rpath removes repeated directory spellings. Preserve the
+	// first occurrence so name/scope evidence follows the same search order.
+	unique := []string{}
+	seenDirs := map[string]bool{}
+	for _, dir := range runpath {
+		if !seenDirs[dir] {
+			unique = append(unique, dir)
+			seenDirs[dir] = true
+		}
+	}
+	runpath = unique
 	for _, flags := range vals[elf.DT_FLAGS_1] {
 		if flags&0x800 != 0 {
 			return nil, nil, refusal("directory_unknown", "closure_loader_syntax", nil)
