@@ -56,7 +56,7 @@ func reconciliationInputs(f *signedFixture) (RepositoryProfile, RepositoryBaseli
 	return p, base, b, source
 }
 
-// Claim: a failed or absent process exit is not a terminal verdict. Under owned
+// Claim: a failed or unobserved process exit is not a terminal verdict. Under owned
 // exclusion, installed state plus authentic matching payload passes; an installed
 // status with mismatching payload refuses without evidence or accepted-state writes.
 func TestReconcileMidwayFailurePayload(t *testing.T) {
@@ -68,8 +68,8 @@ func TestReconcileMidwayFailurePayload(t *testing.T) {
 	}{
 		{"failed-but-payload-matches", "failed", false, nil},
 		{"failed-installed-payload-mismatch", "failed", true, ErrChecksum},
-		{"missing-post-payload-matches", "open", false, nil},
-		{"missing-post-payload-mismatch", "open", true, ErrChecksum},
+		{"missing-after-payload-matches-refused", "open", false, ErrGap},
+		{"missing-after-payload-mismatch-refused", "open", true, ErrGap},
 		{"post-observed-payload-matches", "post", false, nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -295,5 +295,37 @@ func TestReconcileHookUnpackConfigure(t *testing.T) {
 				t.Fatalf("lost chronology: %+v", result)
 			}
 		})
+	}
+}
+
+// Claim: a pending Begin cannot absorb otherwise unrecorded database-only drift,
+// even if installed packages, closure bytes and the entire signed payload match.
+func TestReconcileUnfinishedDatabaseOnlyDrift(t *testing.T) {
+	f := newSignedFixture(t)
+	ctx := context.Background()
+	p, base, b, source := reconciliationInputs(f)
+	before := copySnapshot(f.inv.After)
+	before.DatabaseSHA256 = Digest([]byte("last accepted database"))
+	base.Common.Packages = before.Packages
+	base.Common.Leaves = before.Leaves
+	current := copySnapshot(before)
+	current.DatabaseSHA256 = Digest([]byte("unrecorded metadata"))
+	r := recorderFixture(t)
+	id, e := r.Begin(ctx, f.inv.ID.Boot, "invocation", "unfinished", ID{}, before)
+	if e != nil {
+		t.Fatal(e)
+	}
+	result, e := Reconcile(ctx, r, AcceptedState{Snapshot: before}, p, base, map[ID]RepositoryBundle{id: b}, source, "current-boot", &ownedPackageState{snapshot: current})
+	if e != ErrGap || !reflect.DeepEqual(result, Reconciled{}) {
+		t.Fatalf("pending intent adopted current database: %v %+v", e, result)
+	}
+	// Nearby control: recorded after observation covers that same transition;
+	// process success is still absent, and payload verification must actually run.
+	if e = r.ObservePost(ctx, id, current); e != nil {
+		t.Fatal(e)
+	}
+	result, e = Reconcile(ctx, r, AcceptedState{Snapshot: before}, p, base, map[ID]RepositoryBundle{id: b}, source, "current-boot", &ownedPackageState{snapshot: current})
+	if e != nil || len(result.Evidence) != 1 {
+		t.Fatal("recorded reinstall control", e)
 	}
 }

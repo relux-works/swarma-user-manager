@@ -135,8 +135,8 @@ func terminalSnapshot(s Snapshot, l Limits) error {
 }
 
 // reconcileChronology compares both ends to the LAST ACCEPTED snapshot. It
-// preserves every intermediate ID/version; a lone open final invocation may
-// supply its after observation under exclusion, without inventing exit success.
+// preserves every intermediate ID/version. The locked endpoint confirms recorded
+// after observations; it never fills an unrecorded after state from current.
 func (r *Recorder) reconcileChronology(ctx context.Context, accepted AcceptedState, current Snapshot) (ScanResult, error) {
 	fail := func() (ScanResult, error) { return ScanResult{}, ErrGap }
 	u, e := r.lock(ctx)
@@ -166,6 +166,23 @@ func (r *Recorder) reconcileChronology(ctx context.Context, accepted AcceptedSta
 	if e != nil {
 		return ScanResult{}, e
 	}
+	for _, rec := range records {
+		if rec.begin.Sequence > accepted.Sequence {
+			continue
+		}
+		after := rec.end
+		if after == nil {
+			after = rec.observed
+		}
+		if after == nil || after.Sequence > accepted.Sequence {
+			return fail()
+		}
+		for _, id := range rec.children {
+			if id.Sequence > accepted.Sequence {
+				return fail()
+			}
+		}
+	}
 	out := ScanResult{}
 	previous := accepted.Snapshot
 	batches := map[ID]int{}
@@ -185,19 +202,15 @@ func (r *Recorder) reconcileChronology(ctx context.Context, accepted AcceptedSta
 			out.Pending = append(out.Pending, Batch{ID: v.ID})
 			continue
 		}
-		endpoint := current
+		var endpoint Snapshot
 		if rec.end != nil {
 			endpoint = rec.end.Snapshot
 		} else if rec.observed != nil {
 			endpoint = rec.observed.Snapshot
 		} else {
-			// No later invocation can be attributed past a missing post observation.
-			for _, later := range events[v.Sequence:] {
-				if later.Phase == "begin" {
-					return fail()
-				}
-			}
+			return fail()
 		}
+
 		if !digestOK(endpoint.DatabaseSHA256) {
 			return fail()
 		}
