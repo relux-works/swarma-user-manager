@@ -147,3 +147,14 @@ mechanisms, profiles and procedures remain unselected and unqualified.
 | M5 — Native journal/durability | Recommendation: jointly qualify native reader/writer locking, sync/publication/crash semantics, original budgets and external restore custody with direct consumers. APFS metadata observations do not establish these guarantees | No production journal writer/consumer claim |
 | M6 — Key, root qualification and task scope | Recommendation: select the root-test host/procedure separately; publish task names/soft bounds, qualify admission and static UID-range deny, and retain the shared Keymaker pre-active provision/confirm activation gate. P5 is settled scope: explicitly named trusted soft-limit tasks; hard-limit tasks refuse or use Linux, with no waiver | `user.bump` closed; no mutations, execution or hard-limit claim from read-only facts |
 | M7 — Authentic update/requalification | Recommendation: publish authentic publisher/target/trust policy, update-writer exclusion including automatic/MDM/background updates, installed seal/Cryptex evidence, authorized pin-transition and interrupted failure/rollback rules. Qualify reviewed root verification and the five named MacUpdate cases, each paired with an authentic pre-approved-target control; history and a reported sealed snapshot are insufficient | No automatic acceptance of unverified updates; admission closed and P7 response applies on revocation |
+
+## Boot service validation after the openat2 sandbox correction
+
+The old qualification service's `RestrictSUIDSGID=yes` denies required openat2
+reads on systemd 259. The corrected profile and stage-coded diagnostics have an
+unprivileged live reproduction and preflight hook, documented in
+[qualification diagnostics](docs/qualification-diagnostics.md). The specific
+previous root failure had no stage trace; a corrected delivery with regenerated
+pins still requires the owner to run initial qualification and successful boot
+renewal, preserving diagnostics on refusal. Nonroot preflight is no privileged
+acceptance evidence.

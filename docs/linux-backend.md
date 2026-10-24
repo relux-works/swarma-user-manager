@@ -881,3 +881,14 @@ Provider failures, unknown records, closure mismatch and missing files refuse.
 Do not install these example schema descriptions as JSON: construct the exact
 closed canonical reviewed documents for the actual host. There is no automatic
 policy edit, repin, root script or deployment action in the maintenance command.
+
+### Boot refusal diagnostics and preflight
+
+Every normal maintenance refusal now adds one stable `qualification_refused
+stage=... check=...` line before the existing `qualification_required`, retaining
+exit 1. See [the diagnostic contract and nonroot live preflight](qualification-diagnostics.md).
+The reviewed unit requires `RestrictSUIDSGID=no` because systemd 259's `yes` blocks
+the required openat2 reads; reintroducing it is rejected by the closed validator.
+Regenerate deployment/binary/unit pins for a corrected delivery and repeat the
+owner qualification procedure. The nonroot environment check cannot substitute
+for root qualification, publication, or latest successful boot-unit evidence.

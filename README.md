@@ -161,6 +161,8 @@ The Go station-account core implements closed `user.create`, `user.retire` and
 Its backend contract and recovery/qualification limits are in
 [the core documentation](docs/station-core.md). The entrypoint supplies the
 [production Linux environment](docs/linux-backend.md#production-qualification).
+The [boot diagnosis and refusal-code contract](docs/qualification-diagnostics.md)
+includes a live nonroot preflight and the required openat2-compatible sandbox.
 Its root maintenance modes implement initial qualification and per-boot renewal;
 the reader requires a protected current record, unchanged inputs, the policy pin
 and the matching successful latest systemd invocation. A policy flag alone
@@ -186,6 +188,7 @@ describes protected deployment inputs and the stopped-admission pin/restart flow
 | Tool | Purpose | Command | Output |
 |---|---|---|---|
 | Qualification maintenance (owner root shell) | Produce a candidate inputs digest, then renew through the unit | `/opt/swarma/libexec/swarma-user-manager qualify`; `systemctl restart swarma-user-manager-qualify.service` | Initial mode prints one digest; protected `/opt/swarma/lib/user-manager/qualification/record.json`; root step pending |
+| Boot environment preflight (nonroot) | Exercise protected systemctl, own-unit and cgroup checks under the unit sandbox | Candidate binary `qualify-preflight` inside the [fixed user oneshot](docs/qualification-diagnostics.md#nonroot-live-installation-preflight) | Stable success/refusal lines; no policy, record or root mutation |
 | Loader closure checks | Absolute requester-only RUNPATH, exact ordered lookup evidence, earlier-name/link drift, member metadata and streaming byte bounds | `go test -race -p 1 ./internal/linuxos -run '^TestLoader' -count=1`; `go test -race -p 1 ./internal/linuxbackend -run '^TestQualification(LoaderEvidence\|LoaderCache\|DeploymentSchema\|LoaderSchema)$' -count=1` | Named verdicts; owned temporary ELF fixtures and test-only overlay; no provider RPC or host writes |
 | Native loader review regressions | Symlink parent-step and cross-file SONAME alias refusals, with admitted controls and local/full drift checks | `go test -race -p 1 ./internal/linuxbackend -run '^TestReviewLoader(SymlinkDotDot\|SONAMEReuse)$' -count=1` | Named verdicts; temporary ELF objects and empty-environment native loader differential; no host writes |
 | Provider configuration pins | Typed file/absent/directory capabilities, full and local rechecks of appearing drop-ins | `go test -race -p 1 ./internal/linuxos ./internal/linuxbackend -run '^TestQualification(ProviderConfiguration\|SystemdConfigurationPins)$' -count=1` | Named verdicts; owned fixtures and production wrapper overlay; no local guard RPC |
