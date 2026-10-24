@@ -256,6 +256,12 @@ The local Q and matching issuer are prerequisites, not a public certificate.
 Public guarantee claims also need the broader platform test catalog; Linux's
 local eleven checks do not establish every parity guarantee.
 
+The local gate supplies only its qualified `qualification.boot` and
+`qualification.drift` evidence. The broader catalog must separately prove such
+rows as `journal.durable`, `inventory.uid` and `admission.guarantees`. A public
+attestation signature cannot supply `keys.station` or `matrix.login`; those
+retain their own platform implementations, enrollment and proving tests.
+
 ### 6.1 Required signed content
 
 Before implementation, publish a closed versioned encoding with finite
@@ -414,7 +420,7 @@ until those decisions, reviewed encodings and positive/negative vectors exist.
 | Q4 — Revocation authority and distribution? | Scoped owner/publisher revocation, signed sequenced index, explicit bounded refresh/clock policy and anti-rollback custody; retain history | Unknown revocation status blocks current verification; no numeric refresh default invented |
 | Q5 — Exact class descriptor and compatibility? | Version exact dimensions in §5; default new class on changes; test-maintainer-reviewed compatibility only with dependency evidence | OS-family/model-name matches cannot inherit results |
 | Q6 — Public evidence and retention? | Minimized signed export with reproducible sanitized evidence, explicit owner preview/consent, content-addressed retention through expiry plus a published audit window | Withhold a claim lacking publishable proof; no private logs or identity leakage |
-| Q7 — Matrix review and zero-touch publication? | Independent review for class/test/trust/status changes; preauthorized checked automation for routine same-class record attachments, with scoped publisher key and normal protected-branch delivery | No automatic publication until policy/tooling is approved; pending submissions remain unverified |
+| Q7 — Matrix review and routine publication? | Independent review for class/test/trust/status changes; preauthorized checked automation for routine same-class record attachments, with scoped publisher key and normal protected-branch delivery | No automatic publication until policy/tooling is approved; pending submissions remain unverified |
 | Q8 — Catalog, finite bounds and extension policy? | Platform-test maintainers version the complete identifier/test/dependency map, root/destructive-test authorization, evidence/schema bounds and later pool additions; ratify the parity revision | No unknown required identifier, skipped live proof or unreviewed extension may admit |
 
 This specification adds no runtime feature. Implementation acceptance requires

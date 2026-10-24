@@ -259,3 +259,30 @@ abort or duplicate append. Include the valid consumed-attempt completion control
 unchanged committed facts may finish once within the original budgets despite
 Keymaker death; restart publication waits for F and obligation reconciliation.
 No stale-instance-only fixture or setup failure discharges these subcases.
+
+## Self-service host qualification publication gates
+
+The [protocol](spec/host-qualification-protocol.md#9-open-decisions-and-activation-gates)
+and empty [platform matrix](platforms/verified.md) are documentation proposals.
+They generalize the owner-run flow without changing the closed local record or
+admitting a host. Their explicit owner/maintainer decisions remain:
+
+- Q1–Q2: dedicated host-attestation signer, trusted enrollment and custody; exact
+  versioned signature envelope, canonicalization, bounded schemas and key recovery.
+  Recommend owner-authorized separate-purpose keys and domain-separated Ed25519
+  over pinned CCJ-1 bytes; hardware identity requires qualified hardware evidence.
+- Q3–Q4: public validity/time, scoped revocation, index freshness and anti-rollback
+  policy. Recommend at most 30-day public validity plus immediate drift invalidation,
+  and signed sequenced revocations; these are proposals, not local-Q TTL changes.
+- Q5–Q6: class descriptor/compatibility and publishable proof retention. Recommend
+  exact versioned enforcement dimensions and consented sanitized evidence; no
+  inheritance from OS-family equality or disclosure of private logs.
+- Q7–Q8: independent class/test/trust/status review, bounded same-class publication
+  automation, and the platform-test catalog/accepted parity revision. Recommend
+  preauthorized verified routine attachments without per-host kit engineering;
+  new coverage and trust still require independent review. Future pool checks
+  cannot silently alter existing guarantee identifiers.
+
+Until these decisions and their proving tests are approved and implemented, no
+trusted generic signing/submission/publication service or verified matrix row
+is claimed. Existing local boot, drift, update and admission gates remain.

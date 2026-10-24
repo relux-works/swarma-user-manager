@@ -7,6 +7,15 @@ Two minimal privileged components for agent systems. Each runs as root for one o
 
 **Status: design in progress.** Accepted architecture-review findings (2026-10-13) are reflected in draft v0.15 and its figures; publication/qualification gates remain open. The [generation journal format `gen-journal/1`](spec/generation-journal.md), vectors and Linux offline checker are published here; the station core includes v2 effect receipts, unlocked per-effect flights and versioned authority boundaries with injected-backend tests, and standalone [Linux station primitives](internal/linuxos/README.md) are available through a Linux backend adapter; host qualification providers remain gated. Real OS account backends and production consumer adapters remain unqualified. The helper specification is [`spec/helper.md`](spec/helper.md); diagrams are in [`diagrams/`](diagrams/).
 
+## Host qualification protocol
+
+The proposed [self-service protocol](spec/host-qualification-protocol.md) defines
+owner-run survey, kit generation/review, root stage/apply/verify, signed evidence
+and later requalification. The [verified-platform matrix](platforms/verified.md)
+is an empty format proposal with no qualified rows. Signing/enrollment, catalog,
+expiry/revocation and publication policy remain explicit activation gates; this
+documentation supplies no generic installer or submission command.
+
 ## Principles
 
 - [A3 package-update requalification](spec/upgrade-requalification.md) specifies the sole signed-apt-chain automatic re-pin exception. Its evidence recorder, chain verifier and state reconciler are implemented for review; time/deployment integration, automatic pinning, containment/notification and root qualification remain pending; station admission stays closed until that slice is landed and qualified. It does not implement A1p's separate administrator command.
