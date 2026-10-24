@@ -42,7 +42,9 @@ noncanonical ordering/escapes/numbers, BOM, CRLF, whitespace, empty lines and
 missing final LF. All nested objects defined here are closed.
 
 `D` means a nonzero lowercase 64-hex SHA-256. `Z` is exactly 64 ASCII zeroes.
-All integers are CCJ safe integers, never floats: 0..9007199254740991 unless a
+The parser must bound nesting to 32 objects/arrays before allocating; no
+recursive reference resolution or object-type cycle is allowed. All integers
+are CCJ safe integers, never floats: 0..9007199254740991 unless a
 tighter bound is stated. No sequence wraps. Hash ordinary objects over their
 **exact stored bytes**, with no added LF; new manifest objects use CCJ-1 without
 LF. Hash a journal predecessor over the **entire canonical previous line,
@@ -59,7 +61,7 @@ never silently CCJ-reencode them or reuse a hash of a transformed representation
 
 ### 2.2 Closed entry
 
-Every entry has exactly the following 21 members. Canonical key order is the
+Every entry has exactly the following 22 members. Canonical key order is the
 lexicographic order shown; arrays have the explicit semantic orders below.
 
 | Member | Type and exact constraint |
@@ -70,13 +72,14 @@ lexicographic order shown; arrays have the explicit semantic orders below.
 | `candidate_state` | `Ref` to the candidate `qual-maint-state/1` object (§2.4) |
 | `evidence_manifest` | `Ref` to the complete `qual-maint-evidence/1` object (§2.4) |
 | `format` | Exactly `qual-maint/1` |
-| `initial_q` | `null`, or `Ref` to exact protected initial-mode Q bytes captured before boot mode replaces Q |
+| `initial_q` | `null`, or `Ref` to the minimized initial-mode Q proof defined in §2.4, captured before boot mode replaces Q |
 | `interlock` | `Ref` to retained authenticated admission/maintenance/P7 continuity evidence; not a caller assertion or a marker-only proof (§4) |
 | `links` | Array of 0..512 closed per-link references (§2.3); exactly equals the evidence manifest's list |
 | `notification` | Closed notification receipt snapshot (§2.5), never omitted |
 | `old_inputs` | `D`; last accepted input digest, not a freshly trusted digest of live files |
 | `old_state` | `Ref` to the last accepted `qual-maint-state/1` object |
 | `phase` | Exactly `intent`, `accepted`, `refused` or `interrupted` |
+| `plan` | `Ref` to the exact before/P0/pinned-policy and manifest byte-digest plan below |
 | `prev` | `D`, except `Z` only at sequence 1 |
 | `reason` | One code from §2.6; no free text |
 | `retry_of` | 0, or an earlier terminal attempt's intent sequence (§3) |
@@ -84,13 +87,13 @@ lexicographic order shown; arrays have the explicit semantic orders below.
 | `step` | Integer 0..5; intent=0, accepted=5; failure's last known step, or 0 if unknown; never evidence of completed work |
 | `transaction_manifest` | `Ref` to `qual-maint-transactions/1`; its digest binds the complete covered transaction set and original recorder event bytes |
 | `transactions` | Array of 1..64 transaction groups (§2.3), with at most 256 total invocations |
-| `unit` | `null`, or exactly `{boot_id,invocation_id,q}`: same boot as this attempt, nonzero lowercase 32-hex systemd invocation ID, and `q:Ref` to exact boot-mode Q bytes |
+| `unit` | `null`, or exactly `{boot_id,invocation_id,q}`: same boot as this attempt, nonzero lowercase 32-hex systemd invocation ID, and `q:Ref` to the minimized boot-mode Q proof (§2.4) |
 
 `initial_q` and `unit` MUST be non-null in `accepted`. An `intent` has both null;
 a failure MAY retain only the exact observations actually completed. A present
 unit record is not itself a successful latest unit completion. The guard checks
-that independently. Q's bytes retain its existing no-LF canonical form and
-existing schema; this journal adds no fields to Q.
+that independently. The live Q retains its existing no-LF canonical form and schema; this journal
+adds no fields to Q and copies no Q account names into its store.
 
 ### 2.3 Transaction association and per-link references
 
@@ -140,6 +143,8 @@ lists, UID/name mappings, station contents or raw account/tool output.
 
 | Format | Exact members and semantics |
 |---|---|
+| `qual-maint-plan/1` | `{format,manifest_before,manifest_candidate,policy_before,policy_p0,policy_pinned}`; every non-format member is `D` over exact fixed-path object bytes. Bind original and candidate manifests, candidate P0 and its sole two-field pinned-policy transition. Store digests only, never policy/account contents. Recompute candidate bytes under the unchanged qualified configuration/profile; require exact plan hashes before each write. |
+| `qual-maint-q-proof/1` | `{boot_id,checks,format,inputs,issuer,record_sha256,record_size}`. `boot_id`: nonzero canonical UUID; `inputs:D`; `issuer` exactly the existing `{invocation_id,mode}` (initial has empty ID; boot has nonzero 32-hex ID); `record_sha256:D` and `record_size:1..8388608` bind the full live Q's original bytes. `checks` has exactly the eleven existing Q check keys, each exactly `{reason:"",result:"ok"}`. This is the reconciler's minimized observation of an actually validated protected Q, not a substitute Q or independent root certificate. Store no station_names or raw account fields. |
 | `qual-maint-state/1` | `{format,inputs,packages,recorder,releases,snapshot}`. `inputs:D`; `packages`, `releases`, `snapshot`: `Ref` to the protected A3b package/version/archive baseline, repository release high-water baseline and complete `Snapshot` respectively. `recorder` is exactly `{event_sha256,sequence}`: `(Z,0)` only for explicitly installed genesis, otherwise nonzero sequence and `D` of the original recorder event. Snapshot/database and both baselines must agree with that frontier. |
 | `qual-maint-transactions/1` | `{after,before,events,format,transactions}`. `before` and `after`: state refs equal entry old/candidate state; `transactions` exactly entry list; `events`: complete recorder-ordered array of 1..4096 `Ref` values covering all begin/observation/end/membership evidence between frontiers, including original association and database-only changes. Validate every original event hash/chain, not just this wrapper. |
 | `qual-maint-evidence/1` | `{format,links,profile,transactions,verification}`. `links` exactly entry list; `profile:D` of the previously qualified fixed update profile; `transactions:Ref` equals entry transaction manifest; `verification`: array of 1..256 `Ref` values in invocation order, one complete original A3b repository verification report per invocation, including an explicit database-only proof where applicable. |
@@ -154,14 +159,16 @@ sets/types and validators are defined in [types.go](../internal/updateproof/type
 Reject unknown/duplicate fields and require exact owning-form re-encoding,
 including sorted map keys and original time representations. Apply the pinned
 A3b semantic validators and profile limits as well as this document's stricter
-budgets; do not accept an arbitrary digest-matching JSON blob. Baselines must
+budgets; do not accept an arbitrary digest-matching JSON blob. Both state `inputs` values must equal the corresponding entry input digest. Baselines must
 match snapshot packages and the independently reverified release high-waters.
 A future codec or source-pin change requires explicit versioned review, not
 reinterpretation of retained bytes. Journal references do not extend A3b's
 existing formats. The collector/export integration for these references is
 still unimplemented.
 
-The journal's verified accepted entries are the authority for advancing the
+The wrapper's genesis `(Z,0)` maps only to A3b's existing empty event hash
+and sequence zero; no non-genesis hash substitution is permitted. The journal's
+verified accepted entries are the authority for advancing the
 A3b last-accepted state. Any future materialized frontier/configuration cache
 MUST name the accepted line checkpoint and exactly equal its candidate state;
 a cache is not independent authority. The next attempt's old state is the last
@@ -185,7 +192,9 @@ An incident is exactly `qual-maint-incident/1` with members
 `attempt`, `boot_id`, input digests and `reason` bind the failing attempt;
 `transactions:Ref` equals its transaction manifest. `affected` and `response`
 are refs to the authenticated containment owner's bounded execution-set and
-response evidence. `detected` is exactly `{boot_id,monotonic_ms}` with a current
+response evidence, using opaque execution/receipt identities without account
+names, UIDs, credentials or raw process output. The interface must supply this
+minimized proof; otherwise incident capability remains unavailable. `detected` is exactly `{boot_id,monotonic_ms}` with a current
 or retained original boot UUID and safe integer milliseconds. `deadline` is a
 safe integer **absolute millisecond value on that same boot clock**, greater
 than detection, taken from the already published P7 profile. It is never a new
@@ -236,7 +245,7 @@ migration. Missing capacity never creates a passing outcome.
 Exactly one attempt may be open. Its intent has `attempt=seq`, `retry_of=0` or a
 valid previous terminal attempt, `phase=intent`, `step=0`, `reason=pending`, no Q
 references and none/null notifications. Its complete covered set, links, input
-and state/evidence digests and interlock reference are frozen before installing
+and state/evidence/plan digests and interlock reference are frozen before installing
 candidate P0. A terminal entry references that intent and repeats those frozen
 fields exactly, with its own contiguous seq/prev. `boot_id` remains the attempt's
 boot except that crash recovery may close it as interrupted from a later boot;
@@ -369,3 +378,286 @@ clock semantics remain the existing A3 interfaces, requiring review before
 implementation. A marker's existence alone proves none of those facts. Lost
 ownership or an unknown previous worker requires fencing its mutation authority
 and proving quiescence before recovery can act; never run two reconcilers.
+
+## 5. Write-ahead steps and crash recovery
+
+### 5.1 Normal commit protocol
+
+These steps specialize A3 §4 without authorizing any additional mutation. Take
+F/B, W, root-writer exclusion and then D; authenticate the **whole** pending
+chronology and every chain through the locked terminal snapshot. Reserve all
+budgets. Require a qualified time sample and unexpired evidence. Retain exact
+objects/references, the last accepted state and the candidate plan. The
+admission owner has already established the pre-package interlock; do not wait
+until this worker starts to fence changed controls or running work.
+
+1. **Intent and candidate installation.** With D held, persist all intent
+   objects, append/sync the intent and verify its checkpoint. Only then install
+   the exact planned P0 policy and candidate deployment manifest, each by
+   protected exclusive temporary creation, file fsync, atomic replacement and
+   parent fsync. There is no cross-file atomicity claim. Verify both installed
+   hashes and P0's false/zero attestation before launching the fixed-path
+   initial qualifier. Every non-eligible diff refuses. Keep the maintenance
+   marker and stopped admission. No initial record is acceptance.
+2. **Initial qualification and revalidation.** Release D, retaining all other
+   exclusion and worker ownership; launch only the already authenticated
+   installed initial command, without a held inherited D. It takes/releases
+   its own D and repeats every check. Wait for its terminal result under the
+   qualified bounded control interface (Q1 remains a gate). Reacquire D and
+   revalidate marker/ownership continuity, exact candidate policy/manifest,
+   current complete package snapshot, P0-derived inputs and the all-ok initial
+   record. Capture its minimized Q proof as `initial_q` only after validating the full
+   live protected Q and hashing its exact bytes; do not copy its account list. Resample trusted time and
+   recheck expiry/high-waters **immediately before step 3**, not from a cached
+   earlier verdict. Any drift/lost continuity refuses.
+3. **Pin.** With D held and every other exclusion continuous, atomically install
+   the exact planned pinned-policy bytes. The sole change from candidate P0
+   is `qualified=true` and `qualification_digest=candidate_inputs`; normalized
+   policy/manifest/inputs must still match. Fsync the policy and parent and
+   re-read it. Keep the marker; no readiness signal or accepted frontier yet.
+4. **Boot-mode qualification and final snapshot.** Release D before restart or
+   wait for the installed qualification unit. Never retain an inherited locked
+   D. The unit takes/releases its own D and runs every check without network.
+   Require a newly started current-boot invocation, terminal success of the
+   **latest** invocation, all-ok boot Q, exact input pin and exact invocation
+   equality. Reacquire D after the issuer releases it. Recheck marker,
+   stopped-admission/P7 and exclusion continuity, installed plan hashes,
+   recorder tail, complete stable dpkg/package/closure snapshot and both Q
+   identities. Any newer package event or unknown/running/failed unit result
+   refuses; a previous same-boot success cannot complete this step.
+5. **Outcome commit and frontier.** Required prior incident deliveries must
+   have both authenticated receipts before acceptance; pending/unknown delivery
+   refuses without advancing any frontier. Delivery itself runs outside all
+   locks; append receipt updates under W/D before a new attempt. With D held, persist all final evidence/minimized-Q-proof
+   objects, then append the accepted entry repeating the frozen complete
+   transaction bindings. Journal file fsync, parent fsync and exact readback
+   complete the accepted commit. The candidate state now derives the accepted
+   recorder/package-version/release high-waters; never advance them before
+   this commit or from A3b's provisional reconciliation result. A materialized
+   cache is written only after acceptance and must reference this checkpoint.
+   Its failure leaves readiness closed until verified reconstruction, without
+   undoing the historical commit. Report the exact acceptance to the separate
+   admission owner **after releasing maintenance locks**. The reconciler never
+   clears the marker, opens admission, resumes work or changes a generation.
+
+No success may be reported if any required write, sync, check, continuity proof,
+notification capability or final snapshot is unknown. A final guard read MUST
+include the entire current journal and any newer intent/failure, not merely a
+remembered accepted line. The complete accepted object is durable only after
+step 5, and it is not a substitute for the admission owner's own checks.
+
+### 5.2 Crash-boundary obligations
+
+At every row, admission remains fenced. Qualifier processes must be fenced and
+proved quiescent before retry; PID absence alone or expiry of a worker timer is
+not permission to overlap an unknown writer. The two file replacements in step
+1 and their fsync boundaries are distinct failure points.
+
+| Crash point | Possible retained disk state | Required recovery; forbidden inference |
+|---|---|---|
+| Before intent durability, including object creation | Old pin/state plus unreferenced objects, or a torn journal tail | No candidate mutation was permitted. Count orphans; reject torn history. Never infer a new attempt from live installed versions. |
+| After intent sync, before P0 | Valid open intent; old policy/manifest/Q may remain | Close the attempt as interrupted after fencing old workers; full fresh steps 1–5 on a new intent. Old Q cannot complete the intent. |
+| After P0 replace, before its directory sync | Old or P0 bytes after reboot; durability unknown | Compare only with exact planned possibilities; unknown/foreign bytes require maintenance. Reinstall the authenticated complete candidate under a new attempt, never re-pin from this policy. |
+| Between P0 and manifest writes, or after manifest replace before sync | Mixed old/candidate policy and manifest | No cross-file transaction is assumed. Keep marker and stopped admission; reconstruct/install the **complete candidate** from authenticated evidence. Do not restore old pin over changed package files. |
+| During initial mode, before/after initial Q publication | Open intent; Q absent, failed, partial or passing initial | Fence/finish the old child, persist interruption, rerun full initial checks. Passing initial Q never admits and is not reused as a boot Q. |
+| After initial success, during D reacquisition/revalidation | Initial Q may exist; observed state/lease continuity may have changed | Fresh capture/expiry and full recovery; no pin on the basis of the old initial result. |
+| During pinned-policy replace/fsync, or after pin before boot | Candidate pin may be visible/durable; no accepted outcome | Reject admission even with qualified=true; keep candidate fenced. Full new initial -> pin -> boot sequence, never rollback to old pin. |
+| During unit start/boot Q publication, before terminal unit success | Candidate pin and perhaps passing boot Q; latest invocation incomplete/unknown | A visible Q is not terminal success. Prove old run quiescent, then full retry; do not use a previous unit completion. |
+| After unit success, before/after final D reacquisition or final capture | Pin and Q exist but no accepted entry; exclusion may be lost | Full retry. Revalidation and durable accepted outcome cannot be elided because Q happens to match. |
+| During accepted append or either sync | No line, partial line, or complete line with unknown durability/acknowledgment | §5.3; keep fence, never treat parseability or cached frontier as proof of commit. Preserve the bytes. |
+| After durable accepted commit, before cache/report/owner action | Complete committed accepted line; cache may lag; marker remains | Rebuild cache only from that verified checkpoint. Lost reply is not a second effect. Admission still needs §6 and its owner; uncertainty invokes §5.3. |
+| During refused/interrupted incident or notification update | Open intent or durable terminal failure with one/both deliveries pending | Keep original incident/deadline; retry delivery on transaction/boot/service-recovery events. No frontier advance, admission or P7 postponement. |
+
+### 5.3 Recovery algorithm and uncertain commits
+
+Boot and service recovery start with new starts/resumes closed, before ordinary
+consumer readiness. Reestablish the authenticated maintenance interlock for the
+current boot without erasing the original P7 incident/deadline. Acquire the
+same bounded exclusion graph and prove any previous worker/qualifier cannot
+still mutate. Unknown ownership means hold, not concurrent retries.
+
+Validate the **entire** protected journal, retained baseline/checkpoint, recorder
+chain and all referenced objects under budgets. An invalid complete entry,
+partial tail, fork, missing baseline, unexplained changed file or unknown
+root-writer continuity is an explicit maintenance incident. Preserve all bytes
+and refuse; there is no truncate-to-last-valid, skip-record, current-state
+bootstrap or automatic repair. Any future repair/migration must preserve the
+original evidence and be independently specified/authorized. A qualification
+rerun cannot make a corrupt journal valid.
+
+For an intact open intent, append/sync interrupted with the authenticated
+incident before opening a new attempt. Recover only from the last **accepted**
+state, account for every pending transaction and reauthenticate retained proofs
+against the current locked endpoint. Recompute the complete candidate plan;
+rerun **all five steps**, both qualifier modes and the final snapshot, without
+cached checks. If evidence expired or new drift is unattributed, refuse. Never
+restore an old pin over changed installed files, and never change generation
+history, reservations, effects or restore floors.
+
+A complete accepted line observed after an interrupted append/sync is not by
+itself a trustworthy acknowledgment. Keep admission closed, verify its entire
+history/proof and resync the retained journal/parent before any use. If its
+original commit cannot be established, require a **full revalidation attempt**
+under the exact-set retry rule in §3: fresh initial -> pin -> boot, rechecked
+proof/time/exclusion and a new durable accepted outcome. No result is inferred
+from surviving pin/Q. Retain the old line as history; no second frontier effect
+is permitted. An invalid line is not this recoverable case. If a newly changed
+endpoint no longer matches that exact accepted set, explicit maintenance must
+resolve the uncertain frontier before any new reconciliation; do not choose
+whichever baseline makes verification pass.
+
+A known fully committed accepted result with an identical redelivery is not an
+unfinished attempt: return that outcome after the ordinary fresh guard. On a
+later ordinary boot with no unresolved intent or unmatched transactions, §6
+uses the stable accepted inputs/frontier plus a **new** ordinary boot Q. It
+does not reinterpret an accepted historical archive's expiry as a new update or
+automatically re-pin. Failed/unknown recovery remains `qualification_required`.
+
+## 6. Admission and boot binding
+
+The **future** A3-enabled guard and boot precheck MUST validate all of:
+
+1. Protected store, entire canonical hash/sequence chain, replay transitions,
+   known durability, baseline/checkpoint and complete evidence identities.
+   No unresolved intent, unknown tail, failed newer attempt, pending required
+   incident/notification or unrelated accepted cache may be hidden by an older
+   success. A later valid accepted retry can resolve only its declared failure;
+   independent holds remain held.
+2. The selected accepted entry's covered set/transaction manifest is exact,
+   both state inputs match their entry digests, and the current protected
+   package/recorder endpoint is fully accounted through its candidate frontier.
+   Include database-only changes and every aggregate child. A new unmatched
+   event closes readiness even if current closure bytes and pin are unchanged.
+3. Installed normalized policy, deployment manifest, fixed input closure and
+   existing `P.qualification_digest = SHA256(CCJ(I)) = Q.inputs_digest` equal
+   that acceptance's `candidate_inputs`, candidate state and planned artifacts.
+   Check `qualified=true`, current protection and every original Q invariant;
+   a flag, independently written pin or standalone Q never supplies acceptance.
+4. On the accepting boot/run, SHA-256 and size of current protected Q bytes equal the
+   record identity in the minimized proof referenced by `unit.q`,
+   `Q.boot_id=unit.boot_id=accepted.boot_id=current_boot`, Q issuer is boot,
+   and `Q.issuer.invocation_id=unit.invocation_id` equals the latest terminal
+   successful current-boot qualification-unit invocation. All eleven checks
+   are ok; `initial_q` was a passing initial record of the same inputs and
+   cannot substitute. A later legitimate ordinary same-boot renewal uses the stable-input
+   renewal rule below as well; a changed-input or unresolved-attempt run may
+   not be relabeled ordinary renewal to evade a new accepted outcome.
+5. For ordinary renewal, including a **later boot**, boot precheck first validates the unchanged accepted
+   inputs/frontier and absence of pending/unmatched work. It then authorizes
+   only ordinary networkless renewal of that existing pin. After terminal
+   success require fresh current-boot Q and its matching latest unit invocation
+   under the existing Q contract. The old accepted Q proof remains historical and
+   its record hash is not compared to the new Q. This is derived boot renewal of
+   the exact stable accepted binding, not a new transaction acceptance, re-pin
+   or new field in Q. A pending/uncertain attempt instead requires §5.3.
+6. Fresh authenticated maintenance/admission/P7 facts and all existing
+   lifecycle, Keymaker and per-target gates remain satisfied. The admission
+   owner alone may clear its fence under existing authority; no human approval
+   flow, automatic resume or generation mutation is added by this journal.
+
+Get unit/provider/external facts on the unlocked preparation path; bind them
+to current boot, invocation, inputs and journal checkpoint. At final admission
+commit under the existing lifecycle lock order, use only bounded local guard
+revalidation with retained version/lease evidence. Changed inputs, recorder
+frontier, journal tail, unit result or interlock version invalidates preparation;
+release locks and reprepare or refuse. Never perform service-manager RPC while
+holding lifecycle/journal/deployment locks, and never rely on a cached clean
+verdict or a timestamp-only lease. The integration must qualify this boundary;
+this specification does not implement it.
+
+## 7. Required future tests and narrowing controls — PENDING
+
+These are **future executable obligations, not test results**. Each negative
+asserts its named refusal/invariant, preserved original bytes/history and
+frontiers, no unauthorized pin or lifecycle effect, closed new starts/resumes,
+and the appropriate original P7 response and durable owner/curator incident.
+Delivery failures retain pending receipts. A crash, timeout or unapplied plant
+is not the intended rejection. Run only isolated disposable owned fixtures.
+
+| Named negative | Nearby valid control | Narrowing mutant the test must kill |
+|---|---|---|
+| `QualMaintTamperedEntry`: change one complete accepted byte | Same canonical chain and retained checkpoint verifies | Skip a line hash/checkpoint or field validation |
+| `QualMaintWrongPredecessor`: correct sequence with another predecessor | Immediate previous **line including LF** matches | Hash without LF or accept any earlier ancestor |
+| `QualMaintSequenceReuse`: duplicate, gap, decrease or wrap | Contiguous sequence and unique attempt identity | Compare only max sequence or allow duplicate seq |
+| `QualMaintNoncanonical`: unknown/duplicate field, invalid UTF-8, unsafe integer, reordered/escaped alternative, CRLF or extra line | Exact CCJ-1/LF bytes within all bounds | Parse with permissive JSON or omit exact re-encoding |
+| `QualMaintTruncatedTail`: partial intent or accepted line after a valid prefix | Complete synced counterpart | Ignore tail or admit from the earlier accepted prefix |
+| `QualMaintObjectMismatch`: missing/wrong-size/hash object or wrong owning codec | Exact retained objects pass their owning validators | Trust only wrapper/verdict digest or recanonicalize A3b bytes |
+| `QualMaintAssociation`: omit one aggregate child, double-parent/reuse an ID, invent apt parent for dpkg | Multi-invocation apt and independent direct-dpkg groups, with identical hook retry deduplication | Use hook count or merge child IDs |
+| `QualMaintCoverageGap`: omit intermediate/database-only transaction or missing after observation | Complete before-to-after recorder range including failed-process authentic endpoint | Compare endpoints/closure bytes alone or choose a later baseline |
+| `QualMaintFalseAccepted`: accepted without all checks, initial Q or boot proof, wrong plan/state/ref/phase | Full genuine initial -> pin -> boot -> accepted | Allow accepted enum to bypass semantic validation |
+| `QualMaintCrashCuts`: cut before/after **each** object/journal/file fsync, P0/manifest replacement, both D handoffs, initial/pin/boot publication and accepted/cache boundary in §5.2 | Full run at each neighboring cut commits exactly once | Reuse a previous Q/check, skip final capture, promote page-cache bytes or restore old pin |
+| `QualMaintPinWithoutOutcome`: qualified pin, initial Q, or valid boot Q while intent is unresolved | Matching durable accepted attempt and separate admission authority | Admit from flag/pin/Q alone |
+| `QualMaintWrongTransactionSet`: otherwise valid outcome for another subset/order/parent/frontier | Exact full frozen group list, manifest and old/candidate states | Bind only input digest or one transaction ID |
+| `QualMaintHandoffLost`: parent retains D, another worker takes ownership, root writer races or exclusion lapses during qualifier | Parent releases D; issuer owns D; F/B/W/root-writer exclusion remains continuous; final reacquisition/revalidation passes | Inherit D, drop exclusion during RPC or skip continuity check |
+| `QualMaintStaleInvocation`: wrong/zero invocation, different boot, running/failed/latest mismatch or newer unaccepted changed-input Q | Exact accepting Q/invocation; later unchanged ordinary renewal uses stable accepted binding and fresh latest invocation | Use earlier same-boot success or equate initial with boot |
+| `QualMaintBootGap`: unchanged closure but an unmatched recorder/database transition, pending old intent or corrupt tail | Fully accounted unchanged accepted frontier followed by a fresh networkless ordinary boot run | Skip boot precheck or infer transactions from current versions |
+| `QualMaintUncertainAck`: complete visible line after failed sync, lost accepted reply or stale frontier cache | Established durable checkpoint redelivers once; uncertain case stays fenced and full exact-set retry creates no second frontier effect | Parseability implies durability, append duplicate acceptance effect or trust cache |
+| `QualMaintNotificationHeld`: one recipient missing, counterfeit receipt, changed incident or restarted response deadline | Both authenticated incident-bound receipts; original detection/deadline retained | Treat enqueue as delivery, drop pending incident or reset P7 time |
+| `QualMaintSaturation`: entry/object/member/total/sequence/reserve budget exceeded, including orphan bytes | Exact bounded request with full terminal/incident reserve | Truncate arrays, prune history, ignore temporary bytes or reset sequence |
+| `QualMaintProtectedStore`: symlink, unsafe ancestry/ACL, hard link, lock inode replacement or unqualified mount | Exact protected retained descriptors on qualified local filesystem | Trust textual path/mode or substitute unrelated package flock |
+| `QualMaintNoLifecycleEffect`: recovery/success attempts marker clearing, reopening, resume, generation/effect rewrite or credential/account export | Accepted result reports evidence only; independent authorized admission action is separate | Couple accepted phase to reopening, rollback or data export |
+
+Implementations must preserve test names (with per-cut/per-link subcases), name
+the killed narrowing mutant and record exact head, environment, command and
+real exit. A surviving mutant states a coverage bound and blocks that contract;
+no pair of implementations agreeing substitutes for the independent rules here.
+Reviewers must qualify both rejection and the neighboring positive control.
+
+## 8. Canonical examples and documentation validation
+
+The small [qual-maint vectors](../vectors/qual-maint/README.md) provide one
+synthetic intent and two **alternative** sequence-2 continuations: interrupted
+and accepted. Each is a single complete canonical line with LF and a published
+SHA-256/byte count. Each continuation's predecessor is the intent line's hash;
+never concatenate both alternatives into a single history. Objects and system
+observations named by their synthetic references are deliberately absent.
+
+These examples exercise framing, field shape and predecessor bytes only. They
+are **not qualifying fixtures**, accepted host evidence, proof of signatures,
+transaction coverage or root behavior. A semantic acceptance verifier MUST
+refuse these examples without their complete authentic objects and observations.
+The accepted example has accepted **shape**, not authorization to accept it.
+The future positive/negative fixtures in §7 must supply real bounded objects and
+authenticated observations, not replace missing facts with this example data.
+
+For hand checks: the initial prev is 64 zeroes, attempt=seq=1; a continuation
+has attempt=1, seq=2 and prev equal to SHA-256 of the intent **with its LF**.
+The ID has explicit invocation kind, original boot token and sequence; standalone
+dpkg has aggregate=null. Intent Q/unit are null; accepted has both; interrupted
+has two pending recipient states and a non-null incident ref. SHA-256 the exact
+files rather than copying a rendered Markdown line.
+
+Documentation validation uses the pinned Go CCJ-1 package to parse/re-encode
+these exact files, check byte counts/hashes and predecessor identities. Nearby
+malformed/modified controls check that the documentation validator actually
+rejects its claimed framing/hash failures. This limited check is not a product
+journal implementation or evidence that §7's pending runtime tests ran.
+
+## 9. Open decisions and recommendations
+
+All choices below remain explicit architect/owner or interface publication
+gates. Recommendations are not approvals. Their resolution does not by itself
+implement or qualify A3d, its guard, hooks, P7 response or notification transport.
+
+| Question | Recommendation | Safe state until resolved |
+|---|---|---|
+| Q1 — Meaning of no RPC under locks at the unit-control handoff | Confirm the existing A3 distinction: no RPC under journal/deployment/recorder/generation/effect locks; allow only the fixed qualifier/unit-control operations while F/B/W maintenance exclusion is held, after proving the invoked unit/control path never needs F/B/W or lifecycle locks. All unrelated RPC remains outside every lock. If an absolute prohibition includes F/B/W, revise A3 §4's ownership/control interface first; do not release package exclusion or insert a relay to disguise the wait | No unit-control integration or A3d activation from this document; continuous exclusion and the no-cycle rule are both retained |
+| Q2 — Initial baseline import and checkpoint/restore custody | Use a separate explicit owner-qualified install/import of the existing A3b accepted baseline and retain a trusted journal checkpoint with its deployment identity. Never seed from current state. If coherent rollback resistance is required, select independent custody outside the restored failure domain; otherwise disclose A3's existing limitation | Empty/unknown/lost baseline or fork refuses; no invented restore floor or bootstrap acceptance |
+| Q3 — Concrete interlock, recovery fencing and notification receipt interfaces | Publish closed bounded authenticated schemas and validators for worker/qualifier quiescence, admission/P7 version continuity, affected-set/response evidence and both transport receipts. Preserve original clock/deadline across retries/boots and reserve durable incident capacity. Missing delivery capability blocks deployment; pending delivery blocks readiness but not immediate P7 response | No marker-only interlock, timer-only worker takeover, unverified delivery or unimplemented guard claim |
+| Q4 — Capacity, serialization pins and deployment budgets | Review these exact hard limits and source-pinned A3b byte mappings against the supported Ubuntu/profile archive sizes before implementation. Retain the profile's separately confirmed freshness/P7 values and finite operation deadlines. A larger encoding/store limit or revised payload serialization requires explicit versioned review, not a fallback | Saturation/unsupported payload refuses; these bounds never authorize a destructive capacity fix or permissive timeout |
+| Q5 — Migration and privileged qualification | Publish an evidence-preserving migration/recovery procedure and run §7 on an owner-approved disposable root fixture, including actual fsync/failure, package exclusion and unit invocation cuts, plus independent guard review | No compaction/tail repair, automatic journal upgrade, production re-pin or admission claim |
+
+## 10. Tools and current delivery limits
+
+| Tool | Exact entry point | Output/scope |
+|---|---|---|
+| Pinned Go CCJ-1 | `ccj.Parse` then `ccj.Marshal` from the registrar module pinned in `go.mod`, on each vector's bytes before LF | Exact canonical bytes only; no second journal canonicalizer |
+| SHA-256 | `sha256sum vectors/qual-maint/*.jsonl` | Published line digests, including LF |
+| Git | `git diff --check` | Documentation whitespace verdict |
+
+No commands here grant permission for root execution, live package mutation,
+service restart or deployment. Journals and full evidence stay protected; any
+future public export is a separately reviewed sanitized protocol, not raw
+qualification records or content-store publication. The historical r1/r2 root
+passes in [the evidence note](../docs/root-qualification-evidence.md) do not
+qualify this new journal, A3d or any automatic pin/admission path.
