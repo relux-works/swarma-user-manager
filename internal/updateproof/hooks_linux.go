@@ -571,6 +571,10 @@ func retainArtifactAt(d *os.File, owner uint32, b []byte, l Limits, syncFile fun
 			f.Close()
 			return ErrStore
 		}
+		if st.Size() < 0 || st.Size() > l.Bytes-total {
+			f.Close()
+			return ErrStore
+		}
 		total += st.Size()
 		if n == name {
 			old, e := io.ReadAll(io.LimitReader(f, l.Bytes+1))

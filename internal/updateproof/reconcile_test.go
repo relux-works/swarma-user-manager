@@ -2,10 +2,13 @@ package updateproof
 
 import (
 	"context"
+	"crypto/md5"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"github.com/relux-works/swarma-credential-broker/timeconf"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -80,7 +83,13 @@ func TestReconcileMidwayFailurePayload(t *testing.T) {
 			before.DatabaseSHA256 = Digest([]byte("accepted database"))
 			after.DatabaseSHA256 = Digest([]byte("recorded database"))
 			if tc.mismatch {
-				after.Leaves[0].SHA256 = Digest([]byte("midway partial bytes"))
+				partial := []byte("midway partial bytes")
+				after.Leaves[0].SHA256 = Digest(partial)
+				retained := b.Sources["approved"]
+				installed := retained.Installed["/usr/lib/fixture"]
+				installed.Bytes = partial
+				retained.Installed = map[string]Installed{"/usr/lib/fixture": installed}
+				b.Sources = map[string]Bundle{"approved": retained}
 			}
 			accepted := AcceptedState{Snapshot: before}
 			original, _ := json.Marshal(accepted)
@@ -327,5 +336,210 @@ func TestReconcileUnfinishedDatabaseOnlyDrift(t *testing.T) {
 	result, e = Reconcile(ctx, r, AcceptedState{Snapshot: before}, p, base, map[ID]RepositoryBundle{id: b}, source, "current-boot", &ownedPackageState{snapshot: current})
 	if e != nil || len(result.Evidence) != 1 {
 		t.Fatal("recorded reinstall control", e)
+	}
+}
+
+// Claim: an exact previously accepted event boundary excludes old proof from the
+// pending batch, while a changed event hash or a frontier splitting an aggregate
+// refuses. The fixture supplies acceptance; the API never writes that decision.
+func TestReconcileAcceptedFrontier(t *testing.T) {
+	f := newSignedFixture(t)
+	ctx := context.Background()
+	p, base, b, source := reconciliationInputs(f)
+	before, after := copySnapshot(f.inv.Before), copySnapshot(f.inv.After)
+	before.DatabaseSHA256 = Digest([]byte("initial"))
+	after.DatabaseSHA256 = Digest([]byte("accepted"))
+	r := recorderFixture(t)
+	first, e := r.Begin(ctx, f.inv.ID.Boot, "invocation", "first", ID{}, before)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if e = r.ObservePost(ctx, first, after); e != nil {
+		t.Fatal(e)
+	}
+	u, e := r.lock(ctx)
+	if e != nil {
+		t.Fatal(e)
+	}
+	events, e := r.load()
+	u()
+	if e != nil {
+		t.Fatal(e)
+	}
+	raw, _ := json.Marshal(events[1])
+	accepted := AcceptedState{Snapshot: after, Sequence: 2, EventSHA256: Digest(raw)}
+	base.Common.Packages = after.Packages
+	base.Common.Leaves = after.Leaves
+	next := copySnapshot(after)
+	next.DatabaseSHA256 = Digest([]byte("recorded reinstall"))
+	second, e := r.Begin(ctx, f.inv.ID.Boot, "invocation", "second", ID{}, after)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if e = r.ObservePost(ctx, second, next); e != nil {
+		t.Fatal(e)
+	}
+	result, e := Reconcile(ctx, r, accepted, p, base, map[ID]RepositoryBundle{second: b}, source, "current-boot", &ownedPackageState{snapshot: next})
+	if e != nil || len(result.Evidence) != 1 || result.Scan.Pending[0].ID != second {
+		t.Fatalf("exact frontier control: %v %+v", e, result)
+	}
+	accepted.EventSHA256 = Digest([]byte("wrong retained event"))
+	if result, e = Reconcile(ctx, r, accepted, p, base, map[ID]RepositoryBundle{second: b}, source, "current-boot", &ownedPackageState{snapshot: next}); e != ErrGap || !reflect.DeepEqual(result, Reconciled{}) {
+		t.Fatal("wrong frontier accepted", e)
+	}
+	t.Run("aggregate-cut", func(t *testing.T) {
+		r := recorderFixture(t)
+		aggregate, e := r.Begin(ctx, f.inv.ID.Boot, "aggregate", "apt", ID{}, before)
+		if e != nil {
+			t.Fatal(e)
+		}
+		child, e := r.Begin(ctx, f.inv.ID.Boot, "invocation", "dpkg", aggregate, before)
+		if e != nil {
+			t.Fatal(e)
+		}
+		if e = r.ObservePost(ctx, child, after); e != nil {
+			t.Fatal(e)
+		}
+		u, e := r.lock(ctx)
+		if e != nil {
+			t.Fatal(e)
+		}
+		events, e := r.load()
+		u()
+		if e != nil {
+			t.Fatal(e)
+		}
+		raw, _ := json.Marshal(events[2])
+		cut := AcceptedState{Snapshot: after, Sequence: 3, EventSHA256: Digest(raw)}
+		result, e := Reconcile(ctx, r, cut, p, base, nil, source, "current-boot", &ownedPackageState{snapshot: after})
+		if e != ErrGap || !reflect.DeepEqual(result, Reconciled{}) {
+			t.Fatalf("split aggregate frontier accepted: %v %+v", e, result)
+		}
+	})
+}
+
+// Claim: an authentic downgrade followed by upgrade cannot disappear inside a
+// recorded aggregate; both versions have real signed index/archive/payload links.
+// The neighboring identical-archive reinstall sequence must verify successfully.
+func TestReconcileIntermediateDowngrade(t *testing.T) {
+	f := newSignedFixture(t)
+	ctx := context.Background()
+	oldData := []byte("1")
+	oldArchive := makeDeb(t, "fixture", "1", "amd64", oldData)
+	oldIndex := f.bundle.Index
+	f.bundle.Index = append(append([]byte(nil), oldIndex...), []byte(fmt.Sprintf("Package: fixture\nVersion: 1\nArchitecture: amd64\nFilename: pool/main/f/fixture-old.deb\nSize: %d\nSHA256: %s\n\n", len(oldArchive), Digest(oldArchive)))...)
+	f.release = strings.Replace(f.release, fmt.Sprintf("%s %d %s", Digest(oldIndex), len(oldIndex), f.profile.IndexPath), fmt.Sprintf("%s %d %s", Digest(f.bundle.Index), len(f.bundle.Index), f.profile.IndexPath), 1)
+	f.sign(false)
+	before := copySnapshot(f.inv.Before)
+	before.DatabaseSHA256 = Digest([]byte("accepted version1"))
+	before.Packages[0].ArchiveSHA256 = Digest(oldArchive)
+	before.Leaves[0].SHA256 = Digest(oldData)
+	after := copySnapshot(f.inv.After)
+	after.DatabaseSHA256 = Digest([]byte("version2"))
+	for _, downgrade := range []bool{false, true} {
+		t.Run(map[bool]string{false: "reinstall-control", true: "downgrade-then-upgrade"}[downgrade], func(t *testing.T) {
+			r := recorderFixture(t)
+			p, base, b2, source := reconciliationInputs(f)
+			base.Common.Packages = before.Packages
+			base.Common.Leaves = before.Leaves
+			mid := copySnapshot(after)
+			mid.DatabaseSHA256 = Digest([]byte("reinstall"))
+			middleBundle := b2
+			if downgrade {
+				mid = copySnapshot(before)
+				mid.DatabaseSHA256 = Digest([]byte("downgrade"))
+				old := f.bundle
+				old.Archives = map[string][]byte{"fixture:amd64": oldArchive}
+				old.Installed = map[string]Installed{"/usr/lib/fixture": {Bytes: oldData, Mode: 0644, MD5: fmt.Sprintf("%x", md5.Sum(oldData))}}
+				middleBundle = RepositoryBundle{Sources: map[string]Bundle{"approved": old}, SourceByPackage: b2.SourceByPackage}
+			}
+			aggregate, e := r.Begin(ctx, f.inv.ID.Boot, "aggregate", "apt", ID{}, before)
+			if e != nil {
+				t.Fatal(e)
+			}
+			snapshots := []Snapshot{before, after, mid, after}
+			bundles := map[ID]RepositoryBundle{}
+			for n := 0; n < 3; n++ {
+				id, e := r.Begin(ctx, f.inv.ID.Boot, "invocation", fmt.Sprintf("child-%d", n), aggregate, snapshots[n])
+				if e != nil {
+					t.Fatal(e)
+				}
+				if e = r.ObservePost(ctx, id, snapshots[n+1]); e != nil {
+					t.Fatal(e)
+				}
+				bundles[id] = b2
+				if n == 1 {
+					bundles[id] = middleBundle
+				}
+			}
+			if e = r.ObservePost(ctx, aggregate, after); e != nil {
+				t.Fatal(e)
+			}
+			result, e := Reconcile(ctx, r, AcceptedState{Snapshot: before}, p, base, bundles, source, "current-boot", &ownedPackageState{snapshot: after})
+			if downgrade {
+				if e != ErrRollback || !reflect.DeepEqual(result, Reconciled{}) {
+					t.Fatalf("hidden intermediate downgrade: %v %+v", e, result)
+				}
+			} else if e != nil || len(result.Evidence) != 3 {
+				t.Fatalf("reinstall sequence control: %v %+v", e, result)
+			}
+		})
+	}
+}
+
+// Claim: an interrupted aggregate followed by a recorded recovery aggregate may
+// reconcile to one installed endpoint; intermediate aggregate identities and
+// payloads remain verified, and an unfinished overall endpoint still refuses.
+func TestReconcileAcrossAggregateRecovery(t *testing.T) {
+	f := newSignedFixture(t)
+	ctx := context.Background()
+	for _, recover := range []bool{false, true} {
+		t.Run(map[bool]string{false: "unfinished", true: "recovered"}[recover], func(t *testing.T) {
+			r := recorderFixture(t)
+			p, base, b, source := reconciliationInputs(f)
+			before, after := copySnapshot(f.inv.Before), copySnapshot(f.inv.After)
+			before.DatabaseSHA256 = Digest([]byte("accepted"))
+			after.DatabaseSHA256 = Digest([]byte("configured"))
+			mid := copySnapshot(after)
+			mid.DatabaseSHA256 = Digest([]byte("unpacked"))
+			mid.PendingTriggers = true
+			mid.Packages[0].Status = "unpacked"
+			current := before
+			bundles := map[ID]RepositoryBundle{}
+			var aggregates []ID
+			endpoints := []Snapshot{mid}
+			if recover {
+				endpoints = append(endpoints, after)
+			}
+			for n, endpoint := range endpoints {
+				aggregate, e := r.Begin(ctx, f.inv.ID.Boot, "aggregate", fmt.Sprintf("apt-%d", n), ID{}, current)
+				if e != nil {
+					t.Fatal(e)
+				}
+				aggregates = append(aggregates, aggregate)
+				id, e := r.Begin(ctx, f.inv.ID.Boot, "invocation", fmt.Sprintf("dpkg-%d", n), aggregate, current)
+				if e != nil {
+					t.Fatal(e)
+				}
+				if e = r.ObservePost(ctx, id, endpoint); e != nil {
+					t.Fatal(e)
+				}
+				if e = r.ObservePost(ctx, aggregate, endpoint); e != nil {
+					t.Fatal(e)
+				}
+				bundles[id] = b
+				current = endpoint
+			}
+			result, e := Reconcile(ctx, r, AcceptedState{Snapshot: before}, p, base, bundles, source, "current-boot", &ownedPackageState{snapshot: current})
+			if !recover {
+				if e != ErrGap || !reflect.DeepEqual(result, Reconciled{}) {
+					t.Fatal("unfinished recovery accepted", e)
+				}
+				return
+			}
+			if e != nil || len(result.Evidence) != 2 || len(result.Scan.Pending) != 2 || result.Scan.Pending[0].ID != aggregates[0] || result.Scan.Pending[1].ID != aggregates[1] {
+				t.Fatalf("complete recorded recovery: %v %+v", e, result)
+			}
+		})
 	}
 }

@@ -200,18 +200,18 @@ func VerifyRepositoryBatch(ctx context.Context, p RepositoryProfile, base Reposi
 	if e != nil {
 		return nil, e
 	}
-	return verifyRepositoryBatch(ctx, p, base, batch, bundles, clock)
+	return verifyRepositoryBatch(ctx, p, base, batch, bundles, clock, true)
 }
-func verifyRepositoryBatch(ctx context.Context, p RepositoryProfile, base RepositoryBaseline, batch Batch, bundles map[ID]RepositoryBundle, clock Clock) ([]RepositoryEvidence, error) {
+func verifyRepositoryBatch(ctx context.Context, p RepositoryProfile, base RepositoryBaseline, batch Batch, bundles map[ID]RepositoryBundle, clock Clock, terminal bool) ([]RepositoryEvidence, error) {
 	if !batch.ID.valid() || len(batch.Invocations) == 0 || len(batch.Invocations) > p.Common.Limits.Entries || len(bundles) != len(batch.Invocations) {
 		return nil, ErrGap
 	}
 	last := batch.Invocations[len(batch.Invocations)-1].After
-	if last.PendingTriggers {
+	if terminal && last.PendingTriggers {
 		return nil, ErrGap
 	}
 	for _, pkg := range last.Packages {
-		if pkg.Status != "installed" {
+		if terminal && pkg.Status != "installed" {
 			return nil, ErrGap
 		}
 	}

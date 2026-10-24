@@ -84,7 +84,7 @@ func reconcile(ctx context.Context, r *Recorder, accepted AcceptedState, profile
 	}
 	out := Reconciled{Scan: scan, Snapshot: current}
 	count := 0
-	for _, batch := range scan.Pending {
+	for batchIndex, batch := range scan.Pending {
 		selected := map[ID]RepositoryBundle{}
 		for _, inv := range batch.Invocations {
 			b, ok := bundles[inv.ID]
@@ -94,7 +94,7 @@ func reconcile(ctx context.Context, r *Recorder, accepted AcceptedState, profile
 			selected[inv.ID] = b
 			count++
 		}
-		proof, e := verifyRepositoryBatch(ctx, profile, base, batch, selected, clock)
+		proof, e := verifyRepositoryBatch(ctx, profile, base, batch, selected, clock, batchIndex == len(scan.Pending)-1)
 		if e != nil {
 			return fail(e)
 		}
