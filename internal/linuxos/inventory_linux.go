@@ -204,8 +204,9 @@ func parseIPC(class string, b []byte, uid uint32) ([]Object, error) {
 
 // OpenFiles inventories inode ownership across every process's fd table,
 // including other-UID holders of unlinked objects. pidfd_getfd duplicates kernel
-// handles rather than following proc magic symlinks. Permission denial, races,
-// mappings without an inspectable fd, or unsupported kernel support are unknown.
+// handles rather than following proc magic symlinks. Exited PIDs are skipped.
+// Denial, other races, mappings without an inspectable fd, or unsupported kernel
+// support are unknown.
 func (p *Proc) OpenFiles(ctx context.Context, uid uint32, max int) Result {
 	objects := []Object{}
 	if uid == 0 || max <= 0 {
@@ -225,6 +226,9 @@ func (p *Proc) OpenFiles(ctx context.Context, uid uint32, max int) Result {
 		}
 		found, e := p.processFiles(pid, name, uid, max)
 		objects = append(objects, found...)
+		if processExited(e) {
+			continue
+		}
 		if e != nil {
 			return result("open_files", objects, e)
 		}
@@ -234,7 +238,7 @@ func (p *Proc) OpenFiles(ctx context.Context, uid uint32, max int) Result {
 func (p *Proc) processFiles(pid int, name string, uid uint32, max int) (objects []Object, err error) {
 	dir, e := child(p.root, name, unix.O_RDONLY|unix.O_DIRECTORY, 0)
 	if e != nil {
-		return nil, e
+		return nil, processEntryError(e)
 	}
 	defer closed(dir, &err)
 	proc, e := p.process(name)
@@ -243,7 +247,7 @@ func (p *Proc) processFiles(pid int, name string, uid uint32, max int) (objects 
 	}
 	pidfd, e := unix.PidfdOpen(pid, 0)
 	if e != nil {
-		return nil, e
+		return nil, processEntryError(e)
 	}
 	defer func() { err = errors.Join(err, unix.Close(pidfd)) }()
 	again, e := p.process(name)
@@ -252,12 +256,12 @@ func (p *Proc) processFiles(pid int, name string, uid uint32, max int) (objects 
 	}
 	fds, e := child(dir, "fd", unix.O_RDONLY|unix.O_DIRECTORY, 0)
 	if e != nil {
-		return nil, e
+		return nil, p.processChildError(dir, e)
 	}
 	defer closed(fds, &err)
 	labels, e := list(fds, max)
 	if e != nil {
-		return nil, e
+		return nil, p.processChildError(dir, e)
 	}
 	for _, label := range labels {
 		target, e := strconv.Atoi(label)
@@ -270,7 +274,7 @@ func (p *Proc) processFiles(pid int, name string, uid uint32, max int) (objects 
 		}
 		fd, e := duplicate(pidfd, target, 0)
 		if e != nil {
-			return objects, e
+			return objects, p.processChildError(dir, e)
 		}
 		f := os.NewFile(uintptr(fd), "kernel-duplicate")
 		s, e := descriptorStat(f)
@@ -287,7 +291,7 @@ func (p *Proc) processFiles(pid int, name string, uid uint32, max int) (objects 
 	// contract. Detect deleted mappings via the trusted maps text and fail closed.
 	maps, e := p.read(dir, "maps")
 	if e != nil {
-		return objects, e
+		return objects, p.processChildError(dir, e)
 	}
 	if strings.Contains(string(maps), " (deleted)") {
 		return objects, refusal("inventory_unknown", "unlinked_mapping_requires_qualification", nil)
@@ -297,7 +301,8 @@ func (p *Proc) processFiles(pid int, name string, uid uint32, max int) (objects 
 
 // NamespaceCoverage refuses if any observable process uses another mount,
 // IPC or network namespace. It does not enter namespaces or trust a caller's
-// assertion that a different view is empty. Permission/race errors are unknown.
+// assertion that a different view is empty. Exited PIDs are skipped; other
+// read errors remain unknown, including a missing current-process baseline.
 func (p *Proc) NamespaceCoverage(ctx context.Context, max int) Result {
 	names, e := list(p.root, max)
 	if e != nil {
@@ -312,6 +317,7 @@ func (p *Proc) NamespaceCoverage(ctx context.Context, max int) Result {
 		}
 		baseline[kind] = v
 	}
+processes:
 	for _, name := range names {
 		if _, e := strconv.Atoi(name); e != nil {
 			continue
@@ -321,6 +327,9 @@ func (p *Proc) NamespaceCoverage(ctx context.Context, max int) Result {
 		}
 		for kind, want := range baseline {
 			v, e := p.namespace(name, kind)
+			if processExited(e) {
+				continue processes
+			}
 			if e != nil {
 				return result("namespaces", nil, e)
 			}
@@ -334,18 +343,23 @@ func (p *Proc) NamespaceCoverage(ctx context.Context, max int) Result {
 func (p *Proc) namespace(pid, kind string) (value string, err error) {
 	dir, e := child(p.root, pid, unix.O_RDONLY|unix.O_DIRECTORY, 0)
 	if e != nil {
-		return "", e
+		return "", processEntryError(e)
 	}
 	defer closed(dir, &err)
 	ns, e := child(dir, "ns", unix.O_RDONLY|unix.O_DIRECTORY, 0)
 	if e != nil {
-		return "", e
+		return "", p.processChildError(dir, e)
 	}
 	defer closed(ns, &err)
+	if p.beforeRead != nil {
+		if e := p.beforeRead(pid + "/ns/" + kind); e != nil {
+			return "", p.processChildError(dir, e)
+		}
+	}
 	b := make([]byte, 256)
 	n, e := unix.Readlinkat(int(ns.Fd()), kind, b)
 	if e != nil {
-		return "", e
+		return "", p.processChildError(dir, e)
 	}
 	if n == len(b) {
 		return "", refusal("inventory_unknown", "namespace_link", nil)

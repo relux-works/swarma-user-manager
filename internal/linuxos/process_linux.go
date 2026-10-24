@@ -99,6 +99,64 @@ func parseProcess(pid int, status, stat []byte) (Process, error) {
 	out.StartTicks = start
 	return out, nil
 }
+
+// processExitError marks disappearance of the exact PID being inspected, not a
+// missing global source or an unrelated descriptor. Other errors remain unknown.
+type processExitError struct{ error }
+
+func (e *processExitError) Unwrap() error { return e.error }
+
+// allErrors checks every joined cause so an exit cannot hide EIO/close failures.
+func allErrors(err error, match func(error) bool) bool {
+	if err == nil {
+		return false
+	}
+	if match(err) {
+		return true
+	}
+	switch e := err.(type) {
+	case interface{ Unwrap() []error }:
+		causes := e.Unwrap()
+		if len(causes) == 0 {
+			return false
+		}
+		for _, cause := range causes {
+			if !allErrors(cause, match) {
+				return false
+			}
+		}
+		return true
+	case interface{ Unwrap() error }:
+		return allErrors(e.Unwrap(), match)
+	}
+	return false
+}
+func processMissing(err error) bool {
+	return allErrors(err, func(e error) bool { return e == unix.ENOENT || e == unix.ESRCH })
+}
+func processEntryError(err error) error {
+	if processMissing(err) {
+		return &processExitError{err}
+	}
+	return err
+}
+func processExited(err error) bool {
+	return allErrors(err, func(e error) bool { _, ok := e.(*processExitError); return ok })
+}
+
+// A missing per-PID child (fd/maps/ns) alone is not proof of exit. Check status
+// through the same pinned PID directory before classifying its disappearance.
+func (p *Proc) processChildError(dir *os.File, err error) error {
+	if !processMissing(err) {
+		return err
+	}
+	_, probe := p.read(dir, "status")
+	if processMissing(probe) {
+		return processEntryError(err)
+	}
+	return errors.Join(err, probe)
+}
+
 func (p *Proc) process(name string) (out Process, err error) {
 	pid, e := strconv.Atoi(name)
 	if e != nil || pid <= 0 {
@@ -106,23 +164,23 @@ func (p *Proc) process(name string) (out Process, err error) {
 	}
 	dir, e := child(p.root, name, unix.O_RDONLY|unix.O_DIRECTORY, 0)
 	if e != nil {
-		return out, e
+		return out, processEntryError(e)
 	}
 	defer closed(dir, &err)
 	status, e := p.read(dir, "status")
 	if e != nil {
-		return out, e
+		return out, processEntryError(e)
 	}
 	stat, e := p.read(dir, "stat")
 	if e != nil {
-		return out, e
+		return out, processEntryError(e)
 	}
 	return parseProcess(pid, status, stat)
 }
 
-// Processes scans all numeric proc entries. Any unreadable or vanished entry
-// makes this observation unknown, never an empty/partial success. Retry under
-// the caller's creation fence to obtain a complete stable absence observation.
+// Processes scans all numeric proc entries. A vanished PID is absent; every
+// other unreadable entry makes this observation unknown. The caller must hold
+// its creation fence to obtain a complete stable absence observation.
 // On error the returned matched prefix is diagnostic evidence, not completeness.
 func (p *Proc) Processes(ctx context.Context, uid uint32, max int) ([]Process, error) {
 	if uid == 0 || max <= 0 {
@@ -141,6 +199,9 @@ func (p *Proc) Processes(ctx context.Context, uid uint32, max int) ([]Process, e
 			return out, e
 		}
 		v, e := p.process(name)
+		if processExited(e) {
+			continue
+		}
 		if e != nil {
 			return out, refusal("proc_unknown", "enumeration", e)
 		}

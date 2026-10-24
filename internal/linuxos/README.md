@@ -40,6 +40,13 @@ roots. IPC/socket observations cover the current namespaces; the independent
 namespace check refuses different or unreadable process namespaces. Open inode
 inventory duplicates kernel handles with `pidfd_getfd`; denial, races, unsupported
 kernels or deleted mappings without inspectable descriptors return unknown.
+Process, open-file and namespace enumeration skip only a vanished PID
+(`ENOENT`/`ESRCH` on that PID's directory/status/stat, or failed pidfd acquisition).
+For missing per-PID children, the pinned PID's status must also be gone. Other
+errors, including permission/I/O failures and missing global sources or the
+current-process namespace baseline, remain unknown. Validated objects observed
+before an exit stay in the report. Signaling still requires the exact admitted
+incarnation and revalidates after pinning its pidfd.
 It cannot claim host-wide coverage in an unqualified container/proc view.
 Scheduler parsing supports explicitly configured per-user cron, system cron and
 qualified `# atrun uid=... gid=...` at spools. Systemd requires all configured
