@@ -388,13 +388,14 @@ func TestUpdateBatchUnpackConfigure(t *testing.T) {
 }
 
 // Claim: the native profile accepts only the named Ubuntu/official-archive
-// subset. Generic fixture verification itself grants no native deployment.
+// subset and all three owner-confirmed time bounds, including explicit skew
+// approval. Generic fixture verification itself grants no native deployment.
 func TestUpdateSupportedNativeProfile(t *testing.T) {
-	p := Profile{MaxAge: UbuntuReleaseMaxAge, P7Deadline: RevocationResponseDeadline, Distribution: "ubuntu", Release: "26.04", Architecture: "amd64", Origin: "Ubuntu", Component: "main", Codename: "approved", Suite: "approved-security"}
+	p := Profile{FutureSkewConfirmed: true, FutureSkew: UbuntuReleaseFutureSkew, MaxAge: UbuntuReleaseMaxAge, P7Deadline: RevocationResponseDeadline, Distribution: "ubuntu", Release: "26.04", Architecture: "amd64", Origin: "Ubuntu", Component: "main", Codename: "approved", Suite: "approved-security"}
 	if !supportedNativeProfile(p) {
 		t.Fatal("approved control refused")
 	}
-	for _, edit := range []func(*Profile){func(p *Profile) { p.Origin = "PPA" }, func(p *Profile) { p.Suite = "other" }, func(p *Profile) { p.Component = "universe" }, func(p *Profile) { p.Architecture = "arm64" }, func(p *Profile) { p.Release = "24.04" }, func(p *Profile) { p.MaxAge = 8 * 24 * time.Hour }, func(p *Profile) { p.P7Deadline = 6 * time.Minute }} {
+	for _, edit := range []func(*Profile){func(p *Profile) { p.Origin = "PPA" }, func(p *Profile) { p.Suite = "other" }, func(p *Profile) { p.Component = "universe" }, func(p *Profile) { p.Architecture = "arm64" }, func(p *Profile) { p.Release = "24.04" }, func(p *Profile) { p.FutureSkewConfirmed = false }, func(p *Profile) { p.FutureSkew = 6 * time.Minute }, func(p *Profile) { p.MaxAge = 8 * 24 * time.Hour }, func(p *Profile) { p.P7Deadline = 6 * time.Minute }} {
 		q := p
 		edit(&q)
 		if supportedNativeProfile(q) {

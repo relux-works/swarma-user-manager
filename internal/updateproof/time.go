@@ -7,6 +7,7 @@ import (
 )
 
 const UbuntuReleaseMaxAge = 7 * 24 * time.Hour
+const UbuntuReleaseFutureSkew = 5 * time.Minute
 const RevocationResponseDeadline = 5 * time.Minute
 
 // TimeSource is the pinned public provider's start-sample boundary. The final

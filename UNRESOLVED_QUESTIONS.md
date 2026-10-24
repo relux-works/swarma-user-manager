@@ -173,8 +173,8 @@ automatic pin protocol nor host qualification. Before deployment:
   acceptance with the sample hooks alone.
 - Wire the pinned public timeconf collector entry/policy into the service and
   qualify durable time continuity. Unknown/untrusted time refuses. Release age
-  seven days and P7 response five minutes are owner-confirmed; the proposed
-  five-minute future-Date skew remains unconfirmed and cannot yet admit proof.
+  seven days, future-Date skew five minutes and P7 response five minutes are
+  owner-confirmed and fixed by native profile validation.
 - Qualify the complete independently held verifier/decoder closure, pinned key
   validity/revocation policy, exact Ubuntu/archive/package mapping, and native
   hook/ownership/exclusion behavior. The multi-repository composition library

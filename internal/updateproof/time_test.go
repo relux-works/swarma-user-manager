@@ -41,7 +41,7 @@ func TestUpdatePlatformTimeRefused(t *testing.T) {
 	if _, e = sampleTime(context.Background(), provider, "boot-a"); e != ErrTime {
 		t.Fatal("off production source admitted", e)
 	}
-	if UbuntuReleaseMaxAge != 7*24*time.Hour || RevocationResponseDeadline != 5*time.Minute {
+	if UbuntuReleaseMaxAge != 7*24*time.Hour || UbuntuReleaseFutureSkew != 5*time.Minute || RevocationResponseDeadline != 5*time.Minute {
 		t.Fatal("confirmed bounds changed")
 	}
 }

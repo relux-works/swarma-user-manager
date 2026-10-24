@@ -120,11 +120,11 @@ continuity. Until that separate embedding is reviewed, the native source is
 unavailable; fixtures exercise the public provider contract and its real off
 provider without invoking host NTS tools.
 
-Owner-confirmed Ubuntu profile values are **maximum release age seven days**
-and **P7 stop or verified narrowing within five minutes of detection**. Native
-profile validation fixes both values. The proposed five-minute future-Date skew
-remains an **unconfirmed profile parameter** (`FutureSkewConfirmed` is false
-until explicitly approved); evidence verification refuses unconfirmed skew.
+Owner-confirmed Ubuntu profile values are **maximum release age seven days**,
+**future-Date skew five minutes**, and **P7 stop or verified narrowing within
+five minutes of detection**. Native profile validation fixes all three values
+and requires `FutureSkewConfirmed` to be true. Missing approval or any different
+native value refuses; synthetic repository fixtures retain explicit parameters.
 Clock/expiry must be resampled/rechecked before the next slice's pin publication;
 historical evidence is not a fresh verdict.
 

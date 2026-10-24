@@ -559,7 +559,7 @@ func retainArtifact(b []byte, l Limits) error {
 }
 
 func supportedNativeProfile(p Profile) bool {
-	return p.MaxAge == UbuntuReleaseMaxAge && p.P7Deadline == RevocationResponseDeadline && p.Distribution == "ubuntu" && p.Release == "26.04" && p.Architecture == "amd64" && p.Origin == "Ubuntu" && p.Component == "main" && nameRE.MatchString(p.Codename) && (p.Suite == p.Codename || p.Suite == p.Codename+"-updates" || p.Suite == p.Codename+"-security")
+	return p.FutureSkewConfirmed && p.FutureSkew == UbuntuReleaseFutureSkew && p.MaxAge == UbuntuReleaseMaxAge && p.P7Deadline == RevocationResponseDeadline && p.Distribution == "ubuntu" && p.Release == "26.04" && p.Architecture == "amd64" && p.Origin == "Ubuntu" && p.Component == "main" && nameRE.MatchString(p.Codename) && (p.Suite == p.Codename || p.Suite == p.Codename+"-updates" || p.Suite == p.Codename+"-security")
 }
 
 func packageMetadata(qualified, name, suffix string, limit int64, optional bool) ([]byte, error) {
