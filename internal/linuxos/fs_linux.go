@@ -24,12 +24,15 @@ import (
 type Error struct {
 	Code, Operation string
 	Cause           error
+	Tool            *AccountToolDiagnostic
 }
 
-func (e *Error) Error() string                   { return e.Code + ": " + e.Operation }
-func (e *Error) Unwrap() error                   { return e.Cause }
-func refusal(code, op string, cause error) error { return &Error{code, op, cause} }
-func closed(f *os.File, err *error)              { *err = errors.Join(*err, f.Close()) }
+func (e *Error) Error() string { return e.Code + ": " + e.Operation }
+func (e *Error) Unwrap() error { return e.Cause }
+func refusal(code, op string, cause error) error {
+	return &Error{Code: code, Operation: op, Cause: cause}
+}
+func closed(f *os.File, err *error) { *err = errors.Join(*err, f.Close()) }
 func component(s string) bool {
 	return s != "" && s != "." && s != ".." && !strings.ContainsAny(s, "/\x00")
 }

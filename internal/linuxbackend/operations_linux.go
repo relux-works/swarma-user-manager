@@ -291,6 +291,11 @@ func (b *Backend) planCurrent(ctx context.Context, t manager.Task) (manager.Step
 			if len(s.Accounts)+len(s.Groups) != 0 {
 				return zero, refuse("cleanup_pending")
 			}
+			// userdel without --remove does not establish mailbox absence.
+			// Never release the reservation while this postcondition is unknown.
+			if err := b.mailAbsent(ctx, e.Reservation.Name, e.Reservation.Home); err != nil {
+				return zero, refuse("cleanup_pending")
+			}
 		}
 		if err := b.absentFiles(ctx, t); err != nil {
 			return zero, err
@@ -594,6 +599,11 @@ func (b *Backend) Execute(ctx context.Context, a manager.Attempt) (manager.Compl
 		return noWrite, refuse("state_contradictory")
 	}
 	if e != nil {
+		// A verified account creation remains an applied mutation even when a
+		// later mailbox postcondition fails. Preserve ownership for rollback.
+		if a.Intent.Operation == "account_create" && len(objects) == 1 {
+			return manager.Completion{Stopped: true, Outcome: "applied", Objects: objects}, mapError(e)
+		}
 		return unknown, mapError(e)
 	}
 	return manager.Completion{Stopped: true, Outcome: "applied", Objects: objects, Done: done}, nil
@@ -698,7 +708,11 @@ func (b *Backend) executeAccount(ctx context.Context, t manager.Task, operation 
 	if u.Name != id.Name || u.UID != id.UID || u.GID != id.GID || u.Home != id.Home || u.Shell != "/usr/sbin/nologin" || !u.PasswordLocked || len(u.SupplementaryGIDs) != 0 {
 		return nil, refuse("state_contradictory")
 	}
-	return accountObjects(linuxos.AccountSet{Accounts: observed.Accounts})
+	objects, err := accountObjects(linuxos.AccountSet{Accounts: observed.Accounts})
+	if err != nil {
+		return nil, err
+	}
+	return objects, b.mailAbsent(ctx, id.Name, id.Home)
 }
 func (b *Backend) executeHome(ctx context.Context, t manager.Task, i manager.OSIntent) ([]json.RawMessage, error) {
 	m, paths, e := b.manifest(ctx, t)

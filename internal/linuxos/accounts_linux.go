@@ -98,7 +98,7 @@ func (a Allocation) Commands() ([]Command, error) {
 	id := strconv.FormatUint(uint64(a.uid), 10)
 	return []Command{
 		{"/usr/sbin/groupadd", []string{"--gid", id, "--", a.name}},
-		{"/usr/sbin/useradd", []string{"--uid", id, "--gid", id, "--no-user-group", "--home-dir", a.home, "--no-create-home", "--shell", "/usr/sbin/nologin", "--password", "!", "--no-log-init", "--groups", "", "--key", "CREATE_MAIL_SPOOL=no", "--key", "CREATE_HOME=no", "--", a.name}},
+		{"/usr/sbin/useradd", []string{"--uid", id, "--gid", id, "--no-user-group", "--home-dir", a.home, "--no-create-home", "--shell", "/usr/sbin/nologin", "--password", "!", "--no-log-init", "--groups", "", "--key", "CREATE_HOME=no", "--", a.name}},
 	}, nil
 }
 func (a Allocation) RetirementCommands() ([]Command, error) {
@@ -126,11 +126,7 @@ func RunAccountTool(ctx context.Context, c Command) (err error) {
 	if e := trustedExecutable(c.path); e != nil {
 		return e
 	}
-	cmd := accountCommand(ctx, c)
-	if e := cmd.Run(); e != nil {
-		return refusal("backend_failed", "account_tool", e)
-	}
-	return nil
+	return runAccountCommand(accountCommand(ctx, c))
 }
 
 func accountCommand(ctx context.Context, c Command) *exec.Cmd {

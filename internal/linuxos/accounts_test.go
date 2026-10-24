@@ -83,7 +83,7 @@ func TestExactAccountVectors(t *testing.T) {
 		t.Fatal(e)
 	}
 	id := strconv.FormatUint(uint64(base), 10)
-	want := [][]string{{"--gid", id, "--", "worker-fixture"}, {"--uid", id, "--gid", id, "--no-user-group", "--home-dir", "/var/lib/stations/worker-fixture", "--no-create-home", "--shell", "/usr/sbin/nologin", "--password", "!", "--no-log-init", "--groups", "", "--key", "CREATE_MAIL_SPOOL=no", "--key", "CREATE_HOME=no", "--", "worker-fixture"}}
+	want := [][]string{{"--gid", id, "--", "worker-fixture"}, {"--uid", id, "--gid", id, "--no-user-group", "--home-dir", "/var/lib/stations/worker-fixture", "--no-create-home", "--shell", "/usr/sbin/nologin", "--password", "!", "--no-log-init", "--groups", "", "--key", "CREATE_HOME=no", "--", "worker-fixture"}}
 	for i, c := range cmds {
 		if !reflect.DeepEqual(c.Args(), want[i]) {
 			t.Fatalf("argv %d mismatch", i)

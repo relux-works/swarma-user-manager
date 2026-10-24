@@ -174,7 +174,7 @@ func TestObservationAndErrorMapping(t *testing.T) {
 		t.Fatal(a)
 	}
 	for _, tc := range []struct{ primitive, want string }{{"delete_budget_insufficient", "cleanup_pending"}, {"directory_unknown", "state_unavailable"}, {"identity_conflict", "user_exists_unmanaged"}, {"anything", "backend_failed"}} {
-		e := mapError(&linuxos.Error{Code: tc.primitive, Cause: errors.New("secret diagnostic")})
+		e := mapError(&linuxos.Error{Code: tc.primitive, Cause: errors.New("secret diagnostic"), Tool: &linuxos.AccountToolDiagnostic{ExitStatus: 3, Stderr: "secret stderr", Stdout: "secret stdout"}})
 		if code(e) != tc.want || strings.Contains(e.Error(), "secret") {
 			t.Fatal(e)
 		}

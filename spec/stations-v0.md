@@ -237,7 +237,7 @@ groupadd --gid <selected-gid> -- <derived-name>
 useradd --uid <selected-uid> --gid <selected-gid> --no-user-group
         --home-dir <derived-home> --no-create-home --shell /usr/sbin/nologin
         --password ! --no-log-init --groups ''
-        --key CREATE_MAIL_SPOOL=no --key CREATE_HOME=no -- <derived-name>
+        --key CREATE_HOME=no -- <derived-name>
 ```
 
 The empty `--groups` value is one empty argv element, not shell syntax; `!` is
@@ -245,6 +245,24 @@ one literal locked-password argument. Run no shell. A distro that does not
 support these options or creates extra state refuses qualification rather
 than dropping flags. Verify passwd/shadow/group/NSS results, locked password,
 non-login shell and empty supplementary-group membership before `active`.
+After successful `useradd` and exact account verification, prove that its mail
+spool is absent. Read `login.defs` through the same protected, bounded,
+no-follow configuration reader: `MAIL_DIR/<derived-name>` takes precedence,
+otherwise `MAIL_FILE` is relative to the derived home, with default
+`/var/mail/<derived-name>` when neither is set. Duplicate or malformed mailbox
+settings refuse. Absence requires a protected existing immediate parent and
+ENOENT for the no-follow leaf; an unsafe/missing parent or any present object
+(including a symlink) fails the postcondition. Recheck the protected configuration
+after the absence observation. A failed mailbox postcondition returns the proved
+account creation receipt with the error, preserving ownership for ordinary
+reverse-dependency compensation. The station never becomes `active`: successful
+compensation ends in `removed`; unresolved absence, removal or inventory keeps
+it in `creating` with `cleanup_pending` and its reservation held. Do not adopt or
+delete an unreceipted mailbox merely because it has the derived name. Recheck
+mailbox absence before declaring `removed`; account/group removal alone does
+not release the reservation. A host
+whose mail parent is group-writable needs owner-reviewed qualification changes,
+not a relaxed absence check.
 No authorized_keys, PAM login, sudo group, auto-home/mail skeleton, cron/at job,
 user systemd service or lingering permission is created.
 

@@ -53,6 +53,7 @@ type Backend struct {
 	observe           func(context.Context, linuxos.ReservedIdentity, linuxos.Limits) (linuxos.AccountSet, error)
 	restore           func(context.Context, linuxos.RestoreEvidence, linuxos.Limits) (linuxos.Restoration, error)
 	tool              func(context.Context, linuxos.Command) error
+	mailAbsent        func(context.Context, string, string) error
 	removals          func(context.Context, linuxos.RestoreEvidence, linuxos.Limits) ([]linuxos.Command, error)
 }
 
@@ -63,6 +64,7 @@ var _ manager.Backend = (*Backend)(nil)
 func New(p manager.Policy) *Backend { return NewWithEnvironment(p, nil, nil) }
 func NewWithEnvironment(p manager.Policy, h Environment, evidence EvidenceStore) *Backend {
 	b := &Backend{policy: p, host: h, evidence: evidence, open: openAnchor, reservations: map[string]manager.RestoreInput{}, stages: map[string]*stage{}, tool: linuxos.RunAccountTool}
+	b.mailAbsent = linuxos.CheckMailSpoolAbsent
 	b.policyProtection = checkPolicyProtection
 	b.persistenceChecks = b.localPersistenceChecks
 	b.observe = func(ctx context.Context, id linuxos.ReservedIdentity, l linuxos.Limits) (linuxos.AccountSet, error) {

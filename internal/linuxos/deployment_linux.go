@@ -261,10 +261,14 @@ func ProtectedAbsent(path string) error {
 		return e
 	}
 	defer d.Close()
-	if e = d.protected(); e != nil {
+	return d.proveAbsent(filepath.Base(path))
+}
+
+func (d *Dir) proveAbsent(name string) error {
+	if e := d.protected(); e != nil {
 		return e
 	}
-	f, e := child(d.f, filepath.Base(path), unix.O_PATH, 0)
+	f, e := child(d.f, name, unix.O_PATH, 0)
 	if e == nil {
 		f.Close()
 		return refusal("qualification_failed", "entry_present", nil)

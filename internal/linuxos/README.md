@@ -22,7 +22,7 @@ There is no package-global mutable state.
 | `CheckPolicyFile`, `CheckPersistenceDenial`, `Qualification` | Fresh `ok` / `failed(reason)` / `unknown` checks of policy protection, cron/at deny coverage and allow precedence, and absent linger markers. [Receipts §6](../../spec/station-effect-receipts.md#6-accepted-local-v0-authority-sources). |
 | `RemovalCommands` | Exact original-lifetime removal vectors with permitted cleanup absence; never enables creation or changes holds. |
 | `PrepareDeletion`, `DeleteEntries`, `DeletionEntry` | Bounded read-only exact entry preparation and separately admitted deletion, with whole-batch prevalidation and per-entry replacement refusal; caller supplies owned root receipt and fences. |
-| `Allocation.Commands`, `RetirementCommands`, `RunAccountTool` | Closed exact vectors for groupadd/useradd/userdel/groupdel, fixed absolute executables, empty environment, cwd `/`; §§4–5. Tool success still requires caller postcondition checks. |
+| `Allocation.Commands`, `RetirementCommands`, `RunAccountTool` | Closed exact vectors for groupadd/useradd/userdel/groupdel, fixed absolute executables, empty environment, cwd `/`; §§4–5. Tool success still requires caller postcondition checks; failures retain bounded 4 KiB stderr/stdout and exit status in protected diagnostic fields, never the public error string. |
 | `OpenRoot`, `Dir.OpenDirectory`, `Close` | Pinned descriptors, no symlink traversal. Explicit mount transitions are allowed only while acquiring a configured root; descendant transitions refuse. Shared sticky ancestors permit inventory, never publication. |
 | `StationManifest`, `Dir.Install`, `Dir.ReplaceManaged`, `Dir.Verify` | Private staging, root:S scaffold modes, approved control bytes, atomic publication/replacement, stored ACL/capability refusal and actual SHA-256 digests; §§7/10. |
 | `OpenProc`, `Proc.Processes`, `Proc.Stop`, `StopTiming`, `StopResult` | All four UID fields, pidfd incarnation checks, TERM/grace/KILL, complete quiet absence; §§5–6. Caller explicitly admits the observed process set. A new/reused PID refuses without signaling it. |
@@ -62,6 +62,18 @@ establish coverage, and differing/unreadable links return `unknown`.
 Budgets bound cooperative work, not stuck kernel syscalls. A deletion batch that
 cannot remove any entry returns `delete_budget_insufficient`; retain the fence
 and increase the entry budget instead of retrying identical zero-work batches.
+
+`CheckMailSpoolAbsent` reads protected `/etc/login.defs` and proves the derived
+mailbox absent through its protected immediate parent. MAIL_DIR takes precedence
+over home-relative MAIL_FILE; the default is `/var/mail/<name>`. Group-writable
+mail parents cannot provide this proof. The backend preserves the verified
+account receipt on a failed mailbox postcondition so ordinary compensation keeps
+its deletion authority. Root qualification persists its rollback marker before
+checking mailbox absence and refuses a clean rollback marker if that absence
+still cannot be proved. The backend also rechecks it before declaring removed.
+Rebuild its candidate with Go 1.26.10:
+`go test -c -trimpath -o /absolute/scratch/linuxos.test ./internal/linuxos`.
+The launcher needs the newly approved binary hash; its protocol is unchanged.
 
 ## Receipt primitive boundary
 
@@ -144,7 +156,7 @@ No test may signal a process it did not start.
 `TestRootQualification` is **PENDING/skipped by default**. The proposed script
 has not qualified root account tools, root:S ownership or root signaling merely
 by compiling. For an owner-approved isolated host, first build the exact reviewed
-binary with `go test -c -o /chosen/path/linuxos.test ./internal/linuxos` and record
+binary with `go test -c -trimpath -o /chosen/path/linuxos.test ./internal/linuxos` and record
 its SHA-256 with `sha256sum /chosen/path/linuxos.test`. The owner must supply
 `/etc/swarma-linuxos-qualification.json`, root:root mode 0600, containing `Min`,
 `Max`, `ReservedUIDs` and `ReservedGIDs`: a reviewed unused test range and all

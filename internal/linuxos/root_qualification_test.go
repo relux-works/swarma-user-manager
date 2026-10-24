@@ -169,6 +169,13 @@ func qualificationRollback(ctx context.Context, d *Dir, s *qualificationState, p
 			return e
 		}
 	}
+	// A successful useradd may have created mail outside the owned home. Do
+	// not label rollback clean or delete an unreceipted mailbox by its name.
+	if s.UserCreated {
+		if e = CheckMailSpoolAbsent(ctx, a.name, a.home); e != nil {
+			return e
+		}
+	}
 	s.Done = true
 	s.Stage = ""
 	s.UserCreated = false
@@ -304,6 +311,11 @@ func TestRootQualification(t *testing.T) {
 		if e = qualificationWrite(root, state); e != nil {
 			t.Fatal(e)
 		}
+	}
+	// Persist UserCreated first so a failed mailbox proof still runs guarded
+	// rollback for both successfully created namespaces.
+	if e = CheckMailSpoolAbsent(ctx, a.name, a.home); e != nil {
+		t.Fatal(e)
 	}
 	u, e := user.Lookup(a.name)
 	if e != nil || u.Uid != number(a.uid) || u.Gid != number(a.uid) || u.HomeDir != a.home {
