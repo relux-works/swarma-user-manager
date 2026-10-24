@@ -42,8 +42,8 @@ running proof verifier MUST be the previously qualified verifier and dependency
 closure, held independently of overwritten package paths. If that trusted base
 changed or cannot still be executed safely, refuse; do not bootstrap trust by
 executing the changed verifier. Only after authentication may the reconciler run
-the updated qualification binary/checker. Installing a different trust base is not
-an automatic exception.
+the updated qualification binary/checker. Installing a different trust base is
+not an automatic exception.
 
 ## 2. Transaction trigger and exclusion
 
@@ -114,8 +114,9 @@ The archive chain is described by
 The installed `md5sums` file is integrity bookkeeping, not a security
 attestation; dpkg can generate entries when the archive omits that control file.
 See [deb-md5sums(5)](https://manpages.debian.org/trixie/dpkg-dev/deb-md5sums.5.en.html).
-If generated, the entry MUST still match MD5 computed from the authenticated
-payload, as well as the independent installed/payload SHA-256 comparison. A
+Whether supplied by the archive or generated, the installed entry MUST match
+MD5 computed from the authenticated payload, as well as the independent
+installed/payload SHA-256 comparison. A
 changed leaf with no entry refuses. Modified conffiles and maintainer-generated
 bytes lacking an identical authenticated payload member cannot qualify
 through this exception. MD5 equality alone MUST NOT admit any leaf.
@@ -203,7 +204,8 @@ After **all** changed leaves pass §3 and all other pins remain unchanged:
    package-version and release high-water frontiers. Only then report evidence
    to the admission owner. The reconciler MUST NOT clear the maintenance fence,
    reopen station admission, resume work or change a generation. Admission is a
-   separate owner-controlled action subject to all remaining lifecycle gates.
+   separate action by the admission controller under its existing authority and
+   all remaining lifecycle gates; this introduces no new human approval flow.
 
 The intent/outcome MUST be in a protected append-only qualification-maintenance
 journal, separate from `gen-journal/1` and the existing closed OS-effect store.
@@ -221,8 +223,9 @@ bounds and explicit saturation refusal. No credentials or raw account data.
 A crash at any step MUST leave the admission fence in place and no accepted
 outcome unless all steps completed. A published pin or Q without its accepted
 transaction outcome MUST NOT admit; the future admission guard and boot check
-MUST verify that binding as well as the existing record/unit checks. Recovery rechecks retained evidence and
-current inputs and reruns the complete qualification protocol; it does not
+MUST verify that binding as well as the existing record/unit checks. Recovery
+rechecks retained evidence and current inputs and reruns the complete
+qualification protocol; it does not
 infer success, automatically restore an old pin over changed files, or use
 partially written receipts. Unknown journal/floor or root-writer continuity
 requires explicit maintenance. Recovery never rewrites generation history.
@@ -249,8 +252,7 @@ Every changed leaf outside a package, unknown package, missing/mismatched link,
 expired/unsigned release, keyring change, downgrade, failed/unknown check or
 interrupted reconciliation MUST keep admission closed as
 `qualification_required`. Retain the old pin as historical evidence and retain
-failure evidence; a
-candidate pin already installed before a late failure remains fenced and is
+failure evidence; a candidate pin already installed before a late failure remains fenced and is
 not an accepted update. No automatic rollback or widening fallback is allowed.
 
 A required `QualificationRevoked` interface MUST durably deliver a bounded
