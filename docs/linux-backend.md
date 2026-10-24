@@ -546,6 +546,12 @@ object's ordered absolute RUNPATH (explicit `[]` for no RUNPATH or an absolute
 name). Equal name/scope pairs share evidence; the carrying object's own bytes
 remain in the implementation closure. `path` is the selected canonical path.
 Conflicting canonical selections for one needed name within a closure refuse.
+The runtime `DT_SONAME` of every closure member is checked as well. Duplicate
+SONAMEs on distinct canonical files, or a SONAME matching another file's requested
+or canonical root/member name, refuse in either traversal order. This is a
+conservative alias refusal: the model does not emulate glibc's loaded-object
+namespace or its breadth-first dependency load order. Distinct SONAMEs and
+multiple names selecting the same canonical object remain supported.
 
 Each ordered `locations` entry is the closed object
 `{kind,path,state,resolved,links,digest}`:
@@ -566,6 +572,14 @@ default directory first requires protected absence of its `glibc-hwcaps` child;
 ABI/CPU level without guessing hardware state. Selected cache entries with
 hwcap-dependent selection remain refused. A stale cache target also refuses
 rather than attempting unsupported cache-target failure fallback.
+
+Symlink targets must have canonical spelling. Leading `..` components are
+allowed from the already-resolved protected parent directory; `..` after a new
+path component, single `.`, repeated separators and trailing separators refuse.
+This prevents lexical cleaning from discarding a component that the kernel
+would first resolve as a symlink. Every admitted lookup retains the protected
+parent walk, literal link chain and finite hop/path limits; unsupported targets
+return no partial lookup evidence.
 
 RUNPATH has at most 32 clean absolute entries, with no `$` tokens, relative paths,
 empty elements or noncanonical spelling. Repeated directory spellings collapse to their first occurrence, as glibc does.
@@ -589,6 +603,8 @@ at **256 MiB**, including revalidation. Exhaustion refuses without partial closu
 evidence. Configuration/document reads keep their existing smaller limits.
 
 Source basis: glibc 2.42 [`_dl_map_object` search order](https://github.com/bminor/glibc/blob/glibc-2.42/elf/dl-load.c),
+[`_dl_lookup_map` requested-name/SONAME reuse](https://github.com/bminor/glibc/blob/glibc-2.42/elf/dl-load.c),
+[`_dl_map_object_deps` breadth-first loading](https://github.com/bminor/glibc/blob/glibc-2.42/elf/dl-deps.c),
 [`_dl_important_hwcaps` directory expansion](https://github.com/bminor/glibc/blob/glibc-2.42/elf/dl-hwcaps.c)
 and [cache ABI/hwcaps selection](https://github.com/bminor/glibc/blob/glibc-2.42/elf/dl-cache.c).
 The operator reviews loader bytes, ABI, compiled defaults and configuration as

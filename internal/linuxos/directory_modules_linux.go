@@ -121,6 +121,7 @@ func CaptureImplementationClosure(ctx context.Context, roots []ProtectedArtifact
 	out := []ClosureFile{}
 	remaining := ImplementationTotalBytes
 	resolvedNames := map[string]string{}
+	sonames := map[string]string{}
 	seen := map[string]bool{}
 	for len(queue) > 0 {
 		next := queue[0]
@@ -132,6 +133,11 @@ func CaptureImplementationClosure(ctx context.Context, roots []ProtectedArtifact
 			return nil, "", refusal("directory_unknown", "closure_limit", nil)
 		}
 		seen[next.a.Path] = true
+		// Canonical root/object names also participate in the loaded-name set.
+		if prior, ok := resolvedNames[next.a.Path]; ok && prior != next.a.Path {
+			return nil, "", refusal("directory_unknown", "closure_name_collision", nil)
+		}
+		resolvedNames[next.a.Path] = next.a.Path
 		maximum := ImplementationFileBytes
 		if remaining < maximum {
 			maximum = remaining
@@ -155,7 +161,7 @@ func CaptureImplementationClosure(ctx context.Context, roots []ProtectedArtifact
 			held.Close()
 			return nil, "", refusal("directory_unknown", "closure_abi", nil)
 		}
-		deps, runpath, e := loaderDependencies(object, held, uint64(size))
+		deps, runpath, soname, e := loaderDependencies(object, held, uint64(size))
 		if e != nil {
 			held.Close()
 			return nil, "", e
@@ -188,6 +194,15 @@ func CaptureImplementationClosure(ctx context.Context, roots []ProtectedArtifact
 		if e != nil || ce != nil || !stableStat(before, after) {
 			return nil, "", refusal("path_changed", "closure_parse", e)
 		}
+		// Every distinct object contributes its authoritative runtime SONAME.
+		// A collision is outside this order-independent closure model even when
+		// one load order could happen to use both objects.
+		if soname != "" {
+			if prior, ok := sonames[soname]; ok && prior != next.a.Path {
+				return nil, "", refusal("directory_unknown", "closure_soname_alias", nil)
+			}
+			sonames[soname] = next.a.Path
+		}
 		for _, dep := range lookups {
 			if dep.name == "" || strings.ContainsAny(dep.name, "$\x00\n\r") || strings.Contains(dep.name, "/") && (!filepath.IsAbs(dep.name) || filepath.Clean(dep.name) != dep.name) {
 				return nil, "", refusal("directory_unknown", "closure_dependency", nil)
@@ -212,6 +227,14 @@ func CaptureImplementationClosure(ctx context.Context, roots []ProtectedArtifact
 			queue = append(queue, item{a, next.depth + 1})
 		}
 		out = append(out, file)
+	}
+	// glibc may reuse any previously loaded requested name or SONAME before
+	// searching the filesystem. Refuse cross-file aliases in either traversal
+	// order rather than attest independent resolutions that glibc would skip.
+	for name, path := range resolvedNames {
+		if alias, ok := sonames[name]; ok && alias != path {
+			return nil, "", refusal("directory_unknown", "closure_soname_alias", nil)
+		}
 	}
 	if e := c.Err(); e != nil {
 		return nil, "", e

@@ -167,10 +167,12 @@ func reviewLoaderOperation(err error, op string) bool {
 	return false
 }
 
-// A previously loaded object's DT_SONAME aliases its original lookup name.
-// Independent per-name resolutions must not attest another object as the hit.
+// A previously loaded SONAME can suppress a later filesystem lookup. The native
+// differential remains the reviewer witness; the bounded model now specifically
+// refuses that cross-file alias, while distinct SONAMEs admit and replay. An
+// alias planted after capture also invalidates local and full revalidation.
 func TestReviewLoaderSONAMEReuse(t *testing.T) {
-	for _, aliasing := range []bool{false, true} {
+	for _, aliasing := range []bool{true, false} {
 		t.Run(map[bool]string{false: "control", true: "soname-alias"}[aliasing], func(t *testing.T) {
 			ctx := context.Background()
 			f := newLoaderFixture(t)
@@ -180,47 +182,70 @@ func TestReviewLoaderSONAMEReuse(t *testing.T) {
 			loaderELF(t, second, "int second(void){return 2;}", "-Wl,-soname,libalias.so")
 			root := filepath.Join(f.root, "root.so")
 			loaderELF(t, root, "extern int first(void);extern int second(void);int root(void){return first()+second();}", "-L"+f.late, "-Wl,--no-as-needed", "-l:libfirst.so", "-l:libalias.so", "-Wl,--enable-new-dtags,-rpath,"+f.late)
-			if aliasing {
-				b, e := os.ReadFile(first)
+			plant := func() {
+				t.Helper()
+				raw, e := os.ReadFile(first)
 				if e != nil {
 					t.Fatal(e)
 				}
-				if !bytes.Contains(b, []byte("libfirst.so")) {
+				if !bytes.Contains(raw, []byte("libfirst.so")) {
 					t.Fatal("SONAME plant absent")
 				}
-				b = bytes.ReplaceAll(b, []byte("libfirst.so"), []byte("libalias.so"))
-				if e = os.WriteFile(first, b, 0755); e != nil {
+				raw = bytes.ReplaceAll(raw, []byte("libfirst.so"), []byte("libalias.so"))
+				if e = os.WriteFile(first, raw, 0755); e != nil {
 					t.Fatal(e)
 				}
+			}
+			if aliasing {
+				plant()
+			}
+			runner := reviewLoaderRunner(t, f.root)
+			native := reviewRunLoader(t, runner, root)
+			loadedSecond := strings.Contains(native, second+"\n")
+			if loadedSecond == aliasing {
+				t.Fatal("SONAME reference shape not established", native)
 			}
 			a, e := f.reader.OpenArtifact(ctx, root)
 			if e != nil {
 				t.Fatal(e)
 			}
 			defer a.Directory.Close()
-			profile, files, _, e := f.resolver(t, nil).Capture(ctx, []linuxos.ProtectedArtifact{a}, loaderLimits())
-			if e != nil {
-				t.Fatal("fixture capture", e)
+			profile, files, digest, e := f.resolver(t, nil).Capture(ctx, []linuxos.ProtectedArtifact{a}, loaderLimits())
+			if aliasing {
+				if !reviewLoaderOperation(e, "closure_soname_alias") || files != nil || digest != "" {
+					t.Fatal("cross-file SONAME reuse was not specifically refused", files, digest, e)
+				}
+				return
+			}
+			if e != nil || len(files) != 3 || digest == "" {
+				t.Fatal("distinct SONAME control", files, e)
 			}
 			if !linuxbackend.QualificationLoaderProfileValid(profile, 10000) {
-				t.Fatal("profile refused")
+				t.Fatal("valid profile refused")
 			}
 			pinned := f.resolver(t, profile.Resolutions)
 			if e = pinned.Revalidate(ctx); e != nil {
-				t.Fatal(e)
+				t.Fatal("baseline replay", e)
 			}
-			native := reviewRunLoader(t, reviewLoaderRunner(t, f.root), root)
-			t.Logf("native=%s captured=%+v", strings.TrimSpace(native), files)
-			loadedSecond := strings.Contains(native, second+"\n")
-			if loadedSecond == aliasing {
-				t.Fatal("SONAME reference shape not established", native)
+			control, again, e := linuxos.CaptureImplementationClosure(ctx, []linuxos.ProtectedArtifact{a}, pinned, loaderLimits())
+			if e != nil || again != digest || len(control) != 3 {
+				t.Fatal("baseline full replay", e)
 			}
-			if aliasing {
-				for _, record := range profile.Resolutions {
-					if record.Name == "libalias.so" && record.Path == second {
-						t.Errorf("qualified different hit: libalias.so reused %s in glibc but recorded %s", first, second)
-					}
-				}
+			plant()
+			if native = reviewRunLoader(t, runner, root); strings.Contains(native, second+"\n") {
+				t.Fatal("late alias did not suppress real second object", native)
+			}
+			if e = pinned.Revalidate(ctx); !errors.Is(e, qualification.ErrRequired) {
+				t.Fatal("local replay ignored alias byte drift", e)
+			}
+			drift, dg, e := linuxos.CaptureImplementationClosure(ctx, []linuxos.ProtectedArtifact{a}, pinned, loaderLimits())
+			if !errors.Is(e, qualification.ErrRequired) || drift != nil || dg != "" {
+				t.Fatal("full replay ignored alias byte drift", e)
+			}
+			// A fresh observation cannot turn the new aliasing shape into authority.
+			_, fresh, dg, e := f.resolver(t, nil).Capture(ctx, []linuxos.ProtectedArtifact{a}, loaderLimits())
+			if !reviewLoaderOperation(e, "closure_soname_alias") || fresh != nil || dg != "" {
+				t.Fatal("fresh alias shape admitted", fresh, dg, e)
 			}
 		})
 	}

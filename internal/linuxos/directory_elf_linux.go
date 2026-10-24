@@ -12,9 +12,10 @@ import (
 
 // loaderDependencies reads PT_DYNAMIC and maps DT_STRTAB through PT_LOAD, as
 // the runtime loader does. Optional sections cannot erase or redirect that view.
-func loaderDependencies(object *elf.File, reader io.ReaderAt, fileSize uint64) ([]string, []string, error) {
-	fail := func() ([]string, []string, error) {
-		return nil, nil, refusal("directory_unknown", "closure_loader_view", nil)
+// The returned SONAME participates in cross-object alias refusal.
+func loaderDependencies(object *elf.File, reader io.ReaderAt, fileSize uint64) ([]string, []string, string, error) {
+	fail := func() ([]string, []string, string, error) {
+		return nil, nil, "", refusal("directory_unknown", "closure_loader_view", nil)
 	}
 	var dynamic *elf.Prog
 	for _, p := range object.Progs {
@@ -35,7 +36,7 @@ func loaderDependencies(object *elf.File, reader io.ReaderAt, fileSize uint64) (
 		if len(sections) != 0 {
 			return fail()
 		}
-		return []string{}, []string{}, nil
+		return []string{}, []string{}, "", nil
 	}
 	width := uint64(16)
 	if object.Class == elf.ELFCLASS32 {
@@ -94,7 +95,7 @@ func loaderDependencies(object *elf.File, reader io.ReaderAt, fileSize uint64) (
 	}
 	for _, tag := range []elf.DynTag{elf.DT_RPATH, elf.DT_FILTER, elf.DT_AUXILIARY, elf.DT_AUDIT, elf.DT_DEPAUDIT} {
 		if len(vals[tag]) != 0 {
-			return nil, nil, refusal("directory_unknown", "closure_loader_syntax", nil)
+			return nil, nil, "", refusal("directory_unknown", "closure_loader_syntax", nil)
 		}
 	}
 	if len(vals[elf.DT_STRTAB]) != 1 || len(vals[elf.DT_STRSZ]) != 1 {
@@ -135,9 +136,27 @@ func loaderDependencies(object *elf.File, reader io.ReaderAt, fileSize uint64) (
 		}
 		deps = append(deps, string(table[offset:offset+uint64(end)]))
 	}
+	soname := ""
+	if len(vals[elf.DT_SONAME]) > 1 {
+		return fail()
+	}
+	if len(vals[elf.DT_SONAME]) == 1 {
+		offset := vals[elf.DT_SONAME][0]
+		if offset >= uint64(len(table)) {
+			return fail()
+		}
+		end := bytes.IndexByte(table[offset:], 0)
+		if end < 1 || end > 4096 {
+			return fail()
+		}
+		soname = string(table[offset : offset+uint64(end)])
+		if strings.ContainsAny(soname, "$\x00\n\r") {
+			return fail()
+		}
+	}
 	runpath := []string{}
 	if len(vals[elf.DT_RUNPATH]) > 1 {
-		return nil, nil, refusal("directory_unknown", "closure_loader_syntax", nil)
+		return nil, nil, "", refusal("directory_unknown", "closure_loader_syntax", nil)
 	}
 	if len(vals[elf.DT_RUNPATH]) == 1 {
 		off := vals[elf.DT_RUNPATH][0]
@@ -146,15 +165,15 @@ func loaderDependencies(object *elf.File, reader io.ReaderAt, fileSize uint64) (
 		}
 		end := bytes.IndexByte(table[off:], 0)
 		if end < 1 {
-			return nil, nil, refusal("directory_unknown", "closure_loader_syntax", nil)
+			return nil, nil, "", refusal("directory_unknown", "closure_loader_syntax", nil)
 		}
 		runpath = strings.Split(string(table[off:off+uint64(end)]), ":")
 		if len(runpath) > 32 {
-			return nil, nil, refusal("directory_unknown", "closure_loader_syntax", nil)
+			return nil, nil, "", refusal("directory_unknown", "closure_loader_syntax", nil)
 		}
 		for _, path := range runpath {
 			if !filepath.IsAbs(path) || filepath.Clean(path) != path || len(path) > 4096 || strings.ContainsAny(path, "$;\x00\n\r") {
-				return nil, nil, refusal("directory_unknown", "closure_loader_syntax", nil)
+				return nil, nil, "", refusal("directory_unknown", "closure_loader_syntax", nil)
 			}
 		}
 	}
@@ -171,10 +190,10 @@ func loaderDependencies(object *elf.File, reader io.ReaderAt, fileSize uint64) (
 	runpath = unique
 	for _, flags := range vals[elf.DT_FLAGS_1] {
 		if flags&0x800 != 0 {
-			return nil, nil, refusal("directory_unknown", "closure_loader_syntax", nil)
+			return nil, nil, "", refusal("directory_unknown", "closure_loader_syntax", nil)
 		}
 	} // DF_1_NODEFLIB
-	return deps, runpath, nil
+	return deps, runpath, soname, nil
 }
 
 // loaderFileRange admits exactly one file-backed mapping of the entire consumed
