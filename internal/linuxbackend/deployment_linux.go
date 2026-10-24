@@ -42,10 +42,29 @@ type SystemdProfile struct {
 	Sources   []SystemdSourceProfile   `json:"sources"`
 }
 type SystemdProviderProfile struct {
-	Name           string   `json:"name"`
-	Implementation []string `json:"implementation"`
-	Configuration  []string `json:"configuration"`
+	Name           string              `json:"name"`
+	Implementation []string            `json:"implementation"`
+	Configuration  []ConfigurationPath `json:"configuration"`
 }
+
+// ConfigurationPath grants one exact file, absent leaf or complete directory.
+type ConfigurationPath struct {
+	Kind string `json:"kind"`
+	Path string `json:"path"`
+}
+
+func configurationPaths(entries []ConfigurationPath) bool {
+	if entries == nil || len(entries) > 100000 {
+		return false
+	}
+	for j, p := range entries {
+		if (p.Kind != "file" && p.Kind != "directory" && p.Kind != "absent") || !absolute(p.Path) || j > 0 && entries[j-1].Path >= p.Path {
+			return false
+		}
+	}
+	return true
+}
+
 type SystemdSourceProfile struct {
 	URL  string `json:"url"`
 	Path string `json:"path"`
@@ -59,7 +78,7 @@ func (s *SystemdProfile) validate() bool {
 		return false
 	}
 	for j, p := range s.Providers {
-		if p.Name == "" || j > 0 && s.Providers[j-1].Name >= p.Name || !paths(p.Implementation, true) || !paths(p.Configuration, false) {
+		if p.Name == "" || j > 0 && s.Providers[j-1].Name >= p.Name || !paths(p.Implementation, true) || !configurationPaths(p.Configuration) {
 			return false
 		}
 	}
@@ -71,11 +90,6 @@ func (s *SystemdProfile) validate() bool {
 	return true
 }
 
-type TreePin struct {
-	State  string `json:"state"`
-	Path   string `json:"path"`
-	Digest string `json:"digest"`
-}
 type FilePin struct {
 	Path   string `json:"path"`
 	Digest string `json:"digest"`
@@ -103,7 +117,7 @@ type LoaderProfile struct {
 }
 type NoLauncherProfile struct {
 	AbsentEntries []string  `json:"absent_entries"`
-	ServiceRoots  []TreePin `json:"service_roots"`
+	ServiceRoots  []string  `json:"service_roots"`
 	Configuration []FilePin `json:"configuration"`
 }
 type InventoryProfile struct {
@@ -155,17 +169,6 @@ func filePins(p []FilePin, nonempty bool) bool {
 	}
 	return true
 }
-func treePins(p []TreePin) bool {
-	if len(p) == 0 {
-		return false
-	}
-	for j, v := range p {
-		if !absolute(v.Path) || !hash(v.Digest) || (v.State != "present" && v.State != "absent") || j > 0 && p[j-1].Path >= v.Path {
-			return false
-		}
-	}
-	return true
-}
 func (m DeploymentManifest) validate(p manager.Policy) error {
 	if !m.Systemd.validate() {
 		return qualification.ErrRequired
@@ -190,7 +193,7 @@ func (m DeploymentManifest) validate(p manager.Policy) error {
 		return qualification.ErrRequired
 	}
 	n := m.NoLauncher
-	if !paths(n.AbsentEntries, true) || !treePins(n.ServiceRoots) || !filePins(n.Configuration, true) {
+	if !paths(n.AbsentEntries, true) || !paths(n.ServiceRoots, true) || !filePins(n.Configuration, true) {
 		return qualification.ErrRequired
 	}
 	required := filepath.Join(p.Root, "libexec/swarma-user-launcher")
@@ -204,7 +207,7 @@ func (m DeploymentManifest) validate(p manager.Policy) error {
 	for _, required := range []string{"/etc/systemd/system", "/run/systemd/system", "/usr/lib/systemd/system"} {
 		found := false
 		for _, r := range n.ServiceRoots {
-			found = found || r.Path == required
+			found = found || r == required
 		}
 		if !found {
 			return qualification.ErrRequired
@@ -257,37 +260,6 @@ func loadDeployment(ctx context.Context, p manager.Policy) (DeploymentManifest, 
 		return m, nil, qualification.ErrRequired
 	}
 	return m, raw, nil
-}
-func captureTree(ctx context.Context, pin TreePin, l linuxos.Limits) ([]linuxos.TreeEntry, error) {
-	if pin.State == "absent" {
-		if linuxos.ProtectedAbsent(pin.Path) != nil {
-			return nil, qualification.ErrRequired
-		}
-		b, _ := qualification.Canonical(struct {
-			State string `json:"state"`
-		}{"absent"})
-		if qualification.Hash(b) != pin.Digest {
-			return nil, qualification.ErrRequired
-		}
-		return []linuxos.TreeEntry{}, nil
-	}
-	if pin.State != "present" {
-		return nil, qualification.ErrRequired
-	}
-	d, e := linuxos.OpenRoot(pin.Path)
-	if e != nil {
-		return nil, e
-	}
-	defer d.Close()
-	entries, e := linuxos.CaptureProtectedTree(ctx, d, l)
-	if e != nil {
-		return nil, e
-	}
-	b, e := qualification.Canonical(entries)
-	if e != nil || qualification.Hash(b) != pin.Digest {
-		return nil, qualification.ErrRequired
-	}
-	return entries, nil
 }
 func verifyFiles(ctx context.Context, pins []FilePin) error {
 	for _, v := range pins {

@@ -221,7 +221,7 @@ The following reviewed capabilities are never record-decoded paths:
 | `Library` | Actual reviewed `libnss_systemd` implementation, resolved through the same protected loader closure. |
 | `Manifest` | Fixed `<root>/etc/user-manager-systemd-closure.json`, root:root 0600, regular single-link, protected ancestors; operator-installed before qualification. |
 | `Etc`, `Run`, `UsrLib` | Protected root-owned descriptors for `/etc`, `/run`, `/usr/lib`. These are separate configured mount anchors; child walks refuse symlinks and mount transitions. |
-| `Providers` | Exact service-name map to `UserDBProviderClosure`: reviewed `Implementation` ELF roots, `Configuration` artifacts and complete `Resolver`. Nil configuration is unknown; an explicit empty set requires reviewed semantics. |
+| `Providers` | Exact service-name map to `UserDBProviderClosure`: reviewed `Implementation` ELF roots, typed `Configuration` entries and complete `Resolver`. Nil configuration is unknown; an explicit empty set requires reviewed semantics. |
 | `Sources` | Exact source-URL map to protected retained documentation artifacts. Their bytes must match each source reference's SHA-256. No runtime network fetch. |
 
 The manifest is a closed CCJ-1 document, at most 1 MiB, with no trailing LF.
@@ -511,8 +511,32 @@ introduced. Changes require initial qualification and a new pin.
 `libnss_systemd` implementation. `providers` is a nonempty name-sorted unique
 array of `{name,implementation,configuration}`. Each implementation is a nonempty
 sorted unique array of protected absolute ELF paths; configuration is an explicit
-sorted unique array of protected absolute configuration paths (empty only when
-reviewed as complete). `sources` is a nonempty URL-sorted unique array of
+path-sorted unique array of closed `{kind,path}` configuration entries (empty only
+when reviewed as complete). Kinds are exactly `file`, `absent` and `directory`.
+All paths are protected clean absolute paths; no link resolution grants authority.
+A `file` pins exact regular-file bytes. An `absent` entry requires an existing
+protected parent and leaf ENOENT on every capture; a missing parent is unknown.
+A `directory` pins its complete bounded no-follow tree: every entry name/type,
+regular-file digest and inert symlink target. Unreadable or unsafe entries,
+unsupported types and entry/depth/time/file-byte exhaustion refuse.
+Provider configuration digests hash the path-sorted CCJ-1 array of
+`{kind,path,sha256}` observations: exact file hashes, a directory's sorted
+CCJ-1 `{path,kind,digest,target}` tree hash, or the hash of `{"state":"absent"}`.
+The kind is part of the pin; a different kind cannot substitute identical bytes.
+Both full provider checks and the local guard recapture the exact leaf beneath
+the retained parent. Creating an absent directory or adding/changing a file in
+a pinned directory changes/refuses the pin, without any provider RPC in the
+local guard. This provider configuration remains pinned even though
+`no_launcher.service_roots` deliberately does not.
+
+For `io.systemd.DynamicUser`, review `/etc/systemd/system.conf` as a file and all
+manager drop-in roots: `/etc/systemd/system.conf.d`, `/run/systemd/system.conf.d`,
+`/usr/local/lib/systemd/system.conf.d` and `/usr/lib/systemd/system.conf.d`.
+Declare each drop-in root `absent` or `directory` according to the reviewed state.
+Prepare protected existing parents before declaring absent leaves; missing
+parents cannot be treated as absence.
+
+`sources` is a nonempty URL-sorted unique array of
 `{url,path}` mapping each exact reviewed provenance URL to its retained protected
 document. These are artifact capabilities, not provider verdicts or additional
 range claims. The landed runtime alone matches the exact provider set and
@@ -525,12 +549,9 @@ these mappings change the existing `backend_digest`; no Q/I member is added.
 Paths are clean absolute paths. Arrays are explicit, sorted and unique by path
 (or resolution key). Loader search arrays instead retain lookup order. File pins
 contain SHA-256 of exact protected file bytes.
-A tree pin is `{path,state,digest}`, with state `present` or `absent`. Present
-pins hash CCJ-1 of the entire sorted tree of `{path,kind,digest,target}` entries:
-relative paths; kinds `directory`, `file`, `link`; file content digests; inert
-symlink text; empty unused fields. Links do not grant permission to follow their
-target. Absent pins hash CCJ-1 `{"state":"absent"}` and require a protected
-existing parent plus actual leaf ENOENT. An unreadable or missing parent refuses.
+`no_launcher.service_roots` is a nonempty sorted unique array of clean absolute
+root paths, with no state or content digest. A root may be absent. Service-tree
+observations are live checks, not qualification inputs or deployment content pins.
 
 `loader.format` remains `glibc-cache-closure/1`; the closed, not-yet-deployed
 `station-deployment/1` schema changes in place. `cache` pins `/etc/ld.so.cache`.
@@ -639,7 +660,25 @@ one complete profile. Accessible library directories alone grant no authority.
 `no_launcher.absent_entries` must include `<root>/libexec/swarma-user-launcher`.
 `service_roots` must include `/etc/systemd/system`, `/run/systemd/system` and
 `/usr/lib/systemd/system`, plus every other load path in the reviewed deployment.
-Their complete pinned entries and file bytes must contain no launcher reference.
+At each initial `qualify` and `qualify --boot`, every listed root is scanned live
+through protected, descriptor-relative, no-follow reads. Entry names, inert
+symlink targets and regular-file contents must not contain
+`swarma-user-launcher` (which also detects `<root>/libexec/swarma-user-launcher`).
+Links are never followed, so ordinary masks and non-launcher dangling links may
+remain. Absent roots require an actual missing component beneath a protected
+existing ancestor; unreadable or unsafe ancestors are not absence. Unreadable or
+unsafe entries, unsupported types, cancellation and entry/depth/time exhaustion
+refuse; file reads retain the existing 8 MiB bound. A clean session scope appearing
+or disappearing, regenerated generator file or upgraded unrelated unit does not
+change the qualification pin. The scan result is neither retained nor hashed
+into `station-qualification-inputs/1`.
+
+`absent_entries` remains a pinned list of required absences, checked during
+issuance and every local guard check. The guard also keeps the protected unit
+configuration checks, but does not rescan service trees under the core lock:
+repeated scans add filesystem work, while a new unit reference cannot execute
+the absent protected launcher binary. Root writers must still obey deployment
+exclusion; an arbitrary hostile root is outside that guarantee.
 `configuration` is a nonempty list of reviewed protected configuration file pins.
 The pinned qualification unit must specify root, oneshot, exact absolute
 `ExecStart=<root>/libexec/swarma-user-manager qualify --boot` and the landed
@@ -647,7 +686,9 @@ service profile: `RestrictAddressFamilies=AF_UNIX`, `IPAddressDeny=any` and
 `SystemCallFilter=~io_uring_setup io_uring_enter io_uring_register`. Private network,
 IPC or temporary-file namespaces must not hide host inventory. Missing, duplicate,
 changed or extra service directives refuse; unit/drop-in load scope and ordering
-also remain part of the protected deployment review and pins.
+remain part of the protected deployment review. The qualification unit's bytes
+remain pinned in `configuration` and `backend_files`; other service-tree bytes
+are not pinned by `service_roots`.
 
 `inventory` contains `format:"local-v0-reviewed-host-scope/1"`, `files` (nonempty
 sorted outside-home roots), `shm`, `mqueue`, `cron`, `system_cron`, `at`, `linger`,
@@ -729,6 +770,10 @@ Review its exact contents against the [landed closure contract](#systemd-userdb-
   optional. DropIn, custom, missing and extra endpoints refuse. Record each
   provider's actual implementation/configuration digests and exact forwarding
   contributors, and retain all reviewed HTTPS range-source documents locally.
+  Supply provider configuration as typed `{kind,path}` entries, including all
+  systemd manager configuration/drop-in paths listed above. A present drop-in
+  directory pins its whole tree; an absent one needs a protected existing parent.
+  Manager configuration changes still require review and repinning.
 - Record DynamicUser UID/GID ranges exactly `[61184,65519]`, synthesis exactly
   `[0,0]` and `[65534,65534]`, and complete reviewed Home/Machine UID/GID ranges
   including explicit/migrated identities and container mappings. Bridges have
@@ -747,7 +792,12 @@ Provider failures, unknown records, closure mismatch and missing files refuse.
    Install [deploy/systemd/qualify-consumer.conf](../deploy/systemd/qualify-consumer.conf)
    as root:root 0644 at `/etc/systemd/system/<consumer>.service.d/10-qualification.conf`
    for every service that can invoke the manager. Review every effective unit/drop-in
-   load path; consumers must both require and order after the qualifier.
+   load path; consumers must both require and order after the qualifier. List every
+   reviewed system unit load path as a path string in `no_launcher.service_roots`,
+   including transient, generator and control directories even when absent, as
+   well as the three mandatory `/etc`, `/run` and `/usr/lib` system unit roots.
+   Do not capture service-tree digests or presence states. Retain the launcher
+   binary's `absent_entries` declaration and the qualification unit file pins.
    Install all pinned artifacts, complete inventory profile and skeleton controls;
    install the closed root:root 0600 deployment manifest at
    `/opt/swarma/etc/user-manager-deployment.json`. Prepare the existing journal
@@ -764,7 +814,10 @@ Provider failures, unknown records, closure mismatch and missing files refuse.
    using the current kernel boot UUID. Hold this operator exclusion until admission resumes.
 4. Run `/usr/bin/env -i /opt/swarma/libexec/swarma-user-manager qualify` from the
    trusted root shell. Require exit 0 and one inputs digest; verify the protected
-   initial record and exact reviewed inputs. It cannot admit an account.
+   initial record and exact reviewed inputs. Each listed service root is scanned
+   live for launcher references; benign service-tree churn does not require repins.
+   Pinned binary/configuration/loader changes still require review and repinning.
+   It cannot admit an account.
 5. Atomically install policy P changing only `qualified:true` and
    `qualification_digest` to that digest, with file sync, rename and parent sync.
    Keep the marker and stopped admission. Run `systemctl daemon-reload`, then

@@ -3,6 +3,7 @@
 package linuxos
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -120,6 +121,12 @@ type TreeEntry struct {
 }
 
 func CaptureProtectedTree(ctx context.Context, d *Dir, l Limits) ([]TreeEntry, error) {
+	return captureProtectedTree(ctx, d, l, false)
+}
+
+// serviceScan checks the very bytes read through protected child descriptors,
+// instead of reopening captured paths. Its transient result is never a pin.
+func captureProtectedTree(ctx context.Context, d *Dir, l Limits, serviceScan bool) ([]TreeEntry, error) {
 	c, cancel, e := budget(ctx, l)
 	if e != nil {
 		return nil, e
@@ -156,6 +163,9 @@ func CaptureProtectedTree(ctx context.Context, d *Dir, l Limits) ([]TreeEntry, e
 				return refusal("qualification_failed", "tree_metadata", nil)
 			}
 			item := TreeEntry{Path: prefix + n}
+			if serviceScan && strings.Contains(item.Path, launcherName) {
+				return refusal("qualification_failed", "service_launcher_reference", nil)
+			}
 			switch s.Mode & unix.S_IFMT {
 			case unix.S_IFDIR:
 				item.Kind = "directory"
@@ -176,16 +186,22 @@ func CaptureProtectedTree(ctx context.Context, d *Dir, l Limits) ([]TreeEntry, e
 				if e != nil {
 					return e
 				}
-				sum := shaBytes(b)
-				item.Digest = sum
+				if serviceScan {
+					if bytes.Contains(b, []byte(launcherName)) {
+						return refusal("qualification_failed", "service_launcher_reference", nil)
+					}
+				} else {
+					item.Digest = shaBytes(b)
+				}
 			case unix.S_IFLNK:
 				item.Kind = "link"
-				buf := make([]byte, 4096)
-				k, e := unix.Readlinkat(int(root.f.Fd()), n, buf)
-				if e != nil || k == len(buf) {
-					return refusal("qualification_failed", "tree_link", e)
+				item.Target, e = protectedTreeLink(root, n, s)
+				if e != nil {
+					return e
 				}
-				item.Target = string(buf[:k])
+				if serviceScan && strings.Contains(item.Target, launcherName) {
+					return refusal("qualification_failed", "service_launcher_reference", nil)
+				}
 				if strings.IndexByte(item.Target, 0) >= 0 {
 					return refusal("qualification_failed", "tree_link", nil)
 				}
@@ -204,6 +220,35 @@ func CaptureProtectedTree(ctx context.Context, d *Dir, l Limits) ([]TreeEntry, e
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
 	return out, nil
+}
+
+// Read link text from a retained O_PATH descriptor, never by reopening a target.
+// Recheck the named link so observed replacement is unknown rather than clean.
+func protectedTreeLink(d *Dir, name string, initial unix.Stat_t) (text string, err error) {
+	f, e := child(d.f, name, unix.O_PATH, 0)
+	if e != nil {
+		return "", e
+	}
+	defer closed(f, &err)
+	now, e := descriptorStat(f)
+	if e != nil || !stableStat(initial, now) {
+		return "", refusal("path_changed", "tree_link", e)
+	}
+	buf := make([]byte, 4096)
+	k, e := unix.Readlinkat(int(f.Fd()), "", buf)
+	if e != nil || k == len(buf) {
+		return "", refusal("qualification_failed", "tree_link", e)
+	}
+	probe, e := child(d.f, name, unix.O_PATH, 0)
+	if e != nil {
+		return "", e
+	}
+	after, e := descriptorStat(probe)
+	e = errors.Join(e, probe.Close())
+	if e != nil || !stableStat(now, after) {
+		return "", refusal("path_changed", "tree_link", e)
+	}
+	return string(buf[:k]), nil
 }
 
 // ProtectedAbsent distinguishes a missing entry from an unreadable/unsafe parent.

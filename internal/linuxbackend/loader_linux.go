@@ -255,7 +255,7 @@ func (r reviewedFilesRuntime) localSystemdFingerprint(ctx context.Context, l lin
 		if e != nil {
 			return "", "", e
 		}
-		_, configuration, e := linuxos.CaptureConfigurationClosure(ctx, p.Configuration, l)
+		_, configuration, e := linuxos.CaptureProviderConfigurationClosure(ctx, p.Configuration, l)
 		if e != nil {
 			return "", "", e
 		}

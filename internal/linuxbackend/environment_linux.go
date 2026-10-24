@@ -242,7 +242,7 @@ func (h *ProductionEnvironment) localFingerprint(ctx context.Context, p manager.
 	if e = verifyFiles(ctx, []FilePin{m.Loader.Cache}); e != nil {
 		return deploymentFingerprint{}, e
 	}
-	if e = checkNoLauncher(ctx, m, l); e != nil {
+	if e = checkNoLauncherLocal(ctx, m); e != nil {
 		return deploymentFingerprint{}, e
 	}
 	etc, e := linuxos.OpenRoot("/etc")
@@ -305,7 +305,11 @@ func (h *ProductionEnvironment) localFingerprint(ctx context.Context, p manager.
 	}
 	return deploymentFingerprint{qualification.Hash(b), namespace}, nil
 }
-func checkNoLauncher(ctx context.Context, m DeploymentManifest, l linuxos.Limits) error {
+
+// checkNoLauncherLocal stays under the core lock: retained absence/configuration
+// pins only. Without the protected launcher binary, a new unit reference cannot
+// execute it. Full tree scans belong to issuance, not repeated guard checks.
+func checkNoLauncherLocal(ctx context.Context, m DeploymentManifest) error {
 	for _, path := range m.NoLauncher.AbsentEntries {
 		if linuxos.ProtectedAbsent(path) != nil {
 			return qualification.ErrRequired
@@ -318,21 +322,18 @@ func checkNoLauncher(ctx context.Context, m DeploymentManifest, l linuxos.Limits
 	if e := verifyFiles(ctx, m.NoLauncher.Configuration); e != nil {
 		return e
 	}
-	for _, pin := range m.NoLauncher.ServiceRoots {
-		entries, e := captureTree(ctx, pin, l)
-		if e != nil {
+	return nil
+}
+
+// Both initial and boot issuance reach this live check through CheckAll. Tree
+// observations grant no pinned inputs; only the reviewed root paths are bound.
+func checkNoLauncher(ctx context.Context, m DeploymentManifest, l linuxos.Limits) error {
+	if e := checkNoLauncherLocal(ctx, m); e != nil {
+		return e
+	}
+	for _, path := range m.NoLauncher.ServiceRoots {
+		if e := linuxos.CheckNoLauncherServices(ctx, path, l); e != nil {
 			return e
-		}
-		for _, entry := range entries {
-			if strings.Contains(entry.Path, "swarma-user-launcher") || strings.Contains(entry.Target, "swarma-user-launcher") {
-				return qualification.ErrRequired
-			}
-			if entry.Kind == "file" {
-				b, e := readPublic(ctx, filepath.Join(pin.Path, entry.Path))
-				if e != nil || strings.Contains(string(b), "swarma-user-launcher") {
-					return qualification.ErrRequired
-				}
-			}
 		}
 	}
 	return nil
@@ -409,9 +410,17 @@ func (h *ProductionEnvironment) systemdRuntime(ctx context.Context, p *SystemdPr
 		if e != nil {
 			return e
 		}
-		configuration, e := artifacts(provider.Configuration)
-		if e != nil {
-			return e
+		configuration := make([]linuxos.ProtectedConfiguration, 0, len(provider.Configuration))
+		for _, entry := range provider.Configuration {
+			// Keep the exact existing parent, including for absent leaves. Do
+			// not resolve links or demand a present regular-file artifact here.
+			d, e := linuxos.OpenRoot(filepath.Dir(entry.Path))
+			if e != nil {
+				return e
+			}
+			r.dirs = append(r.dirs, d)
+			a := linuxos.ProtectedArtifact{Directory: d, Name: filepath.Base(entry.Path), Path: entry.Path}
+			configuration = append(configuration, linuxos.ProtectedConfiguration{Kind: entry.Kind, Artifact: a})
 		}
 		out.Providers[provider.Name] = linuxos.UserDBProviderClosure{Implementation: implementation, Configuration: configuration, Resolver: r}
 	}

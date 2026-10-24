@@ -90,12 +90,12 @@ func newSystemdFixture(t *testing.T) *systemdFixture {
 		return ProtectedArtifact{f.artifacts, name, filepath.Join(root, "artifacts", name)}
 	}
 	resolver := closureResolverFixture{}
-	provider := UserDBProviderClosure{Implementation: []ProtectedArtifact{a("library.so")}, Configuration: []ProtectedArtifact{a("provider.conf")}, Resolver: resolver}
+	provider := UserDBProviderClosure{Implementation: []ProtectedArtifact{a("library.so")}, Configuration: []ProtectedConfiguration{{Kind: "file", Artifact: a("provider.conf")}}, Resolver: resolver}
 	_, impl, e := CaptureImplementationClosure(context.Background(), provider.Implementation, resolver, testLimits())
 	if e != nil {
 		t.Fatal(e)
 	}
-	_, config, e := CaptureConfigurationClosure(context.Background(), provider.Configuration, testLimits())
+	_, config, e := CaptureProviderConfigurationClosure(context.Background(), provider.Configuration, testLimits())
 	if e != nil {
 		t.Fatal(e)
 	}

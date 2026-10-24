@@ -29,6 +29,12 @@ func TestQualificationSystemdNamespaceBinding(t *testing.T) {
 	runQualificationSystemdFixture(t, "TestQualificationSystemdNamespaceBinding")
 }
 
+// Provider configuration absence/tree pins are rechecked by both the real full
+// runtime and the production local fingerprint, without local provider RPCs.
+func TestQualificationSystemdConfigurationPins(t *testing.T) {
+	runQualificationSystemdFixture(t, "TestQualificationSystemdConfigurationPins")
+}
+
 func runQualificationSystemdFixture(t *testing.T, name string) {
 	t.Helper()
 	dir, e := os.Getwd()
@@ -36,11 +42,12 @@ func runQualificationSystemdFixture(t *testing.T, name string) {
 		t.Fatal(e)
 	}
 	overlay := struct{ Replace map[string]string }{map[string]string{
-		filepath.Join(dir, "../linuxos/qualification_systemd_binding_test.go"):  filepath.Join(dir, "testdata/systemd_binding.go"),
-		filepath.Join(dir, "qualification_systemd_fixture.go"):                  filepath.Join(dir, "testdata/systemd_adapter.go"),
-		filepath.Join(dir, "../linuxos/qualification_systemd_fixture_test.go"):  filepath.Join(dir, "testdata/systemd_fixture.go"),
-		filepath.Join(dir, "../linuxos/qualification_systemd_external_test.go"): filepath.Join(dir, "testdata/systemd_external.go"),
-		filepath.Join(dir, "../linuxos/review_systemd_guard_test.go"):           filepath.Join(dir, "testdata/review_systemd_guard_test.go"),
+		filepath.Join(dir, "../linuxos/qualification_systemd_configuration_test.go"): filepath.Join(dir, "testdata/systemd_configuration.go"),
+		filepath.Join(dir, "../linuxos/qualification_systemd_binding_test.go"):       filepath.Join(dir, "testdata/systemd_binding.go"),
+		filepath.Join(dir, "qualification_systemd_fixture.go"):                       filepath.Join(dir, "testdata/systemd_adapter.go"),
+		filepath.Join(dir, "../linuxos/qualification_systemd_fixture_test.go"):       filepath.Join(dir, "testdata/systemd_fixture.go"),
+		filepath.Join(dir, "../linuxos/qualification_systemd_external_test.go"):      filepath.Join(dir, "testdata/systemd_external.go"),
+		filepath.Join(dir, "../linuxos/review_systemd_guard_test.go"):                filepath.Join(dir, "testdata/review_systemd_guard_test.go"),
 	}}
 	b, e := json.Marshal(overlay)
 	if e != nil {

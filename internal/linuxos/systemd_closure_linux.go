@@ -59,7 +59,7 @@ type SystemdClosureManifest struct {
 }
 type UserDBProviderClosure struct {
 	Implementation []ProtectedArtifact
-	Configuration  []ProtectedArtifact
+	Configuration  []ProtectedConfiguration
 	Resolver       ELFResolver
 }
 
@@ -410,7 +410,7 @@ func (r *SystemdNSSRuntime) captureSystemd(ctx context.Context, l Limits) (NSSMo
 		if e != nil || impl != s.ImplementationDigest {
 			return fail(e)
 		}
-		_, config, e := CaptureConfigurationClosure(ctx, provider.Configuration, l)
+		_, config, e := CaptureProviderConfigurationClosure(ctx, provider.Configuration, l)
 		if e != nil || config != s.ConfigurationDigest {
 			return fail(e)
 		}
