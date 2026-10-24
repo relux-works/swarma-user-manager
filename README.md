@@ -5,7 +5,7 @@ Two minimal privileged components for agent systems. Each runs as root for one o
 - **swarma-user-manager** creates, lists and retires per-agent, per-service and qualified workplace OS accounts, owns the static UID-range default deny from v0, and (v1) narrows trusted agents to their bound model-provider proxy and workplaces to zero egress;
 - **swarma-user-launcher** starts one approved executor under one active agent or qualified workplace account, so that an unprivileged dispatcher can run an agent as that account without general `sudo` rights.
 
-**Status: design in progress.** Accepted architecture-review findings (2026-10-13) are reflected in draft v0.13 and its figures; publication/qualification gates remain open. The [generation journal format `gen-journal/1`](spec/generation-journal.md), vectors and Linux offline checker are published here; the station core and its injected-backend tests are implemented, while real OS account backends and production consumer adapters remain unqualified. The helper specification is [`spec/helper.md`](spec/helper.md); diagrams are in [`diagrams/`](diagrams/).
+**Status: design in progress.** Accepted architecture-review findings (2026-10-13) are reflected in draft v0.15 and its figures; publication/qualification gates remain open. The [generation journal format `gen-journal/1`](spec/generation-journal.md), vectors and Linux offline checker are published here; the station core and its injected-backend tests are implemented, and standalone [Linux station primitives](internal/linuxos/README.md) are available for backend integration. Real OS account backends and production consumer adapters remain unqualified. The helper specification is [`spec/helper.md`](spec/helper.md); diagrams are in [`diagrams/`](diagrams/).
 
 ## Principles
 
@@ -96,3 +96,14 @@ or backend access until the Keymaker provision/confirm contract is accepted.
 |---|---|---|---|
 | Station core build | Build the bounded one-request entrypoint | `go build -o .temp/swarma-user-manager ./cmd/swarma-user-manager` | Binary in `.temp/`; closed result JSON on stdout |
 | Core/backend tests | Fake lifecycle, protected disk evidence, invocation and native journal integration | `go test ./internal/manager ./cmd/swarma-user-manager ./tools/genjournal -count=1` | Named test verdicts; isolated Go temporary fixtures |
+
+## Linux station tools
+
+The standalone [Linux package](internal/linuxos/README.md) implements station
+mechanisms; its caller still owns journal authority, fences and activation.
+
+| Tool | Purpose | Command / entry point | Output |
+|---|---|---|---|
+| Go | Compile Linux primitives | `go build ./internal/linuxos` | Compiler verdict |
+| Go, Python 3, existing sudo peer access | Narrow positive/negative primitive and disposable peer fixtures | `GOMAXPROCS=2 go test -p 1 ./internal/linuxos -count=1 -v -timeout=45s` | Named test results; temporary fixtures cleaned by exact path/PID |
+| Shell/Python 3 | Proposed owner-run root qualification, pending execution | `sh internal/linuxos/root-qualification.sh apply ABS_TEST_BINARY APPROVED_SHA`; `verify`; `rollback` | Guarded disposable fixture under `/var/lib/swarma-linuxos-qualification`; prerequisites in the package README |
