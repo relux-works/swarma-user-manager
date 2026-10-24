@@ -55,6 +55,23 @@ PlantUML sources map the current [specification](spec/helper.md#appendix-b-diagr
 
 Apache License 2.0 — see [LICENSE](LICENSE) and [NOTICE](NOTICE).
 
+## macOS station backend specification
+
+The [macOS station draft](spec/stations-macos-v0.md) maps the shared account,
+managed-home, create/retire, journal and qualification guarantees to a proposed
+macOS backend. It includes the [Verified platform tools matrix](spec/stations-macos-v0.md#9-verified-platform-tools),
+with every macOS row PENDING-VERIFY, and root-qualification obligations marked PENDING-HOST. It delivers no
+backend code or permission to run that plan. Linux behavior remains unchanged;
+production bump stays closed pending the shared Keymaker contract.
+
+The [read-only host questions](spec/stations-macos-facts.md) give exact candidate
+commands, tool purposes, synopsis prerequisites, output bounds and evidence
+limits for the requested OS/build. Run each query only on the designated macOS
+host as an ordinary user after local syntax verification; retain stdout/stderr,
+exit codes and raw metadata in private task artifacts. The existing hosted root
+probe does not qualify that host. Open decisions are recorded in
+[the unresolved register](UNRESOLVED_QUESTIONS.md#macos-station-backend-gates).
+
 ## Generation journal tools
 
 Linux and Go 1.26 or later are required. The Go module pins the format owner's

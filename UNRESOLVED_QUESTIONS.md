@@ -122,3 +122,20 @@ The actual loader ABI/search closure, full inventory roots, effective
 unit/drop-in load scope and exclusion of other root writers require owner review;
 missing facts refuse. Unsupported cron-owner resolution also remains refusal.
 These gates do not resolve Keymaker bump admission or cleanup authority.
+
+## macOS station backend gates
+
+The [macOS draft](spec/stations-macos-v0.md) preserves shared lifecycle and
+journal guarantees; it does not qualify an OS adapter. All macOS platform-tool
+rows remain PENDING-VERIFY. [Read-only questions](spec/stations-macos-facts.md)
+collect facts without authorizing account mutation or root fixtures.
+
+| Gate | Open decision/evidence | Safe state |
+|---|---|---|
+| M1 — Directory sources | Local/synthetic provider allowlist, remote/mobile/SSO policy and implicit group semantics | Unknown provider or membership refuses qualification |
+| M2 — Home/storage | Platform root, APFS ownership/case/alias profile, ACL-free feasibility and explicit `com.apple.*`/other metadata policy; root/TCC visibility bounds | No protected-home or complete-inventory claim |
+| M3 — Shared qualification binding | Typed OpenDirectory/dyld/boot/launchd fields and authenticated successful-latest-invocation proof in the shared protocol | Linux fields unchanged; no fabricated systemd values or macOS issuer |
+| M4 — Stop and inventory | Complete process/respawn exclusion, per-user temp mapping, schedulers, sockets and IPC/Mach/other provider scope | No deletion/reuse on unknown evidence; production bump stays closed |
+| M5 — Journal/durability | Native locking, descriptor protection, APFS sync/power-loss bounds and independent restore custody | Shared bytes retained; no production macOS writer/consumer claim |
+| M6 — Key/root/network gates | Shared Keymaker pre-active provision/confirm contract, separately authorized disposable root tests and qualified static UID-range deny provider | Read-only facts only; no mutation, activation or token-policy changes |
+| M7 — Authentic updates | Approved OS/package publisher and target policy, active seal/Cryptex verification, automatic maintenance/pin authority, failure/rollback semantics | No automatic requalification after unverifiable updates; admission closed |
