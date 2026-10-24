@@ -501,7 +501,7 @@ introduced. Changes require initial qualification and a new pin.
 | `nss_helper` | Exactly `<root>/libexec/swarma-nss-probe`; the reviewed protected native collector. |
 | `nss_library` | Canonical absolute path to the actual reviewed NSS files exporter, including libc on platforms where it exports these functions. A compatibility stub is insufficient. |
 | `systemd` | Optional closed reviewed capabilities `{library,providers,sources}` described below; mandatory when NSS selects systemd. |
-| `loader` | Closed object `{format,cache,search_roots,resolutions,configuration}` detailed below. |
+| `loader` | Closed object `{format,cache,default_directories,resolutions,configuration}` detailed below. |
 | `skeleton` | Protected absolute path to the closed skeleton document below. |
 | `no_launcher` | Closed object `{absent_entries,service_roots,configuration}` detailed below. |
 | `inventory` | Closed complete host-scope profile detailed below. |
@@ -522,7 +522,8 @@ The same reviewed loader resolves every provider's ELF dependencies. Changes to
 these mappings change the existing `backend_digest`; no Q/I member is added.
 
 Paths are clean absolute paths. Arrays are explicit, sorted and unique by path
-(or resolution name). File pins contain SHA-256 of exact protected file bytes.
+(or resolution key). Loader search arrays instead retain lookup order. File pins
+contain SHA-256 of exact protected file bytes.
 A tree pin is `{path,state,digest}`, with state `present` or `absent`. Present
 pins hash CCJ-1 of the entire sorted tree of `{path,kind,digest,target}` entries:
 relative paths; kinds `directory`, `file`, `link`; file content digests; inert
@@ -530,19 +531,68 @@ symlink text; empty unused fields. Links do not grant permission to follow their
 target. Absent pins hash CCJ-1 `{"state":"absent"}` and require a protected
 existing parent plus actual leaf ENOENT. An unreadable or missing parent refuses.
 
-`loader.format` is `glibc-cache-closure/1`. `cache` pins `/etc/ld.so.cache`;
-`search_roots` pins every reviewed loader search tree; `configuration` pins the
-reviewed loader configuration files (explicit empty array allowed).
-`resolutions` is a nonempty sorted list of `{name,path}` for every interpreter
-and dependency. Resolution validates protected canonical link targets and exact
-cache selection, then captures the complete ELF loader dependency closure for
-the NSS helper/library and fixed backend programs. Only the reviewed new-format
-little-endian glibc cache with the current amd64/arm64 libc6 ABI flags and zero
-legacy OS-version field is supported. Missing/ambiguous entries, hwcap-dependent
-selection, `glibc-hwcaps` trees, `/etc/ld.so.preload`, unsupported dynamic loader
-tags and incomplete search scope refuse. The operator must review cache ABI,
-architecture, default search directories and loader configuration as one complete
-profile; a few accessible library directories are insufficient evidence.
+`loader.format` remains `glibc-cache-closure/1`; the closed, not-yet-deployed
+`station-deployment/1` schema changes in place. `cache` pins `/etc/ld.so.cache`.
+`default_directories` is a nonempty ordered, unique list (at most 32) of clean
+absolute paths, explicitly reviewed against the deployed loader's compiled
+search defaults. No directory list is inferred from the host. `configuration`
+pins reviewed loader configuration files (explicit empty array allowed).
+Complete loader search trees are no longer captured.
+
+`resolutions` is a nonempty list of `{name,runpath,path,locations}`. Its unique
+sort key is `name`, NUL, then the NUL-joined `runpath` entries. `name` is a SONAME
+or clean absolute interpreter/dependency path; `runpath` is the requesting
+object's ordered absolute RUNPATH (explicit `[]` for no RUNPATH or an absolute
+name). Equal name/scope pairs share evidence; the carrying object's own bytes
+remain in the implementation closure. `path` is the selected canonical path.
+Conflicting canonical selections for one needed name within a closure refuse.
+
+Each ordered `locations` entry is the closed object
+`{kind,path,state,resolved,links,digest}`:
+
+| Field | Meaning |
+|---|---|
+| `kind` | `hwcaps`, `runpath`, `cache`, `default` or `absolute`. |
+| `path` | Exact candidate probed, or `/etc/ld.so.cache` for a cache miss. |
+| `state` | `absent`, `present` (the final hit), or `miss` (cache only). |
+| `resolved` | Canonical hit, first missing component proved by protected parent + ENOENT, or empty for cache miss. Missing deeper ancestors are recorded at that first component. |
+| `links` | Ordered `{path,target}` protected symlink chain, including parent aliases; explicit `[]` if none. |
+| `digest` | SHA-256 of the selected file, pinned cache digest for a cache miss, or empty for absence. |
+
+Search order with the product's empty environment is the requesting object's
+RUNPATH, cache, then reviewed defaults on a genuine cache miss. Each RUNPATH or
+default directory first requires protected absence of its `glibc-hwcaps` child;
+**any existing child refuses**, including an empty directory. This bounds every
+ABI/CPU level without guessing hardware state. Selected cache entries with
+hwcap-dependent selection remain refused. A stale cache target also refuses
+rather than attempting unsupported cache-target failure fallback.
+
+RUNPATH has at most 32 clean absolute entries, with no `$` tokens, relative paths,
+empty elements or noncanonical spelling. Repeated directory spellings collapse to their first occurrence, as glibc does.
+RUNPATH is never inherited by dependencies.
+`DT_RPATH`, `DT_FILTER`, `DT_AUXILIARY`, `DT_AUDIT`, `DT_DEPAUDIT` and
+`DF_1_NODEFLIB` refuse. Program-header dynamic/string mappings remain authoritative;
+section decoys and mismatches refuse. ELF objects must match the reviewed native
+64-bit little-endian amd64/arm64 ABI. Only the reviewed new-format little-endian
+cache with matching libc6 ABI flags and zero legacy OS-version field is supported;
+unknown formats, ambiguous choices and `/etc/ld.so.preload` refuse.
+
+Every lookup is reconstructed and compared with all stored locations, links and
+bytes during resolver construction and dependency traversal. The local guard
+uses that same resolver without provider RPC. Planting a same-name object in an
+earlier location or retargeting a link changes evidence and refuses. Unrelated
+members' metadata and sizes are irrelevant. Actual closure members require
+protected root ownership, single links, no group/other write permissions and no
+ACLs or file capabilities. Hashing streams 64 KiB chunks with **64 MiB per file
+and 256 MiB per closure**; each resolver also caps aggregate selected-file hashing
+at **256 MiB**, including revalidation. Exhaustion refuses without partial closure
+evidence. Configuration/document reads keep their existing smaller limits.
+
+Source basis: glibc 2.42 [`_dl_map_object` search order](https://github.com/bminor/glibc/blob/glibc-2.42/elf/dl-load.c),
+[`_dl_important_hwcaps` directory expansion](https://github.com/bminor/glibc/blob/glibc-2.42/elf/dl-hwcaps.c)
+and [cache ABI/hwcaps selection](https://github.com/bminor/glibc/blob/glibc-2.42/elf/dl-cache.c).
+The operator reviews loader bytes, ABI, compiled defaults and configuration as
+one complete profile. Accessible library directories alone grant no authority.
 
 `no_launcher.absent_entries` must include `<root>/libexec/swarma-user-launcher`.
 `service_roots` must include `/etc/systemd/system`, `/run/systemd/system` and

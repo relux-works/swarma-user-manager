@@ -81,15 +81,25 @@ type FilePin struct {
 	Digest string `json:"digest"`
 }
 type ELFResolution struct {
-	Name string `json:"name"`
-	Path string `json:"path"`
+	Name      string              `json:"name"`
+	Runpath   []string            `json:"runpath"`
+	Path      string              `json:"path"`
+	Locations []ELFSearchLocation `json:"locations"`
+}
+type ELFSearchLocation struct {
+	Kind     string             `json:"kind"`
+	Path     string             `json:"path"`
+	State    string             `json:"state"`
+	Resolved string             `json:"resolved"`
+	Links    []linuxos.PathLink `json:"links"`
+	Digest   string             `json:"digest"`
 }
 type LoaderProfile struct {
-	Format        string          `json:"format"`
-	Cache         FilePin         `json:"cache"`
-	SearchRoots   []TreePin       `json:"search_roots"`
-	Resolutions   []ELFResolution `json:"resolutions"`
-	Configuration []FilePin       `json:"configuration"`
+	Format             string          `json:"format"`
+	Cache              FilePin         `json:"cache"`
+	DefaultDirectories []string        `json:"default_directories"`
+	Resolutions        []ELFResolution `json:"resolutions"`
+	Configuration      []FilePin       `json:"configuration"`
 }
 type NoLauncherProfile struct {
 	AbsentEntries []string  `json:"absent_entries"`
@@ -176,13 +186,8 @@ func (m DeploymentManifest) validate(p manager.Policy) error {
 		}
 	}
 	l := m.Loader
-	if l.Format != "glibc-cache-closure/1" || l.Cache.Path != "/etc/ld.so.cache" || !hash(l.Cache.Digest) || !treePins(l.SearchRoots) || !filePins(l.Configuration, false) || len(l.Resolutions) == 0 || len(l.Resolutions) > int(p.Limits.DeleteEntries) {
+	if !validLoaderProfile(l, int(p.Limits.DeleteEntries)) {
 		return qualification.ErrRequired
-	}
-	for j, r := range l.Resolutions {
-		if r.Name == "" || strings.ContainsAny(r.Name, "\x00\n") || !absolute(r.Path) || j > 0 && l.Resolutions[j-1].Name >= r.Name {
-			return qualification.ErrRequired
-		}
 	}
 	n := m.NoLauncher
 	if !paths(n.AbsentEntries, true) || !treePins(n.ServiceRoots) || !filePins(n.Configuration, true) {

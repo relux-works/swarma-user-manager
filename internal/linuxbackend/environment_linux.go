@@ -242,11 +242,6 @@ func (h *ProductionEnvironment) localFingerprint(ctx context.Context, p manager.
 	if e = verifyFiles(ctx, []FilePin{m.Loader.Cache}); e != nil {
 		return deploymentFingerprint{}, e
 	}
-	for _, pin := range m.Loader.SearchRoots {
-		if _, e = captureTree(ctx, pin, l); e != nil {
-			return deploymentFingerprint{}, e
-		}
-	}
 	if e = checkNoLauncher(ctx, m, l); e != nil {
 		return deploymentFingerprint{}, e
 	}

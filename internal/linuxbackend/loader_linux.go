@@ -5,7 +5,6 @@ package linuxbackend
 import (
 	"context"
 	"encoding/binary"
-	"path/filepath"
 	"runtime"
 	"sort"
 	"strings"
@@ -15,55 +14,24 @@ import (
 )
 
 type deploymentResolver struct {
-	profile LoaderProfile
-	cache   []byte
-	dirs    []*linuxos.Dir
+	profile   LoaderProfile
+	cache     []byte
+	dirs      []*linuxos.Dir
+	reader    linuxos.PathReader
+	remaining int64
 }
 
 func (r *deploymentResolver) Close() { _ = closeDirs(r.dirs) }
 func (r *deploymentResolver) artifact(ctx context.Context, path string) (linuxos.ProtectedArtifact, error) {
-	resolved, e := linuxos.ResolveProtectedPath(ctx, path)
-	if e != nil || resolved != path {
+	probe, e := r.reader.Probe(ctx, path)
+	if e != nil || probe.AbsentAt != "" || probe.Resolved != path {
 		return linuxos.ProtectedArtifact{}, qualification.ErrRequired
 	}
-	d, e := linuxos.OpenRoot(filepath.Dir(path))
-	if e != nil {
-		return linuxos.ProtectedArtifact{}, e
+	a, e := r.reader.OpenArtifact(ctx, path)
+	if e == nil {
+		r.dirs = append(r.dirs, a.Directory)
 	}
-	r.dirs = append(r.dirs, d)
-	return linuxos.ProtectedArtifact{Directory: d, Name: filepath.Base(path), Path: path}, nil
-}
-func (r *deploymentResolver) ResolveELF(ctx context.Context, name string) (linuxos.ProtectedArtifact, error) {
-	expected := ""
-	for _, v := range r.profile.Resolutions {
-		if v.Name == name {
-			expected = v.Path
-			break
-		}
-	}
-	if expected == "" {
-		return linuxos.ProtectedArtifact{}, qualification.ErrRequired
-	}
-	var actual string
-	var e error
-	if filepath.IsAbs(name) {
-		actual, e = linuxos.ResolveProtectedPath(ctx, name)
-	} else {
-		actual, e = cacheResolve(r.cache, name)
-		if e == nil {
-			actual, e = linuxos.ResolveProtectedPath(ctx, actual)
-		}
-	}
-	covered := false
-	for _, root := range r.profile.SearchRoots {
-		if root.State == "present" && (filepath.Dir(expected) == root.Path || strings.HasPrefix(filepath.Dir(expected), root.Path+"/")) {
-			covered = true
-		}
-	}
-	if e != nil || actual != expected || !covered {
-		return linuxos.ProtectedArtifact{}, qualification.ErrRequired
-	}
-	return r.artifact(ctx, expected)
+	return a, e
 }
 
 // This deliberately bounded glibc cache profile admits one unambiguous path
@@ -110,7 +78,7 @@ func cacheResolve(b []byte, name string) (string, error) {
 		found = v
 	}
 	if found == "" {
-		return "", qualification.ErrRequired
+		return "", errCacheMiss
 	}
 	return found, nil
 }
@@ -138,20 +106,15 @@ func newResolver(ctx context.Context, m DeploymentManifest, l linuxos.Limits) (*
 	if e = verifyFiles(ctx, m.Loader.Configuration); e != nil {
 		return nil, e
 	}
-	for _, p := range m.Loader.SearchRoots {
-		entries, e := captureTree(ctx, p, l)
-		if e != nil {
-			return nil, e
-		}
-		for _, v := range entries {
-			for _, part := range strings.Split(v.Path, "/") {
-				if part == "glibc-hwcaps" {
-					return nil, qualification.ErrRequired
-				}
-			}
-		}
+	if !validLoaderProfile(m.Loader, l.Entries) {
+		return nil, qualification.ErrRequired
 	}
-	return &deploymentResolver{profile: m.Loader, cache: b}, nil
+	r := &deploymentResolver{profile: m.Loader, cache: b, remaining: linuxos.ImplementationTotalBytes}
+	if e = r.revalidate(ctx); e != nil {
+		r.Close()
+		return nil, e
+	}
+	return r, nil
 }
 
 type reviewedFilesRuntime struct {
