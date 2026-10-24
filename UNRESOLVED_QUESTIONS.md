@@ -37,11 +37,16 @@ persistent identity.
 
 ## Core implementation deployment gates
 
-The [Go core contract](docs/station-core.md) publishes the private effect-store
-v1 encoding and backend interface. The proposed
+The [Go core contract](docs/station-core.md) implements closed v2 storage,
+immutable intent/receipt histories, per-effect unlocked flights, current
+versioned authority checks and exact restoration boundary types. The
 [v2 OS receipt contract](spec/station-effect-receipts.md#8-implementation-and-review-gates)
-requires core changes: the existing private effect lock spans backend calls,
-and v1 contains no OS-object receipts. Production still requires the Linux backend,
+still requires Linux/backend qualification, maintenance incident reconciliation
+and reviewed nonempty-v1 provenance migration. The gated maintenance API accepts
+only approved empty genesis and preserves its original bytes. The concrete
+protected operator consent/broker-obligation encodings are implemented at the
+issuer boundary; authenticated issuance and root installation remain pending.
+Production still requires the Linux backend,
 qualified sudo/service-identity adapter, authoritative cleanup admission,
 authenticated exact-pair Keymaker re-admission/binding receipts with a pinned
 activation guard, and external restore/migration custody. Production bump is

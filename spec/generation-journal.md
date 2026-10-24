@@ -295,6 +295,7 @@ ignored even if it contains a verified prefix.
 | `journal_create`, `journal_append`, `journal_sync` | Exclusive create, one-write append, or durability failed |
 | `journal_station_range`, `journal_entropy` | Manual input outside configured range or random generation failed |
 | `journal_intent_required`, `journal_genesis_in_use` | Missing write fence or unsafe genesis rollback |
+| `journal_stale_preparation` | In-process `AppendPrepared` observed a different exact tail under exclusive gate/data exclusion; preserve the pending marker and re-prepare after qualified reconciliation. An ancestor remains valid for ordinary recovery APIs. |
 | `journal_usage` | Invalid CLI invocation |
 
 The consumer MUST also refuse uncertain restore authorization, damaged floor

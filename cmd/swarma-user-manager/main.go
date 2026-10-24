@@ -58,7 +58,7 @@ func run() int {
 	}
 	p, e := manager.LoadPolicy()
 	if e != nil {
-		_ = json.NewEncoder(os.Stdout).Encode(manager.PublicRefusal(raw, "state_unavailable"))
+		_ = json.NewEncoder(os.Stdout).Encode(manager.PublicRefusal(raw, "qualification_required"))
 		return 1
 	}
 	store, e := manager.OpenStore(p.Root + "/lib/user-manager/journal")
@@ -67,7 +67,12 @@ func run() int {
 		return 1
 	}
 	defer store.Close()
-	engine = manager.Engine{Policy: p, Authority: manager.FileAuthority{Root: p.Root}, Store: store, Journal: manager.NativeJournal{Path: p.Root + "/lib/user-manager/generations"}}
+	boot, e := manager.BootIdentity()
+	if e != nil {
+		_ = json.NewEncoder(os.Stdout).Encode(manager.PublicRefusal(raw, "qualification_required"))
+		return 1
+	}
+	engine = manager.Engine{BootID: boot, Operator: manager.FileOperatorVerifier{Root: p.Root}, Policy: p, Authority: manager.FileAuthority{Root: p.Root}, Store: store, Journal: manager.NativeJournal{Path: p.Root + "/lib/user-manager/generations"}}
 	// No Linux backend is linked in this core slice. Missing qualification refuses
 	// before any new effect or account mutation; an existing terminal effect can replay.
 	r := engine.Handle(context.Background(), raw, in)

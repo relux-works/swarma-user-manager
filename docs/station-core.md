@@ -1,230 +1,206 @@
 # Station user-manager core
 
-This is the Go core of [station accounts v0](../spec/stations-v0.md), sections
-2–8, using the landed [generation journal](../spec/generation-journal.md).
-It does not include a Linux account backend, installer, cleanup-admission
-adapter, Keymaker provisioning adapter or station launcher. The binary refuses
-new create/retire work as `qualification_required` without a backend; bump
-refuses `bump_key_admission_unconfirmed` at its closed deployment gate. No root execution or
-production activation is qualified by the fake-backend tests.
+The Go core implements the lifecycle, protected effect storage and scheduling
+side of [station effect receipts](../spec/station-effect-receipts.md). It links
+no real Linux account backend. New production provisioning remains closed,
+and production `user.bump` always returns `bump_key_admission_unconfirmed`.
+The deterministic fake backend qualifies core decisions, not Linux account,
+process, inventory, persistence-denial or root installation behavior.
 
-## Invocation and authority
+## Invocation and policy
 
-Build with `go build -o <output>/swarma-user-manager ./cmd/swarma-user-manager`.
-The entrypoint accepts no arguments and reads one document, at most 16 KiB,
-with a five-second intake deadline. The representation is a CCJ-1 canonical
-object, optionally followed by one LF. Extra whitespace, reordered members,
-duplicate members at any depth, trailing documents and embedded NUL refuse.
-This implementation deliberately applies the task's stricter canonical intake;
-section 3's structural argument identity still determines replay/conflicts.
-The explanatory JSON in the station spec must be canonicalized with the pinned
-registrar CCJ package before submission; no second canonicalizer is supplied.
+The helper accepts no arguments and one CCJ-1 canonical request (optional final
+LF), at most 16 KiB, with a five-second intake deadline. It snapshots verified
+sudo provenance before clearing the environment, changes to `/`, sets umask
+077 and a fixed PATH. The protected caller record must match all configured
+UID/principal/service-generation/role fields. Names and NSS presence cannot
+supply caller authority. `FileAuthority.Pin` supplies bounded local caller
+checks through unlocked execution and final append; another Authority must
+implement `CallerPinner`, otherwise mutation refuses.
 
-The fixed policy path is `/opt/swarma/etc/user-manager.json`, root-owned 0600,
-with protected root-owned ancestors. There is no path flag or environment
-configuration. Before clearing the environment, the invocation boundary checks
-EUID/real UID zero, decimal nonzero `SUDO_UID`, and the root-owned current parent
-sudo executable using `/proc` and inode comparison with the protected
-`/usr/bin/sudo` or `/usr/bin/sudo-rs`. It then clears the environment, changes to
-`/`, sets umask 077 and a fixed PATH. No subprocess is launched here. Sudo
-transition behavior still needs distro/root qualification; an environment value
-alone never grants authority.
+`/opt/swarma/etc/user-manager.json` is the fixed policy path. The file must be
+root:root 0600, regular, single-link, without stored ACLs/capabilities, opened
+without following links under protected ancestors. Failure, including a false
+`qualified` flag, returns `qualification_required`.
 
-`FileAuthority` reads `<root>/lib/user-manager/callers/<uid>.json`, another
-root-owned 0600 closed canonical record with `uid`, `principal`, `generation`,
-and `role`. This is a prepared record maintained by the protected service
-identity authority, not inferred from NSS. All four fields must equal a
-configured dispatcher. That authority must rotate/remove its record before
-numeric UID reuse and fence superseded principals. Missing/stale/unreadable
-identity or a different generation refuses. Installing/qualifying that live
-identity adapter remains a deployment gate; the helper never mints it.
+The closed `station-policy/2` object retains the v1 root, ranges, quota, class,
+skeleton, bump flag, limits and callers. It additionally requires `qualified`,
+`qualification_digest`, `backend_digest`, `skeleton_digest`, positive `fence_epoch`, `sources` and
+`operators`. Digests are lowercase SHA-256. Each source selection is exactly
+`{purpose,source,version}`. All six purposes must be configured, without
+duplicates: `host_qualification`, `cleanup_admission`, `managed_content`,
+`persistence_denial`, `process_fence`, `activation_guard`. Each operator scope
+is `{principal,owners}` with explicit original-allocation principals.
 
-All policy fields are mandatory; unknown or omitted fields refuse. The closed
-`station-policy/1` record contains `format`, `root`, `uid_min`, `uid_max`,
-`gid_min`, `gid_max`, `quota`, `class`, `skeleton`, `bump_enabled`, `limits`,
-and `callers` (the closed caller records above). Only `class=trusted` may mutate.
-The root must be absolute and normalized. The root policy owns skeleton/release
-selection; caller paths, account numbers, commands and digests are forbidden.
+Limits have no deployment defaults. Existing finite operation, step, lock,
+entropy, allocation and deletion bounds remain mandatory. `record_bytes` is
+2048–65536 and `record_count` is 1–10000. Bounds are schema ceilings, not a
+claim that any chosen combination provides useful throughput. Deployment must
+qualify capacity/progress and local storage latency. Only `class=trusted`
+may mutate. Generation selection and quota remain bound to the exact original
+allocation lifetime, including retained failed bump reservations.
 
-`limits` requires `entropy_draws`, `allocation_probes`, `lock_ms`,
-`operation_ms`, `step_ms`, `grace_ms`, `quiet_ms`, `delete_entries`,
-`delete_depth` and `delete_work`. There are no numeric policy defaults. Values
-are positive and bounded by 86400000; step time cannot exceed operation time.
-Grace/quiet intervals must fit the step budget, and the UID/GID ranges must
-intersect. Allocation probes must cover the configured UID range. Entropy draws bound
-collision/zero-token retries. UID/GID selection uses the range intersection and
-persistent next-candidate cursor, checking both namespaces and backend hygiene.
-The quota counts live/reserved accounts once, including retained failed bumps.
-Old removed tombstones alone do not consume an account slot.
+## Durable v2 effects and evidence
 
-## Separate durable effects
-
-Installer-created private state is `<root>/lib/user-manager/journal/` (0700),
-with `effects.lock`, `effects.json`, and `ledger.json` (0600). Files are regular,
-single-link, root-owned; descriptor traversal rejects symlinks, unsafe modes,
-stored access/default ACLs, capabilities and unavailable access metadata.
-An installer may call `ProvisionStore` only for an empty protected private
-directory and an independently approved empty generation journal. The binary
-never initializes missing state. Interrupted provisioning is an incident;
-rerunning cannot overwrite partial evidence.
-
-`effects.json` is one canonical CCJ object, without LF:
+`<root>/lib/user-manager/journal/` is protected 0700; files are protected 0600.
+Installer-only `ProvisionStore` initializes only a verified empty directory.
+Normal requests never create missing evidence. The closed CCJ envelope is:
 
 ```text
-{format:"station-effects-store/1",sha256:H,state:S}
-H = lowercase SHA-256(CCJ(S))
-S = {format:"station-effects/1",floor:{seq,hash},cursor,effects:[...]}
+{format:"station-effects-store/2",sha256:H,state:S}
+H = SHA-256(CCJ(S))
+S = {format:"station-effects/2",floor:{seq,hash},cursor,revision,effects,os_records}
 ```
 
-The SHA detects accidental corruption, not malicious root or a coherent
-whole-machine rollback. Each effect has mandatory fields `owner`, `admitted_by`, `request`,
-`account`, `previous`, `phase`, `progress`, `batch`, `plan`, `failure`, `paused`,
-`terminal`, `result`. `owner` is the stable protected caller principal. `admitted_by` records the exact
-UID/principal/service generation/role at admission. Replay keys remain
-`(principal,request_id)` across explicitly authorized service-generation rotation;
-current caller generation must still match policy. Numeric UID reuse by another
-principal cannot acquire the old effects. `request` retains the validated closed request. `account` retains
-`uid,gid,username,home,generation`; `previous` is the old generation for bump
-and empty otherwise. `result` is the recorded operation result or null.
-`phase` is one of `reserved,provision,cleanup,reset,successor,rollback,terminal`.
-`progress` identifies the next idempotent backend step, `batch` distinguishes
-delete receipts, and `plan` is durable before an action. Result/target/request
-contradictions refuse. All effects and results remain; there is no sweep API.
-The hard file bound is 8 MiB; reaching it closes new persistence rather than
-truncating or forgetting request IDs. Capacity migration is not implemented.
+The specification defines each closed intent/flight/receipt/incident/resolution
+body and tagged object observation. Records have contiguous sequence numbers
+and an immutable CCJ hash chain. The store verifies a strictly increasing
+revision and immutable existing records, original effect identities, requests,
+operator acts and terminal effects before replacement. Missing, conflicting,
+unknown-version or malformed evidence refuses. Neither a checksum nor the
+local chain prevents coherent root/whole-machine rollback; external restore
+custody remains required.
 
-The private effect lock serializes a bounded invocation. A pending effect
-blocks a different request ID as `target_busy`; only its own authenticated
-owner/id can continue it. Generation locks are held only for checkpoints and
-single appends, never for backend actions or external service work. Effect
-intent/outcomes are atomically written and file/directory-fsynced under the
-shared generation checkpoint lock before any OS step. The saved generation
-floor must remain on the authoritative chain. Backend work runs after releasing
-those locks. Manual writers require maintenance exclusion from the core;
-manual journal bytes cannot supply lost effect evidence.
+Each effect retains `owner` (the current operation principal), the separate
+`allocation_owner`, and a nullable `act`. Original allocation ownership never
+moves to the retirement operator. All earlier lifecycle/progress/result fields
+remain. Terminal replay is authenticated, generation-specific and read-only;
+retirement/UID reuse cannot transfer an older result to another generation.
+`ledger.json` remains a disposable projection, never ownership authority.
 
-Each delete call performs at most one policy-bounded batch and then returns
-`cleanup_pending` if more remains, releasing the invocation lock and retaining
-the reservation/quota. Next invocation revalidates the chain, identity and
-absence before continuing. No service wait occurs under the effect lock:
-readmission/binding methods read already authenticated local completion
-receipts; another authorized component performs the remote acts between calls.
-Missing receipts may return the distinguished `AwaitingEvidence` outcome. A
-mutation-free wait is durably committed as `paused=true`; same-ID continuation
-rechecks that step. Unknown/interrupted outcomes use `Interrupted`, not
-`AwaitingEvidence`. A crash with an unacknowledged planned create step therefore
-compensates rather than guessing that provisioning finished.
+Provider evidence is retained as immutable content-addressed
+`evidence-<sha256>.json` files. Evidence-preparation receipts refer to these
+protected bytes; loading an effect with missing or corrupt referenced evidence
+refuses. Provider evaluations retain their complete serializable input/verdict/
+scope/digest. Live monotonic leases and guard handles are deliberately not
+persisted as current authority. Generic read preparation retains its exact
+intent, outcome and bounded error code. Recovery always prepares fresh actual
+observations. State has the existing 8 MiB ceiling; retained evidence has a
+separate 8 MiB/10000-file ceiling. No automatic sweeping/truncation exists.
+Before execution, the scheduler reserves bounded room for receipt, incident
+and pending-effect closure; exhausted capacity admits no OS write.
 
-`ledger.json` contains only canonical `{tail,rows}` derived from a newly
-verified generation view. It is private in this slice, not the public generation
-consumer file. Missing/corrupt/divergent content is atomically rebuilt; unsafe
-links/types refuse. It is never read for allocation, ownership, generation
-admission or recovery. Rebuilding it cannot repair the journal, dedup evidence,
-a reader floor or an external restore fence. Generation lookup retains the
-latest state of every generation, so old replies do not adopt a reused UID.
+`MigrateV1` is a separate root-maintenance API, never reachable through the
+helper protocol. It requires a protected `station-effects-migration/1` approval
+binding exact original bytes, reviewed evidence, stopped admission, exclusive
+maintenance and exact verified journal tail. This implementation accepts only
+empty v1 genesis. It fsyncs a preserved original-byte copy before replacing the
+store. Nonempty/unknown v1 OS histories remain fenced for explicit provenance
+reconciliation; they are never reconstructed from NSS or ledger projections.
 
-## Closed bump deployment gate
+## Flights and lock discipline
 
-Production `user.bump` always refuses `bump_key_admission_unconfirmed` after
-caller authentication and before any effect, journal access or backend call.
-This uses station spec section 6.2's missing/untrusted confirmation refusal.
-The jointly accepted Keymaker provision/confirm contract is still absent;
-policy `bump_enabled` cannot open this gate. The unexported confirmation seam
-is set only by package tests, never by the binary, environment or policy.
-The lifecycle below is exercised with the deterministic confirmation stub;
-it is not a deployed receipt protocol. Create and retire retain their existing
-qualified-backend gates.
+The effect lock protects bounded local transitions. Checkpoint/append lock
+order is effects → gate → data. Every backend call and authority evaluation
+runs after all three locks are released. Reacquisition reloads the complete
+store and verifies the generation chain, preserving unrelated committed
+operations. No goroutine wrapper pretends a timed-out backend worker stopped.
 
-## Backend contract
+After allocation, each read or write has a durable immutable intent and a
+numbered flight. Only the exact flight hash/attempt can resolve it. A conclusive
+stopped `applied`, `absent` or `no_progress` receipt closes execution even when
+the journal tail, caller, policy, backend or fence changed. It is historical
+resolution, never current authority: the operation yields and re-prepares.
+Unknown execution retains the flight and incident, blocks all work for that
+UID, and preserves its reservation. Unrelated UIDs may progress. Caller retry
+cannot reconcile or clear an incident. Protected maintenance reconciliation
+and nonempty legacy migration remain separate work.
 
-The internal `Backend` receives a helper-derived `Task`: exact UID/GID/name/home,
-new generation, previous generation when bumping, approved skeleton, configured
-bounds, and stable effect/phase/step/batch key. It must never adopt an unmanaged
-object. Every method is finite, context-aware and idempotent for this exact
-identity/key; an interrupted action is reconciled by owned receipts and exact
-OS evidence, not repeated blindly. Errors are closed service codes, never raw
-paths, command output or secret values. An error is not proof of rollback.
+Scaffold writes must match the root-approved `skeleton_digest`, separately from
+the skeleton selection label. Writes require exact planned identity/intent, earlier applied ownership
+receipts for destructive acts, current selected-source evidence and continuously
+valid local guards. A mismatched object observation becomes unknown held
+execution, never foreign ownership. Backend restoration must independently
+prove every present object belongs to the original allocation; the core's
+reference checks are additional validation, not an OS provenance oracle.
 
-| Method | Required behavior and fail-closed evidence |
+Activation prepares backend readiness and all applicable authority sources
+without locks. `genjournal.AppendPrepared` compares the exact prepared tail
+under the actual exclusive append pair, then invokes bounded local guards
+immediately before writing. This adds no journal bytes and leaves existing
+ancestor-floor recovery APIs unchanged. `removed` also requires fresh process
+and applicable cleanup authority. Guard refusal preserves the journal incident
+marker for explicit reconciliation. Guards must never perform NSS, RPC,
+account tools, scans or service waits; only bounded protected local validation.
+
+## Backend and authority boundary
+
+| Type or method | Contract |
 |---|---|
-| `Qualified` | Current Linux capabilities, static range deny, nonoverlapping ranges, approved skeleton, persistence denial and all required adapters are qualified. Unknown/stale evidence refuses. |
-| `Available` | Candidate UID and GID are free in NSS and the effect reservation domain, name/home exclusive, full cycle/UID temporary-area hygiene clean. Ambiguity/unreadable scans refuse; only definite occupancy is skippable. |
-| `CleanupAdmission` | Authenticated exact-generation dispatcher evidence fences launches/ingress/home leases and discharges output custody and broker obligations. No caller waiver. |
-| `BumpClean` | Full zero-process and outside-home UID-object inventory under the maintained creation/ingress fence. Cover all retirement inventory classes, mounts/namespaces, held unlinked inodes, IPC, sockets, cron/at, user units/runtime and lingering. Partial/unreadable/unsupported inventory is not clean. |
-| `Group`, `Account` | Create only this effect's exclusive dedicated group/account with section 4's exact locked-login/no-persistence policy; receipt-backed retry verifies the same object. |
-| `Home`, `Verify` | Trusted-descriptor scaffold installation and exact account/group/control verification under section 7; approved pin last, no ACL/capability/link/mount bypass, no station content copied during bump. |
-| `Stop`, `Absent` | Qualified stop domain and complete UID-process absence for configured grace/quiet interval, stable process identity and renewed inventories. Unknown/stuck/surviving process refuses deletion. |
-| `DeleteBatch` | Recheck absence, quarantine/delete only effect-owned home/temp objects through descriptors within entry/depth/work bounds; never follow links/cross foreign mounts. Return done only on complete verified cleanup; stable batch keys reconcile interrupted work. |
-| `RemoveAccount`, `RemoveGroup`, `Removed` | Remove only owned matching objects in account-then-group order; last method proves home/temp/account/group absence. An absent NSS name alone is insufficient. |
-| `Retained` | Bump/failed-successor cleanup proves the same reserved OS account/group remains with login/persistence denied and the old home/temp state completely gone. |
-| `Readmission`, `Binding` | Read current authenticated, correlated completion evidence for the exact UID/old/new pair and effect. Old removed precedes per-UID Keymaker re-admission; new binding follows it. Missing/stale/wrong-pair/revoked evidence cannot authorize activation. These methods neither call Keymaker under locks nor mint/carry keys. |
-| `CommitReady` | Renew identity, full bump inventory and both confirmations after every yield/external handoff; acquire local pins/fences that remain valid through durable active append. Return an `ActivationGuard`; unavailable evidence refuses or yields a known mutation-free wait. |
+| `Task` | Original account/generation/previous generation, allocation owner, operator act, approved skeleton/bounds, immutable records and next effect ordinal. |
+| `Qualified`, `Available` | Complete qualification and conclusive candidate collision/hygiene checks, outside state locks. Only known occupancy is skippable. |
+| `CleanupAdmission`, `BumpClean` | Qualified exact-target cleanup and inventory inputs. They cannot invent operator/export or Keymaker authority. |
+| `Plan(ctx, Task) → StepPlan` | Read-only current verification or next individual OS write. No mutation is permitted while planning. Composite home/group/account steps must expose each write separately. |
+| `Execute(ctx, Attempt) → Completion` | Execute only the durable intent. `Stopped` is explicit proof of worker termination. `Outcome` distinguishes conclusive applied/absent/no-progress from unknown; objects are exact closed observations. Partial deletion does not imply complete cleanup. |
+| `Restore(ctx, RestoreInput) → RestoreResult` | Exact saved identity, reservation, owner, receipt history and basis; return exact identity with absent/owned/collision/unknown verdict and evidence digest. No allocator, cursor advance, fresh generation or NSS-based adoption. |
+| `Evidence(ctx, AuthorityInput) → AuthorityEvidence` | Backend-specific qualification, cron/at/linger, complete UID inventory and maintained exclusion facts. Unknown never becomes clean. |
+| `CommitReady → ActivationGuard` | Acquire bounded local readiness/exclusion after external work; keep the acquisition context live through final append and release. |
+| `AuthoritySource.Evaluate` | Exact configured label/version, purpose, caller, target/previous generation, effect/intent digest, policy/tail/fence/boot and fresh challenge. Return explicit verdict, full input, scope/evidence digests, monotonic validity and live local guard. |
 
-`ActivationGuard.Check` runs under the journal's exclusive gate/data locks
-immediately before the actual active write. It must be a bounded local check,
-with no remote service call, and verify current pinned/fenced evidence. Its
-`Release` runs on every return path. The acquisition context stays live through
-the guarded append; it is cancelled only after releasing the guard. The backend must maintain the process/
-object-creation fence and receipt validity until this release; a stale snapshot
-is not a guard. The fake tests prove invocation/order/refusal at this seam,
-not an actual Linux containment or Keymaker confirmation mechanism.
+`LocalV0Source` reads policy through a bounded protected `PolicyReader`, checks
+qualification and configured source/version, and delegates actual OS facts to
+`Backend.Evidence`. There is no permissive local fallback. All six local-v0
+selections use this interface. The policy and caller guards remain local; a
+future remote provider must prepare its evidence outside locks and expose only
+local final validation. A `qualified` flag and digest do not themselves prove
+root qualification; the backend/source must verify retained root-run evidence.
 
-## Recovery and lifecycle
+V0 has no station launcher and admits no UID process before activation.
+The backend must inventory and refuse unexpected/unknown processes and objects;
+configuration alone is insufficient. The core does not introduce a process-stop
+operation outside the specification's closed OS-intent vocabulary. A backend
+requiring mutating stop behavior must use a separately reviewed protocol,
+rather than performing signals from read-only `Plan`.
 
-- Create persists chosen identity and `creating` before provisioning. Clean
-  group/account/home/verification plus guarded activation appends `active`.
-  Interrupted never-active work compensates stop/absence/delete/account/group
-  cleanup and appends direct `removed`. A failed compensation retains pending
-  evidence; a verified compensation is terminal failure for that ID.
-- Retire appends `retiring` before any stop/delete, then progresses forward
-  through verified cleanup and appends `removed` last. Repeated backend steps
-  use the same durable identity/key. It never writes `active` during recovery.
-- Bump checks cleanup admission and complete UID cleanliness before admitting
-  intent, retains the OS account, writes old `retiring`, resets/proves retained
-  account, and writes old `removed`. Only then does it choose/persist a distinct
-  new token, append new `creating`, rebuild/verify, consume re-admission then
-  binding confirmations, acquire/check the final guard and append new `active`.
-  Interrupted successor creation compensates new `creating→removed` while
-  retaining the OS account/reservation. No third token is drawn on terminal
-  failure, and the old generation never returns to active.
-- A complete append whose effect-outcome save was interrupted is recognized
-  from the authoritative generation and exact retained identity. Already-active
-  create/bump and already-removed retire finish/replay without duplicate append.
-- Known reserve refusal before initial creating is terminal without an OS step,
-  allowing existing reserved retirement. The native writer preflights transition/
-  reserve under a read window before publishing intent, then revalidates under
-  exclusive locks. A raced or uncertain refusal after marker publication leaves
-  the marker closed, as required by gen-journal/1.
-- A crash *inside* the generation writer can leave `writer.pending`. Normal core
-  recovery does not clear it. Explicit root reconciliation must first establish
-  all writers quiescent and intact floor/history/reserve. The same effect then
-  resumes from the journal. Tests injecting a crash after a completed append
-  model the effect-outcome gap, not automatic recovery from torn writer bytes.
+## Operator retirement and deployment gates
 
-Terminal replay returns the recorded result and the target generation's
-current state, even after retirement/UID reuse. Create/retire mutation qualification can be disabled without repeating/hiding a terminal effect;
-production bump remains closed even for replay until its contract qualifies;
-caller authentication remains mandatory. Different canonical arguments under
-the same caller/id refuse, and a different caller cannot adopt the effect.
+Dispatcher create and configured operator retire are distinct entries. Sudo
+provenance/NOPASSWD never supplies authenticated operator confirmation.
+`OperatorVerifier` is a trusted issuer boundary. `FileOperatorVerifier` reads
+an externally issued protected per-act `station-operator-confirmation/1`
+record under `<root>/lib/user-manager/operator-acts/`, keyed by the canonical
+caller/request digest. It checks exact caller, request/policy/boot binding,
+authenticated confirmation, target generation, per-act export waiver and
+broker-obligation digest. The verifier also reads content-addressed `proof-<digest>.json` files: closed
+`station-operator-consent/1` binds the authenticated caller, exact request,
+policy, boot and waiver; `station-broker-obligation/1` retains the exact act
+with status `unresolved`. Missing, altered or differently scoped proof refuses.
+Cleanup-source evaluations revalidate these issuer records before admitting
+further work. Confirmed broker unbind requires its own future qualified
+protocol. A generic caller waiver is forbidden.
 
-## Validation and remaining gates
+The retirement effect durably records that operator act and original owner
+before cleanup. Explicit owner scope is mandatory. Broker obligations may stay
+unresolved; removing an account never claims broker unbind, credential erasure
+or identity revocation. An authenticated issuer/operator UI is not installed
+by this change. Production operator admission remains gated on its publication
+and qualification together with the real backend and retained proof records.
+
+Production bump's unexported test seam remains unavailable to configuration,
+environment and the binary. The jointly accepted Keymaker provision/confirm
+contract is still required. Additional gates remain root/backend qualification,
+installer policy and deny-file provisioning, maintained process/object fences,
+external restore custody, incident-maintenance admission, and nonempty legacy
+provenance reconciliation. No fake backend is linked into the executable.
+
+## Validation
+
+The targeted tests exercise core decisions with deterministic fake evidence,
+protected runner-owned files (expected UID/GID mapped to the runner), and native
+journal locks. They retain all earlier reviewer test names. They cover stale
+completion/re-preparation, unknown-worker exclusion, unrelated progress,
+unreceipted account/stage preservation, mismatched restoration/receipts,
+operator pins/acts/ownership, policy protection, immutable history, capacity,
+missing retained evidence and approved empty migration. They do not qualify
+real NSS/accounts, complete Linux inventories or a root deployment.
 
 ```sh
-go test ./internal/manager ./cmd/swarma-user-manager ./tools/genjournal -count=1
+env GORACE=atexit_sleep_ms=0 GOMAXPROCS=2 heavy-slot --label architect -- go test -p 1 ./internal/manager -count=1
+env GORACE=atexit_sleep_ms=0 GOMAXPROCS=2 heavy-slot --label architect -- go test -p 1 ./tools/genjournal -run '^(TestNativeActivationGuard|TestPreparedAppendRequiresExactTail)$' -count=1
 go build -o <output>/swarma-user-manager ./cmd/swarma-user-manager
 ```
 
-Tests use a deterministic fake backend plus the real pinned journal verifier/
-proposal rules, protected temporary disk evidence, native writer locks and the
-actual subprocess entrypoint. They cover injected backend and append/effect
-boundaries, terminal replay, closed intake, authority, reserve, bump order,
-readiness/refusal and projection rebuild. They do not qualify real accounts,
-NSS/process/mount/IPC discovery, root DAC/ACL deployment, live service receipts,
-anti-rollback custody, externally fenced restoration or platform activation.
-A guarded native-write refusal deliberately retains the incident marker; its
-reconciliation is an operator evidence act, not an automatic error trap.
-
-Open deployment work is the real Linux backend and its process/object creation
-fence, authenticated current caller/cleanup/readmission/binding adapters,
-protected installer and service policy, and external restore/effect-store
-migration. The binary links no substitute fake backend or permissive fallback.
+Heavy-slot is the shared-host serialization wrapper; elsewhere use the same
+narrow Go commands with the local resource policy. Logs/build outputs belong
+in task-local untracked scratch. No full repository suite or account tool is
+needed to exercise this core boundary.

@@ -10,22 +10,7 @@ import (
 
 const PolicyPath = "/opt/swarma/etc/user-manager.json"
 
-func LoadPolicy() (Policy, error) {
-	var p Policy
-	d, e := protectedDir(filepath.Dir(PolicyPath), 0, "/")
-	if e != nil {
-		return p, e
-	}
-	defer d.Close()
-	b, e := readFile(d, filepath.Base(PolicyPath), 0, MaxRequest)
-	if e != nil {
-		return p, fail("state_unavailable")
-	}
-	if strict(b, &p) != nil {
-		return p, fail("state_unavailable")
-	}
-	return p, p.validate()
-}
+func LoadPolicy() (Policy, error) { return loadPolicyAt(PolicyPath, 0, "/") }
 
 // FileAuthority consumes the protected service-identity authority's current
 // principal/generation record. NSS names or numeric UID existence never substitute.
@@ -99,3 +84,26 @@ func VerifiedInvocation(args []string) Invocation {
 	in.UID = u
 	return in
 }
+
+// Pin prepares trusted local identity validation; Check never performs NSS or RPC.
+func (a FileAuthority) Pin(ctx context.Context, c Caller) (ActivationGuard, error) {
+	g := &fileCallerGuard{a, c}
+	if err := g.Check(); err != nil {
+		return nil, err
+	}
+	return g, nil
+}
+
+type fileCallerGuard struct {
+	authority FileAuthority
+	caller    Caller
+}
+
+func (g *fileCallerGuard) Check() error {
+	c, err := g.authority.Current(context.Background(), g.caller.UID)
+	if err != nil || c != g.caller {
+		return fail("caller_role_not_permitted")
+	}
+	return nil
+}
+func (*fileCallerGuard) Release() {}

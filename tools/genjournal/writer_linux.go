@@ -83,6 +83,9 @@ func appendLocked(d *directory, m pendingRecord, floor Floor, uid int64, generat
 	return appendGuardedLocked(d, m, floor, uid, generation, state, writer, stamp, nil)
 }
 func appendGuardedLocked(d *directory, m pendingRecord, floor Floor, uid int64, generation, state, writer, stamp string, guard func() error) error {
+	return appendPreparedLocked(d, m, floor, uid, generation, state, writer, stamp, guard, nil)
+}
+func appendPreparedLocked(d *directory, m pendingRecord, floor Floor, uid int64, generation, state, writer, stamp string, guard func() error, expected *Floor) error {
 	j, e := d.open("journal", syscall.O_RDWR|syscall.O_APPEND)
 	if e != nil {
 		return e
@@ -119,6 +122,9 @@ func appendGuardedLocked(d *directory, m pendingRecord, floor Floor, uid int64, 
 	}
 	if e = m.check(); e != nil {
 		return e
+	}
+	if expected != nil && v.Tail != *expected {
+		return refuse("journal_stale_preparation")
 	}
 	if guard != nil {
 		if e = guard(); e != nil {

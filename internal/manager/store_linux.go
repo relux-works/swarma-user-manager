@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"io"
 	"os"
@@ -209,7 +210,7 @@ func effectBytes(state State) ([]byte, error) {
 		return nil, e
 	}
 	digest := sha256.Sum256(b)
-	return canonical(effectEnvelope{"station-effects-store/1", state, hex.EncodeToString(digest[:])})
+	return canonical(effectEnvelope{storeFormat, state, hex.EncodeToString(digest[:])})
 }
 func (s *DiskStore) Load() (State, error) {
 	var envelope effectEnvelope
@@ -217,7 +218,7 @@ func (s *DiskStore) Load() (State, error) {
 	if e != nil {
 		return State{}, e
 	}
-	if strict(b, &envelope) != nil || envelope.Format != "station-effects-store/1" {
+	if strict(b, &envelope) != nil || envelope.Format != storeFormat {
 		return State{}, fail("effect_evidence_unavailable")
 	}
 	data, e := canonical(envelope.State)
@@ -227,6 +228,9 @@ func (s *DiskStore) Load() (State, error) {
 	digest := sha256.Sum256(data)
 	if envelope.Digest != hex.EncodeToString(digest[:]) {
 		return State{}, fail("effect_evidence_unavailable")
+	}
+	if err := validateStored(envelope.State); err != nil {
+		return State{}, err
 	}
 	return envelope.State, nil
 }
@@ -239,6 +243,13 @@ func (s *DiskStore) Save(state State) error {
 	}
 	if f.Close() != nil {
 		return fail("state_unavailable")
+	}
+	old, err := s.Load()
+	if err != nil {
+		return err
+	}
+	if state.Revision != old.Revision+1 || immutablePrefix(old, state) != nil || validateStored(state) != nil {
+		return fail("effect_evidence_unavailable")
 	}
 	b, e := effectBytes(state)
 	if e != nil {
@@ -278,7 +289,7 @@ func provisionStore(path string, cursor int64, owner uint32, anchor string) erro
 		}
 		f := os.NewFile(uintptr(fd), name)
 		if name == "effects.json" {
-			b, _ := effectBytes(State{Format: "station-effects/1", Floor: genjournal.Floor{Seq: 0, Hash: genjournal.ZeroHash}, Cursor: cursor, Effects: []Effect{}})
+			b, _ := effectBytes(State{Format: stateFormat, Floor: genjournal.Floor{Seq: 0, Hash: genjournal.ZeroHash}, Cursor: cursor, Effects: []Effect{}, Revision: 1, OSRecords: []OSRecord{}})
 			n, e := f.Write(b)
 			if e != nil || n != len(b) {
 				f.Close()
@@ -295,4 +306,97 @@ func provisionStore(path string, cursor int64, owner uint32, anchor string) erro
 		return fail("state_unavailable")
 	}
 	return nil
+}
+
+// Store-level maxima bound decoding; the engine applies stricter explicit policy bounds.
+func validateStored(s State) error {
+	if s.Effects == nil || s.Cursor < 1 || s.Floor.Seq < 0 || !hashOK(s.Floor.Hash) {
+		return fail("effect_evidence_unavailable")
+	}
+	_, e := indexRecords(s, Policy{Limits: Limits{RecordCount: 10000, RecordBytes: 65536, OperationMS: 86400000}})
+	return e
+}
+func immutablePrefix(old, next State) error {
+	if next.Floor.Seq < old.Floor.Seq || (next.Floor.Seq == old.Floor.Seq && next.Floor.Hash != old.Floor.Hash) {
+		return fail("effect_evidence_unavailable")
+	}
+	if len(next.OSRecords) < len(old.OSRecords) || len(next.Effects) < len(old.Effects) {
+		return fail("effect_evidence_unavailable")
+	}
+	for i, v := range old.OSRecords {
+		if digest(v) != digest(next.OSRecords[i]) {
+			return fail("effect_evidence_unavailable")
+		}
+	}
+	for i, f := range old.Effects {
+		n := next.Effects[i]
+		if f.Owner != n.Owner || f.AllocationOwner != n.AllocationOwner || f.Admitted != n.Admitted || digest(f.Act) != digest(n.Act) || f.Request != n.Request || f.Account.UID != n.Account.UID || f.Account.GID != n.Account.GID || f.Account.Username != n.Account.Username || f.Account.Home != n.Account.Home || f.Previous != n.Previous {
+			return fail("effect_evidence_unavailable")
+		}
+		if f.Account.Generation != n.Account.Generation && (f.Request.Op != "user.bump" || f.Account.Generation != f.Previous || !validGeneration(n.Account.Generation) || n.Account.Generation == f.Previous) {
+			return fail("effect_evidence_unavailable")
+		}
+		if f.Terminal && digest(f) != digest(n) {
+			return fail("effect_evidence_unavailable")
+		}
+	}
+	return nil
+}
+
+// Evidence files are content addressed, immutable, protected and retained with their receipts.
+func (s *DiskStore) Evidence(key string, b json.RawMessage) error {
+	if !hashOK(key) || digestBytes(b) != key || len(b) > 65536 {
+		return fail("effect_evidence_unavailable")
+	}
+	name := "evidence-" + key + ".json"
+	existing, err := s.ReadEvidence(key)
+	if err == nil {
+		if bytes.Equal(existing, b) {
+			return nil
+		}
+		return fail("effect_evidence_unavailable")
+	}
+	// An existing corrupt or unsafe object is evidence loss, never permission to replace it.
+	var existingStat unix.Stat_t
+	if e := unix.Fstatat(int(s.dir.Fd()), name, &existingStat, unix.AT_SYMLINK_NOFOLLOW); !errors.Is(e, syscall.ENOENT) {
+		return fail("effect_evidence_unavailable")
+	}
+	// Bounded retained evidence budget is independent of, and additional to, the state ceiling.
+	fd, err := syscall.Openat(int(s.dir.Fd()), ".", syscall.O_RDONLY|syscall.O_DIRECTORY|syscall.O_CLOEXEC, 0)
+	if err != nil {
+		return fail("state_unavailable")
+	}
+	scan := os.NewFile(uintptr(fd), "evidence")
+	defer scan.Close()
+	entries, err := scan.ReadDir(10003)
+	if err != nil && err != io.EOF {
+		return fail("state_unavailable")
+	}
+	total := len(b)
+	count := 0
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), "evidence-") {
+			var info unix.Stat_t
+			e := unix.Fstatat(int(scan.Fd()), entry.Name(), &info, unix.AT_SYMLINK_NOFOLLOW)
+			if e != nil {
+				return fail("state_unavailable")
+			}
+			total += int(info.Size)
+			count++
+		}
+	}
+	if total > maxEvidence || count >= 10000 {
+		return fail("effect_evidence_unavailable")
+	}
+	return atomicFile(s.dir, name, b, s.owner)
+}
+func (s *DiskStore) ReadEvidence(key string) (json.RawMessage, error) {
+	if !hashOK(key) {
+		return nil, fail("effect_evidence_unavailable")
+	}
+	b, err := readFile(s.dir, "evidence-"+key+".json", s.owner, 65536)
+	if err != nil || digestBytes(b) != key {
+		return nil, fail("effect_evidence_unavailable")
+	}
+	return b, nil
 }

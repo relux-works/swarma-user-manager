@@ -43,7 +43,16 @@ func AppendGuarded(ctx context.Context, path string, floor Floor, uid int64, gen
 func appendNative(ctx context.Context, path string, floor Floor, uid int64, generation, state, stamp string, p policy) (View, error) {
 	return appendNativeGuarded(ctx, path, floor, uid, generation, state, stamp, p, nil)
 }
-func appendNativeGuarded(ctx context.Context, path string, floor Floor, uid int64, generation, state, stamp string, p policy, guard func() error) (v View, e error) {
+
+// AppendPrepared requires the exact prepared tail under exclusive append exclusion.
+// Its callback is restricted to bounded local validation; journal bytes are unchanged.
+func AppendPrepared(ctx context.Context, path string, floor Floor, uid int64, generation, state, stamp string, guard func() error) (View, error) {
+	return appendNativePrepared(ctx, path, floor, uid, generation, state, stamp, production, guard, &floor)
+}
+func appendNativeGuarded(ctx context.Context, path string, floor Floor, uid int64, generation, state, stamp string, p policy, guard func() error) (View, error) {
+	return appendNativePrepared(ctx, path, floor, uid, generation, state, stamp, p, guard, nil)
+}
+func appendNativePrepared(ctx context.Context, path string, floor Floor, uid int64, generation, state, stamp string, p policy, guard func() error, expected *Floor) (v View, e error) {
 	if e = ctx.Err(); e != nil {
 		return v, refuse("journal_lock_timeout")
 	}
@@ -104,7 +113,7 @@ func appendNativeGuarded(ctx context.Context, path string, floor Floor, uid int6
 		}
 		defer unlock(f)
 	}
-	if e = appendGuardedLocked(d, m, floor, uid, generation, state, "user-manager", stamp, guard); e != nil {
+	if e = appendPreparedLocked(d, m, floor, uid, generation, state, "user-manager", stamp, guard, expected); e != nil {
 		return v, e
 	}
 	// Re-open for durability sync; the read-only verifier descriptor is not used for fsync.

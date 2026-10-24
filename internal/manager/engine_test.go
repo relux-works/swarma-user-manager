@@ -29,6 +29,7 @@ type memStore struct {
 	missing      bool
 	failTerminal bool
 	held         bool
+	evidence     map[string]json.RawMessage
 }
 
 func (s *memStore) Lock(context.Context, time.Duration) (func(), error) {
@@ -122,6 +123,9 @@ type fakeBackend struct {
 	homes          map[int64]bool
 	readmit        map[string]bool
 	bound          map[string]bool
+	stages         map[int64]bool
+	hook           func(string, Task)
+	unknownStep    string
 }
 
 func (b *fakeBackend) act(name string, t Task, change func()) error {
@@ -258,15 +262,21 @@ func setup(t *testing.T) *harness {
 	trace := []string{}
 	j := &memJournal{trace: &trace}
 	c := Caller{UID: 200, Principal: "dispatcher", Generation: strings.Repeat("a", 32), Role: "dispatcher"}
-	p := Policy{Format: "station-policy/1", Root: "/sandbox", UIDMin: 30000, UIDMax: 30010, GIDMin: 30000, GIDMax: 30010, Quota: 10, Class: "trusted", Skeleton: "approved-release", Bump: true, Callers: []Caller{c}, Limits: Limits{EntropyDraws: 32, AllocationProbes: 20, LockMS: 50, OperationMS: 5000, StepMS: 1000, GraceMS: 10, QuietMS: 10, DeleteEntries: 10, DeleteDepth: 10, DeleteWork: 100}}
-	s := &memStore{state: State{Format: "station-effects/1", Floor: genjournal.Floor{Hash: genjournal.ZeroHash}, Cursor: p.UIDMin, Effects: []Effect{}}}
-	b := &fakeBackend{j: j, trace: &trace, groups: map[int64]bool{}, accounts: map[int64]bool{}, homes: map[int64]bool{}, readmit: map[string]bool{}, bound: map[string]bool{}}
-	a := &fakeAuthority{map[int64]Caller{c.UID: c}}
+	p := Policy{Format: "station-policy/2", Root: "/sandbox", UIDMin: 30000, UIDMax: 30010, GIDMin: 30000, GIDMax: 30010, Quota: 10, Class: "trusted", Skeleton: "approved-release", SkeletonDigest: strings.Repeat("e", 64), Bump: true, Callers: []Caller{c}, Limits: Limits{EntropyDraws: 32, AllocationProbes: 20, LockMS: 50, OperationMS: 30000, StepMS: 10000, GraceMS: 10, QuietMS: 10, DeleteEntries: 10, DeleteDepth: 10, DeleteWork: 100, RecordBytes: 8192, RecordCount: 10000}, Qualified: true, QualificationDigest: strings.Repeat("c", 64), FenceEpoch: 1, BackendDigest: strings.Repeat("d", 64), Operators: []OperatorScope{{Principal: "operator", Owners: []string{"dispatcher", "other"}}}}
+	for _, purpose := range purposes {
+		p.Sources = append(p.Sources, SourceSelection{purpose, "local-v0", strings.Repeat("e", 64)})
+	}
+	operator := Caller{UID: 202, Principal: "operator", Generation: strings.Repeat("f", 32), Role: "operator"}
+	p.Callers = append(p.Callers, operator)
+	s := &memStore{state: State{Format: stateFormat, Floor: genjournal.Floor{Hash: genjournal.ZeroHash}, Cursor: p.UIDMin, Effects: []Effect{}, Revision: 1, OSRecords: []OSRecord{}}}
+	b := &fakeBackend{j: j, trace: &trace, groups: map[int64]bool{}, accounts: map[int64]bool{}, homes: map[int64]bool{}, readmit: map[string]bool{}, bound: map[string]bool{}, stages: map[int64]bool{}}
+	a := &fakeAuthority{map[int64]Caller{c.UID: c, operator.UID: operator}}
 	entropy := []byte{}
 	for i := byte(1); i < 100; i++ {
 		entropy = append(entropy, bytes.Repeat([]byte{i}, 16)...)
 	}
-	e := &Engine{bumpConfirmed: true, Policy: p, Authority: a, Backend: b, Store: s, Journal: j, Entropy: bytes.NewReader(entropy)}
+	e := &Engine{bumpConfirmed: true, Policy: p, Authority: a, Backend: b, Store: s, Journal: j, Entropy: bytes.NewReader(entropy), Operator: testOperator{}, BootID: strings.Repeat("b", 32)}
+	e.Sources = map[string]AuthoritySource{"local-v0": LocalV0Source{Policies: testPolicyReader{e}, Backend: b, Operators: testOperator{}}}
 	return &harness{e, s, j, b, a, Invocation{EUID: 0, Sudo: true, UID: c.UID}, &trace}
 }
 func wire(t *testing.T, op, id, arg string) []byte {
@@ -285,7 +295,15 @@ func wire(t *testing.T, op, id, arg string) []byte {
 }
 func (h *harness) run(t *testing.T, op, id, arg string) Response {
 	t.Helper()
-	return h.e.Handle(context.Background(), wire(t, op, id, arg), h.in)
+	in := h.in
+	// These legacy lifecycle tests now enter retirement through an explicit confirmed operator fixture.
+	// Direct Handle tests exercise forbidden dispatcher/NOPASSWD admission separately.
+	if op == "user.retire" {
+		original := h.a.callers[in.UID].Principal
+		h.e.Policy.Operators = []OperatorScope{{Principal: "operator", Owners: []string{original}}}
+		in.UID = 202
+	}
+	return h.e.Handle(context.Background(), wire(t, op, id, arg), in)
 }
 func want(t *testing.T, r Response, c string) {
 	t.Helper()
@@ -430,7 +448,7 @@ func TestReplayCurrentState(t *testing.T) {
 	}
 }
 
-// Every interrupted create backend step rolls back its never-active generation; clean provisioning remains active.
+// Every lost-response create backend step with conclusive outcome rolls back its never-active generation; clean provisioning remains active.
 func TestCreateInterruptedSteps(t *testing.T) {
 	for _, step := range []string{"group", "account", "home", "verify"} {
 		t.Run(step, func(t *testing.T) {
@@ -507,7 +525,7 @@ func TestAppendEffectBoundary(t *testing.T) {
 	}
 }
 
-// Retirement never reactivates after an interrupted backend step, and removed is last after verified absence.
+// Retirement never reactivates after a lost-response backend step, and removed is last after verified absence.
 func TestRetireInterruptedSteps(t *testing.T) {
 	for _, step := range []string{"stop", "absent", "delete", "remove_account", "remove_group", "removed"} {
 		t.Run(step, func(t *testing.T) {
@@ -518,7 +536,7 @@ func TestRetireInterruptedSteps(t *testing.T) {
 			h.b.after = true
 			want(t, h.run(t, "user.retire", "retire", g), "cleanup_pending")
 			equalStates(t, h.states(t, g), "creating,active,retiring")
-			want(t, h.run(t, "user.create", "other", "other"), "target_busy")
+			want(t, h.run(t, "user.create", "other", "other"), "ok")
 			want(t, h.run(t, "user.retire", "retire", g), "ok")
 			equalStates(t, h.states(t, g), "creating,active,retiring,removed")
 		})
@@ -990,4 +1008,40 @@ func TestProductionBumpClosed(t *testing.T) {
 	}
 	h.e.Journal, h.e.Backend, h.e.Store = journal, backend, store
 	want(t, h.run(t, "user.retire", "retire", g), "ok")
+}
+
+func (a *fakeAuthority) Pin(_ context.Context, c Caller) (ActivationGuard, error) {
+	return &fakeCallerGuard{a, c}, nil
+}
+
+type fakeCallerGuard struct {
+	authority *fakeAuthority
+	caller    Caller
+}
+
+func (g *fakeCallerGuard) Check() error {
+	c := g.authority.callers[g.caller.UID]
+	if c != g.caller {
+		return fail("caller_role_not_permitted")
+	}
+	return nil
+}
+func (*fakeCallerGuard) Release() {}
+
+func (s *memStore) Evidence(key string, b json.RawMessage) error {
+	if digestBytes(b) != key {
+		return fail("effect_evidence_unavailable")
+	}
+	if s.evidence == nil {
+		s.evidence = map[string]json.RawMessage{}
+	}
+	s.evidence[key] = append(json.RawMessage(nil), b...)
+	return nil
+}
+func (s *memStore) ReadEvidence(key string) (json.RawMessage, error) {
+	b, ok := s.evidence[key]
+	if !ok {
+		return nil, fail("effect_evidence_unavailable")
+	}
+	return b, nil
 }

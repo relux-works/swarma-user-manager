@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"io"
 	"path/filepath"
 	"strings"
@@ -24,6 +25,12 @@ func (c Caller) key() string { return c.Principal }
 type Authority interface {
 	Current(context.Context, int64) (Caller, error)
 }
+
+// CallerPinner prepares a local, continuously checked identity exclusion outside all state locks.
+type CallerPinner interface {
+	Pin(context.Context, Caller) (ActivationGuard, error)
+}
+
 type Invocation struct {
 	EUID int
 	Sudo bool
@@ -41,33 +48,45 @@ type Limits struct {
 	DeleteEntries    int64 `json:"delete_entries"`
 	DeleteDepth      int64 `json:"delete_depth"`
 	DeleteWork       int64 `json:"delete_work"`
+	RecordBytes      int64 `json:"record_bytes"`
+	RecordCount      int64 `json:"record_count"`
 }
 type Policy struct {
-	Format   string   `json:"format"`
-	Root     string   `json:"root"`
-	UIDMin   int64    `json:"uid_min"`
-	UIDMax   int64    `json:"uid_max"`
-	GIDMin   int64    `json:"gid_min"`
-	GIDMax   int64    `json:"gid_max"`
-	Quota    int64    `json:"quota"`
-	Class    string   `json:"class"`
-	Skeleton string   `json:"skeleton"`
-	Bump     bool     `json:"bump_enabled"`
-	Limits   Limits   `json:"limits"`
-	Callers  []Caller `json:"callers"`
+	Format              string            `json:"format"`
+	Root                string            `json:"root"`
+	UIDMin              int64             `json:"uid_min"`
+	UIDMax              int64             `json:"uid_max"`
+	GIDMin              int64             `json:"gid_min"`
+	GIDMax              int64             `json:"gid_max"`
+	Quota               int64             `json:"quota"`
+	Class               string            `json:"class"`
+	Skeleton            string            `json:"skeleton"`
+	SkeletonDigest      string            `json:"skeleton_digest"`
+	Bump                bool              `json:"bump_enabled"`
+	Limits              Limits            `json:"limits"`
+	Callers             []Caller          `json:"callers"`
+	Qualified           bool              `json:"qualified"`
+	QualificationDigest string            `json:"qualification_digest"`
+	FenceEpoch          int64             `json:"fence_epoch"`
+	BackendDigest       string            `json:"backend_digest"`
+	Sources             []SourceSelection `json:"sources"`
+	Operators           []OperatorScope   `json:"operators"`
 }
 
 func (p Policy) validate() error {
-	if p.Format != "station-policy/1" || !filepath.IsAbs(p.Root) || filepath.Clean(p.Root) != p.Root || p.Root == "/" || p.UIDMin < 1 || p.UIDMax > 4294967294 || p.UIDMin > p.UIDMax || p.GIDMin < 1 || p.GIDMax > 4294967294 || p.GIDMin > p.GIDMax || p.Quota < 1 || p.Skeleton == "" {
+	if p.Format != "station-policy/2" || !filepath.IsAbs(p.Root) || filepath.Clean(p.Root) != p.Root || p.Root == "/" || p.UIDMin < 1 || p.UIDMax > 4294967294 || p.UIDMin > p.UIDMax || p.GIDMin < 1 || p.GIDMax > 4294967294 || p.GIDMin > p.GIDMax || p.Quota < 1 || p.Skeleton == "" {
 		return fail("state_unavailable")
 	}
-	for _, v := range []int64{p.Limits.EntropyDraws, p.Limits.AllocationProbes, p.Limits.LockMS, p.Limits.OperationMS, p.Limits.StepMS, p.Limits.GraceMS, p.Limits.QuietMS, p.Limits.DeleteEntries, p.Limits.DeleteDepth, p.Limits.DeleteWork} {
+	for _, v := range []int64{p.Limits.EntropyDraws, p.Limits.AllocationProbes, p.Limits.LockMS, p.Limits.OperationMS, p.Limits.StepMS, p.Limits.GraceMS, p.Limits.QuietMS, p.Limits.DeleteEntries, p.Limits.DeleteDepth, p.Limits.DeleteWork, p.Limits.RecordBytes, p.Limits.RecordCount} {
 		if v < 1 || v > 86400000 {
 			return fail("state_unavailable")
 		}
 	}
 	if p.Limits.GraceMS > p.Limits.StepMS || p.Limits.QuietMS > p.Limits.StepMS || p.UIDMin > p.GIDMax || p.GIDMin > p.UIDMax || p.Limits.AllocationProbes < p.UIDMax-p.UIDMin+1 || p.Limits.StepMS > p.Limits.OperationMS {
 		return fail("state_unavailable")
+	}
+	if p.Limits.RecordBytes < 2048 || p.Limits.RecordBytes > 65536 || p.Limits.RecordCount > 10000 || p.FenceEpoch < 1 || !hashOK(p.BackendDigest) || !hashOK(p.QualificationDigest) || !hashOK(p.SkeletonDigest) || validateSources(p) != nil {
+		return fail("qualification_required")
 	}
 	seen := map[int64]bool{}
 	identities := map[string]bool{}
@@ -101,7 +120,7 @@ func (p Policy) authorize(ctx context.Context, in Invocation, a Authority) (Call
 		return Caller{}, fail("caller_role_not_permitted")
 	}
 	for _, c := range p.Callers {
-		if c.UID == in.UID && c == current && c.Role == "dispatcher" {
+		if c.UID == in.UID && c == current && (c.Role == "dispatcher" || c.Role == "operator") {
 			return c, nil
 		}
 	}
@@ -116,11 +135,17 @@ type Account struct {
 	Generation string `json:"generation"`
 }
 type Task struct {
-	Key      string
-	Account  Account
-	Previous string
-	Skeleton string
-	Limits   Limits
+	Key             string
+	Account         Account
+	Previous        string
+	Skeleton        string
+	SkeletonDigest  string
+	Limits          Limits
+	Step            string
+	Records         []OSRecord
+	AllocationOwner string
+	Act             *OperatorAct
+	NextEffect      EffectIdentity
 }
 
 // Backend methods are bounded, local and idempotent for Task.Key and exact identity.
@@ -135,20 +160,47 @@ type Backend interface {
 	Available(context.Context, Account) error
 	CleanupAdmission(context.Context, Task) error
 	BumpClean(context.Context, Task) error
-	Group(context.Context, Task) error
-	Account(context.Context, Task) error
-	Home(context.Context, Task) error
-	Verify(context.Context, Task) error
-	Stop(context.Context, Task) error
-	Absent(context.Context, Task) error
-	DeleteBatch(context.Context, Task) (bool, error)
-	RemoveAccount(context.Context, Task) error
-	RemoveGroup(context.Context, Task) error
-	Removed(context.Context, Task) error
-	Retained(context.Context, Task) error
-	Readmission(context.Context, Task) error
-	Binding(context.Context, Task) error
+	// Plan is read-only. Each iteration returns one exact write, or a completed read-only step.
+	Plan(context.Context, Task) (StepPlan, error)
+	Execute(context.Context, Attempt) (Completion, error)
+	Restore(context.Context, RestoreInput) (RestoreResult, error)
+	Evidence(context.Context, AuthorityInput) (AuthorityEvidence, error)
 	CommitReady(context.Context, Task) (ActivationGuard, error)
+}
+
+// StepPlan permits a composite step to journal and receipt each OS write separately.
+// Complete/Done are current observations, not persistent authority caches.
+type StepPlan struct {
+	Intent   OSIntent
+	Complete bool
+	Done     bool
+}
+type Attempt struct {
+	Task       Task
+	Intent     OSIntent
+	Flight     Flight
+	FlightHash string
+}
+type Completion struct {
+	Stopped  bool
+	Outcome  string
+	Objects  []json.RawMessage
+	Done     bool
+	Evidence json.RawMessage
+}
+
+// Restore receives the original durable identity and provenance, never an allocator cursor to advance.
+type RestoreInput struct {
+	Identity        ReservedIdentity
+	AllocationOwner string
+	Reservation     Effect
+	Records         []OSRecord
+	Basis           Basis
+}
+type RestoreResult struct {
+	Identity       ReservedIdentity
+	Verdict        string
+	EvidenceDigest string
 }
 
 // Interrupted models loss of execution before durable step outcome, never proof of absence.
@@ -168,35 +220,41 @@ func (j NativeJournal) Checkpoint(c context.Context, f genjournal.Floor, fn func
 	return genjournal.Checkpoint(c, j.Path, f, fn)
 }
 func (j NativeJournal) Append(c context.Context, f genjournal.Floor, u int64, g, s, t string, guard func() error) (genjournal.View, error) {
-	return genjournal.AppendGuarded(c, j.Path, f, u, g, s, t, guard)
+	return genjournal.AppendPrepared(c, j.Path, f, u, g, s, t, guard)
 }
 
 type Effect struct {
-	Owner    string         `json:"owner"`
-	Admitted Caller         `json:"admitted_by"`
-	Request  Request        `json:"request"`
-	Account  Account        `json:"account"`
-	Previous string         `json:"previous"`
-	Phase    string         `json:"phase"`
-	Progress int            `json:"progress"`
-	Batch    int            `json:"batch"`
-	Plan     string         `json:"plan"`
-	Failure  string         `json:"failure"`
-	Paused   bool           `json:"paused"`
-	Terminal bool           `json:"terminal"`
-	Result   map[string]any `json:"result"`
+	Owner           string         `json:"owner"`
+	AllocationOwner string         `json:"allocation_owner"`
+	Act             *OperatorAct   `json:"act"`
+	Admitted        Caller         `json:"admitted_by"`
+	Request         Request        `json:"request"`
+	Account         Account        `json:"account"`
+	Previous        string         `json:"previous"`
+	Phase           string         `json:"phase"`
+	Progress        int            `json:"progress"`
+	Batch           int            `json:"batch"`
+	Plan            string         `json:"plan"`
+	Failure         string         `json:"failure"`
+	Paused          bool           `json:"paused"`
+	Terminal        bool           `json:"terminal"`
+	Result          map[string]any `json:"result"`
 }
 type State struct {
-	Format  string           `json:"format"`
-	Floor   genjournal.Floor `json:"floor"`
-	Cursor  int64            `json:"cursor"`
-	Effects []Effect         `json:"effects"`
+	Format    string           `json:"format"`
+	Floor     genjournal.Floor `json:"floor"`
+	Cursor    int64            `json:"cursor"`
+	Effects   []Effect         `json:"effects"`
+	Revision  int64            `json:"revision"`
+	OSRecords []OSRecord       `json:"os_records"`
 }
 type Store interface {
 	Lock(context.Context, time.Duration) (func(), error)
 	Load() (State, error)
 	Save(State) error
 	Ledger(genjournal.View) error
+	Evidence(string, json.RawMessage) error
+	ReadEvidence(string) (json.RawMessage, error)
 }
 type Engine struct {
 	// Unset in every non-test build path until the external confirmation contract qualifies.
@@ -207,6 +265,9 @@ type Engine struct {
 	Journal       Journal
 	Store         Store
 	Entropy       io.Reader
+	Sources       map[string]AuthoritySource
+	Operator      OperatorVerifier
+	BootID        string
 }
 
 func (e *Engine) token(ctx context.Context, v genjournal.View, effects []Effect) (string, error) {

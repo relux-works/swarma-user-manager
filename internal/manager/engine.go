@@ -11,11 +11,16 @@ import (
 )
 
 type execution struct {
-	engine *Engine
-	state  State
-	view   genjournal.View
-	effect *Effect
-	ctx    context.Context
+	engine      *Engine
+	state       State
+	view        genjournal.View
+	effect      *Effect
+	ctx         context.Context
+	caller      Caller
+	request     Request
+	unlock      func()
+	callerGuard ActivationGuard
+	policyGuard ActivationGuard
 }
 
 func (e *Engine) Handle(ctx context.Context, raw []byte, in Invocation) Response {
@@ -26,9 +31,14 @@ func (e *Engine) Handle(ctx context.Context, raw []byte, in Invocation) Response
 	if err = e.Policy.validate(); err != nil {
 		return refused(id, err)
 	}
+	ctx, cancel := bounded(ctx, e.Policy.Limits.OperationMS)
+	defer cancel()
 	caller, err := e.Policy.authorize(ctx, in, e.Authority)
 	if err != nil {
 		return refused(id, err)
+	}
+	if (r.Op == "user.retire" && caller.Role != "operator") || (r.Op != "user.retire" && caller.Role != "dispatcher") {
+		return refused(id, fail("caller_role_not_permitted"))
 	}
 	if runtime.GOOS != "linux" {
 		return refused(id, fail("platform_unsupported"))
@@ -40,18 +50,31 @@ func (e *Engine) Handle(ctx context.Context, raw []byte, in Invocation) Response
 	if e.Store == nil || e.Journal == nil {
 		return refused(id, fail("state_unavailable"))
 	}
-	ctx, cancel := bounded(ctx, e.Policy.Limits.OperationMS)
-	defer cancel()
+	pinner, ok := e.Authority.(CallerPinner)
+	if !ok {
+		return refused(id, fail("qualification_required"))
+	}
+	callerGuard, err := pinner.Pin(ctx, caller)
+	if err != nil || callerGuard == nil {
+		return refused(id, fail("caller_role_not_permitted"))
+	}
+	defer callerGuard.Release()
 	unlock, err := e.Store.Lock(ctx, time.Duration(e.Policy.Limits.LockMS)*time.Millisecond)
 	if err != nil {
 		return refused(id, err)
 	}
-	defer unlock()
+	defer func() {
+		if unlock != nil {
+			unlock()
+		}
+	}()
 	state, err := e.Store.Load()
 	if err != nil {
 		return refused(id, err)
 	}
-	x := &execution{engine: e, state: state, ctx: ctx}
+	x := &execution{engine: e, state: state, ctx: ctx, caller: caller, request: r, unlock: unlock, callerGuard: callerGuard}
+	unlock = nil
+	defer x.release()
 	if err = x.refresh(); err != nil {
 		return refused(id, err)
 	}
@@ -71,7 +94,8 @@ func (e *Engine) Handle(ctx context.Context, raw []byte, in Invocation) Response
 			if string(a) != string(b) {
 				return refused(id, fail("request_id_conflict"))
 			}
-			x.effect = f
+			copy := *f
+			x.effect = &copy
 			resuming = true
 			break
 		}
@@ -92,21 +116,41 @@ func (e *Engine) Handle(ctx context.Context, raw []byte, in Invocation) Response
 		return refused(id, err)
 	}
 	if x.effect == nil {
-		for _, f := range x.state.Effects {
-			if !f.Terminal {
-				return refused(id, fail("target_busy"))
-			}
+		preGuard, pe := x.authority("host_qualification")
+		if pe != nil {
+			return refused(id, pe)
 		}
+		defer preGuard.Release()
+		x.policyGuard = preGuard
 		var f Effect
 		f, err = x.admit(caller, r)
 		if err != nil {
 			return refused(id, err)
 		}
 		x.state.Effects = append(x.state.Effects, f)
-		x.effect = &x.state.Effects[len(x.state.Effects)-1]
+		x.effect = &f
 		if err = x.save(); err != nil {
 			return refused(id, err)
 		}
+	}
+	if err = x.checkTarget(); err != nil {
+		return refused(id, err)
+	}
+	hostGuard, gateErr := x.authority("host_qualification")
+	if gateErr != nil {
+		return refused(id, gateErr)
+	}
+	defer hostGuard.Release()
+	x.policyGuard = hostGuard
+	if r.Op == "user.retire" {
+		if x.effect.Act == nil || !actOK(*x.effect.Act, caller, r) {
+			return refused(id, fail("cleanup_not_admitted"))
+		}
+		cleanupGuard, ce := x.authority("cleanup_admission")
+		if ce != nil {
+			return refused(id, ce)
+		}
+		defer cleanupGuard.Release()
 	}
 	if r.Op == "user.create" {
 		err = x.create(resuming)
@@ -124,6 +168,17 @@ func (x *execution) refresh() error {
 	return x.engine.Journal.Checkpoint(x.ctx, x.state.Floor, func(v genjournal.View) error { x.view = v; return nil })
 }
 func (x *execution) save() error {
+	if x.unlock == nil {
+		return Interrupted
+	}
+	x.syncEffect()
+	if x.state.Revision >= 9223372036854775807 {
+		return fail("effect_evidence_unavailable")
+	}
+	x.state.Revision++
+	if _, err := indexRecords(x.state, x.engine.Policy); err != nil {
+		return err
+	}
 	return x.engine.Journal.Checkpoint(x.ctx, x.state.Floor, func(v genjournal.View) error {
 		x.view = v
 		x.state.Floor = v.Tail
@@ -135,8 +190,25 @@ func (x *execution) save() error {
 }
 func (x *execution) validate() error {
 	p := x.engine.Policy
-	if x.state.Effects == nil || x.state.Format != "station-effects/1" || x.state.Cursor < p.UIDMin || x.state.Cursor > p.UIDMax {
+	if x.state.Effects == nil || x.state.Format != stateFormat || x.state.Cursor < p.UIDMin || x.state.Cursor > p.UIDMax {
 		return fail("effect_evidence_unavailable")
+	}
+	if _, err := indexRecords(x.state, p); err != nil {
+		return err
+	}
+	for _, r := range x.state.OSRecords {
+		if r.Kind == "receipt" {
+			v, err := recordBody[Receipt](r)
+			if err != nil {
+				return err
+			}
+			if v.EvidenceDigest != "" {
+				b, err := x.engine.Store.ReadEvidence(v.EvidenceDigest)
+				if err != nil || digestBytes(b) != v.EvidenceDigest {
+					return fail("effect_evidence_unavailable")
+				}
+			}
+		}
 	}
 	keys := map[string]bool{}
 	covered := map[string]bool{}
@@ -145,7 +217,10 @@ func (x *execution) validate() error {
 		if keys[k] || f.Owner == "" || !requestID.MatchString(f.Request.ID) || !validGeneration(f.Account.Generation) || f.Account.UID < p.UIDMin || f.Account.UID > p.UIDMax || f.Account.GID != f.Account.UID || f.Progress < 0 || f.Progress > 16 || f.Batch < 0 {
 			return fail("state_contradictory")
 		}
-		if f.Admitted.Principal != f.Owner || f.Admitted.Role != "dispatcher" || f.Admitted.UID < 1 || f.Admitted.UID > 4294967294 || !validGeneration(f.Admitted.Generation) {
+		if f.Admitted.Principal != f.Owner || ((f.Request.Op == "user.retire" && f.Admitted.Role != "operator") || (f.Request.Op != "user.retire" && f.Admitted.Role != "dispatcher")) || f.Admitted.UID < 1 || f.Admitted.UID > 4294967294 || !validGeneration(f.Admitted.Generation) {
+			return fail("state_contradictory")
+		}
+		if !requestID.MatchString(f.AllocationOwner) || (f.Request.Op == "user.create" && f.AllocationOwner != f.Owner) || (f.Request.Op == "user.retire" && (f.Act == nil || !actOK(*f.Act, f.Admitted, f.Request))) || (f.Request.Op != "user.retire" && f.Act != nil) {
 			return fail("state_contradictory")
 		}
 		keys[k] = true
@@ -190,7 +265,7 @@ func (x *execution) validate() error {
 		default:
 			return fail("state_contradictory")
 		}
-		if f.Paused && (f.Terminal || (f.Plan != "readmission" && f.Plan != "binding" && f.Plan != "activation")) {
+		if f.Paused && f.Terminal {
 			return fail("state_contradictory")
 		}
 		if f.Terminal != (f.Phase == "terminal") {
@@ -217,25 +292,31 @@ func (x *execution) validate() error {
 	return nil
 }
 func (x *execution) call(fn func(context.Context, Task) error) error {
-	ctx, cancel := bounded(x.ctx, x.engine.Policy.Limits.StepMS)
-	defer cancel()
-	e := fn(ctx, x.task())
-	if e == nil && ctx.Err() != nil {
-		return fail("cleanup_pending")
+	task := x.task()
+	admitted := false
+	if x.effect != nil {
+		for _, f := range x.state.Effects {
+			if f.Owner == x.effect.Owner && f.Request.ID == x.effect.Request.ID {
+				admitted = true
+			}
+		}
 	}
-	return e
+	if !admitted {
+		return x.preflight(func(c context.Context) error { return fn(c, task) })
+	}
+	return x.read("host_qualification", func(c context.Context) error { return fn(c, task) })
 }
 func (x *execution) task() Task {
 	var t Task
 	if x.effect != nil {
 		f := x.effect
-		t = Task{Key: fmt.Sprintf("%s/%s/%s/%d/%d", f.Owner, f.Request.ID, f.Phase, f.Progress, f.Batch), Account: f.Account, Previous: f.Previous, Skeleton: x.engine.Policy.Skeleton, Limits: x.engine.Policy.Limits}
+		t = Task{Key: fmt.Sprintf("%s/%s/%s/%d/%d", f.Owner, f.Request.ID, f.Phase, f.Progress, f.Batch), Account: f.Account, Previous: f.Previous, Skeleton: x.engine.Policy.Skeleton, SkeletonDigest: x.engine.Policy.SkeletonDigest, Limits: x.engine.Policy.Limits, Step: f.Plan, Records: x.records(), AllocationOwner: f.AllocationOwner, Act: f.Act, NextEffect: x.nextIdentity()}
 	}
 	return t
 }
 
 func (x *execution) admit(c Caller, r Request) (Effect, error) {
-	f := Effect{Owner: c.key(), Admitted: c, Request: r, Phase: "reserved"}
+	f := Effect{Owner: c.key(), AllocationOwner: c.key(), Admitted: c, Request: r, Phase: "reserved"}
 	if r.Op != "user.create" {
 		row, ok := x.view.Generation(r.Args.Generation)
 		if !ok {
@@ -243,8 +324,9 @@ func (x *execution) admit(c Caller, r Request) (Effect, error) {
 		}
 		found := false
 		for _, old := range x.state.Effects {
-			if old.Account.Generation == r.Args.Generation && old.Owner == c.key() {
+			if old.Account.Generation == r.Args.Generation && ((r.Op == "user.retire" && operatorOwns(x.engine.Policy, c, old.AllocationOwner)) || (r.Op != "user.retire" && old.AllocationOwner == c.key())) {
 				f.Account = old.Account
+				f.AllocationOwner = old.AllocationOwner
 				found = true
 				break
 			}
@@ -261,8 +343,38 @@ func (x *execution) admit(c Caller, r Request) (Effect, error) {
 		if !latest {
 			return f, fail("generation_mismatch")
 		}
-		if row.State != "active" {
+		handoff := false
+		if r.Op == "user.retire" {
+			for _, old := range x.state.Effects {
+				if old.Request.Op == "user.bump" && old.Terminal && old.Failure != "" && old.AllocationOwner == f.AllocationOwner && (old.Previous == r.Args.Generation || old.Account.Generation == r.Args.Generation) {
+					handoff = true
+				}
+			}
+		}
+		if row.State != "active" && !handoff {
 			return f, fail("generation_inactive")
+		}
+		for _, old := range x.state.Effects {
+			if !old.Terminal && old.Account.UID == f.Account.UID {
+				return f, fail("target_busy")
+			}
+		}
+		if r.Op == "user.retire" {
+			if x.engine.Operator == nil {
+				return f, fail("cleanup_not_admitted")
+			}
+			var act OperatorAct
+			if err := x.preflight(func(ctx context.Context) error {
+				var e error
+				act, e = x.engine.Operator.Confirm(ctx, c, r, x.engine.Policy, x.engine.BootID)
+				return e
+			}); err != nil {
+				return f, err
+			}
+			if !actOK(act, c, r) {
+				return f, fail("cleanup_not_admitted")
+			}
+			f.Act = &act
 		}
 		x.effect = &f
 		if err := x.call(x.engine.Backend.CleanupAdmission); err != nil {
@@ -303,7 +415,7 @@ func (x *execution) admit(c Caller, r Request) (Effect, error) {
 	owned := map[int64]bool{}
 	for _, old := range x.state.Effects {
 		isCharged := charged[allocationIdentity{old.Account.UID, old.Account.Generation}]
-		if old.Owner == c.key() && isCharged {
+		if old.AllocationOwner == c.key() && isCharged {
 			owned[old.Account.UID] = true
 		}
 		if old.Account.Username == "worker-"+r.Args.Label && isCharged {
@@ -330,7 +442,7 @@ func (x *execution) admit(c Caller, r Request) (Effect, error) {
 		if !occupied[uid] && uid >= p.GIDMin && uid <= p.GIDMax {
 			a := p.account(r.Args.Label, uid, g)
 			stepCtx, cancel := bounded(x.ctx, p.Limits.StepMS)
-			err = x.engine.Backend.Available(stepCtx, a)
+			err = x.preflight(func(ctx context.Context) error { return x.engine.Backend.Available(ctx, a) })
 			if err == nil && stepCtx.Err() != nil {
 				err = fail("cleanup_pending")
 			}
@@ -352,7 +464,40 @@ func (x *execution) admit(c Caller, r Request) (Effect, error) {
 	}
 	return f, fail("identity_exhausted")
 }
-func (x *execution) append(g, state string) error { return x.appendGuarded(g, state, nil) }
+func (x *execution) append(g, state string) error {
+	if state != "removed" {
+		return x.appendGuarded(g, state, nil)
+	}
+	guards := []ActivationGuard{}
+	defer func() {
+		for _, v := range guards {
+			v.Release()
+		}
+	}()
+	needed := []string{"host_qualification", "process_fence"}
+	if x.effect.Request.Op == "user.retire" {
+		needed = append(needed, "cleanup_admission")
+	}
+	for _, p := range needed {
+		guard, e := x.authority(p)
+		if e != nil {
+			return e
+		}
+		guards = append(guards, guard)
+	}
+	basis := x.basis()
+	return x.appendGuarded(g, state, func() error {
+		if basis != x.basis() {
+			return fail("qualification_required")
+		}
+		for _, v := range guards {
+			if e := v.Check(); e != nil {
+				return e
+			}
+		}
+		return nil
+	})
+}
 func (x *execution) appendGuarded(g, state string, guard func() error) error {
 	f := x.effect
 	if row, ok := x.view.Generation(g); ok && row.State == state {
@@ -362,7 +507,16 @@ func (x *execution) appendGuarded(g, state string, guard func() error) error {
 	if e := x.save(); e != nil {
 		return e
 	}
-	v, e := x.engine.Journal.Append(x.ctx, x.state.Floor, f.Account.UID, g, state, genjournal.WholeSecondUTC(), guard)
+	localGuard := func() error {
+		if err := x.fresh(); err != nil {
+			return err
+		}
+		if guard != nil {
+			return guard()
+		}
+		return nil
+	}
+	v, e := x.engine.Journal.Append(x.ctx, x.state.Floor, f.Account.UID, g, state, genjournal.WholeSecondUTC(), localGuard)
 	if e != nil {
 		return e
 	}
@@ -378,7 +532,6 @@ func (x *execution) phase(name string) error {
 }
 func (x *execution) steps(names []string) error {
 	f := x.effect
-	b := x.engine.Backend
 	for f.Progress < len(names) {
 		name := names[f.Progress]
 		f.Plan = name
@@ -386,72 +539,27 @@ func (x *execution) steps(names []string) error {
 		if e := x.save(); e != nil {
 			return e
 		}
-		var action func(context.Context, Task) error
-		switch name {
-		case "group":
-			action = b.Group
-		case "account":
-			action = b.Account
-		case "home":
-			action = b.Home
-		case "verify":
-			action = b.Verify
-		case "stop":
-			action = b.Stop
-		case "absent":
-			action = b.Absent
-		case "remove_account":
-			action = b.RemoveAccount
-		case "remove_group":
-			action = b.RemoveGroup
-		case "removed":
-			action = b.Removed
-		case "retained":
-			action = b.Retained
-		case "readmission":
-			action = b.Readmission
-		case "binding":
-			action = b.Binding
-		case "delete":
-			done := false
-			err := x.call(func(c context.Context, t Task) error {
-				if e := b.Absent(c, t); e != nil {
-					return e
+		done, e := x.step(name)
+		if e != nil {
+			if errors.Is(e, AwaitingEvidence) {
+				f.Paused = true
+				if err := x.save(); err != nil {
+					return err
 				}
-				var e error
-				done, e = b.DeleteBatch(c, t)
-				return e
-			})
-			if err != nil {
-				return err
 			}
+			return e
+		}
+		f.Plan = ""
+		if name == "delete" {
 			f.Batch++
-			f.Plan = ""
 			if !done {
 				if e := x.save(); e != nil {
 					return e
 				}
 				return fail("cleanup_pending")
 			}
-			f.Progress++
-			if e := x.save(); e != nil {
-				return e
-			}
-			continue
-		default:
-			return fail("state_contradictory")
-		}
-		if err := x.call(action); err != nil {
-			if errors.Is(err, AwaitingEvidence) && (name == "readmission" || name == "binding") {
-				f.Paused = true
-				if e := x.save(); e != nil {
-					return e
-				}
-			}
-			return err
 		}
 		f.Progress++
-		f.Plan = ""
 		if e := x.save(); e != nil {
 			return e
 		}
@@ -573,9 +681,7 @@ func (x *execution) retire() error {
 	if !ok {
 		return fail("state_contradictory")
 	}
-	if row.State == "removed" {
-		return x.finish("")
-	}
+
 	if row.State == "active" {
 		if e := x.append(f.Account.Generation, "retiring"); e != nil {
 			return e
@@ -670,7 +776,12 @@ func (x *execution) activate() error {
 	}
 	ctx, cancel := bounded(x.ctx, x.engine.Policy.Limits.StepMS)
 	defer cancel() // The readiness lease remains live through journal persistence and release.
-	guard, err := x.engine.Backend.CommitReady(ctx, x.task())
+	var guard ActivationGuard
+	err := x.read("activation_guard", func(c context.Context) error {
+		var e error
+		guard, e = x.engine.Backend.CommitReady(ctx, x.task())
+		return e
+	})
 	if err == nil && ctx.Err() != nil {
 		err = fail("cleanup_pending")
 	}
@@ -689,7 +800,32 @@ func (x *execution) activate() error {
 	if guard == nil {
 		return fail("qualification_required")
 	}
+	guards := []ActivationGuard{}
+	for _, purpose := range []string{"host_qualification", "managed_content", "persistence_denial", "process_fence", "activation_guard"} {
+		g, e := x.authority(purpose)
+		if e != nil {
+			for _, held := range guards {
+				held.Release()
+			}
+			return e
+		}
+		guards = append(guards, g)
+	}
+	defer func() {
+		for _, g := range guards {
+			g.Release()
+		}
+	}()
+	basis := x.basis()
 	return x.appendGuarded(x.effect.Account.Generation, "active", func() error {
+		if x.basis() != basis {
+			return fail("qualification_required")
+		}
+		for _, g := range guards {
+			if e := g.Check(); e != nil {
+				return e
+			}
+		}
 		if ctx.Err() != nil {
 			return fail("cleanup_pending")
 		}

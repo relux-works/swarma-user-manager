@@ -5,7 +5,7 @@ Two minimal privileged components for agent systems. Each runs as root for one o
 - **swarma-user-manager** creates, lists and retires per-agent, per-service and qualified workplace OS accounts, owns the static UID-range default deny from v0, and (v1) narrows trusted agents to their bound model-provider proxy and workplaces to zero egress;
 - **swarma-user-launcher** starts one approved executor under one active agent or qualified workplace account, so that an unprivileged dispatcher can run an agent as that account without general `sudo` rights.
 
-**Status: design in progress.** Accepted architecture-review findings (2026-10-13) are reflected in draft v0.15 and its figures; publication/qualification gates remain open. The [generation journal format `gen-journal/1`](spec/generation-journal.md), vectors and Linux offline checker are published here; the station core and its injected-backend tests are implemented, and standalone [Linux station primitives](internal/linuxos/README.md) are available for backend integration. Real OS account backends and production consumer adapters remain unqualified. The helper specification is [`spec/helper.md`](spec/helper.md); diagrams are in [`diagrams/`](diagrams/).
+**Status: design in progress.** Accepted architecture-review findings (2026-10-13) are reflected in draft v0.15 and its figures; publication/qualification gates remain open. The [generation journal format `gen-journal/1`](spec/generation-journal.md), vectors and Linux offline checker are published here; the station core includes v2 effect receipts, unlocked per-effect flights and versioned authority boundaries with injected-backend tests, and standalone [Linux station primitives](internal/linuxos/README.md) are available for backend integration. Real OS account backends and production consumer adapters remain unqualified. The helper specification is [`spec/helper.md`](spec/helper.md); diagrams are in [`diagrams/`](diagrams/).
 
 ## Principles
 
@@ -95,7 +95,9 @@ or backend access until the Keymaker provision/confirm contract is accepted.
 | Tool | Purpose | Command | Output |
 |---|---|---|---|
 | Station core build | Build the bounded one-request entrypoint | `go build -o .temp/swarma-user-manager ./cmd/swarma-user-manager` | Binary in `.temp/`; closed result JSON on stdout |
-| Core/backend tests | Fake lifecycle, protected disk evidence, invocation and native journal integration | `go test ./internal/manager ./cmd/swarma-user-manager ./tools/genjournal -count=1` | Named test verdicts; isolated Go temporary fixtures |
+| Core/backend tests | Fake lifecycle, v2 receipts/flights, authority, operator admission and protected evidence | `go test -p 1 ./internal/manager -count=1` | Named test verdicts; isolated Go temporary fixtures |
+| Prepared journal tests | Exact-tail admission and native activation lock guard | `go test -p 1 ./tools/genjournal -run '^(TestNativeActivationGuard\|TestPreparedAppendRequiresExactTail)$' -count=1` | Named test verdicts |
+| Shared-host serialization | Bound package/race-test contention | `env GORACE=atexit_sleep_ms=0 GOMAXPROCS=2 heavy-slot --label architect -- go test -p 1 ./internal/manager -count=1` | Task-local untracked logs |
 
 ## Linux station tools
 
