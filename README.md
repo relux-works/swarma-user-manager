@@ -92,6 +92,11 @@ account backend, so new provisioning refuses `qualification_required`.
 Production bump always refuses `bump_key_admission_unconfirmed` before journal
 or backend access until the Keymaker provision/confirm contract is accepted.
 
+The [qualification issuer and account-directory contract](spec/station-effect-receipts.md#63-root-issuer-and-closed-qualification-record)
+specifies a root-only `swarma-user-manager qualify` maintenance entry, canonical
+digest-pinned evidence and exact recorded NSS configuration. That entry and its
+production reader remain unimplemented; a `qualified` flag alone never admits.
+
 | Tool | Purpose | Command | Output |
 |---|---|---|---|
 | Station core build | Build the bounded one-request entrypoint | `go build -o .temp/swarma-user-manager ./cmd/swarma-user-manager` | Binary in `.temp/`; closed result JSON on stdout |

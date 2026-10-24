@@ -470,11 +470,11 @@ Provider implementations still require their own publication/qualification.
 
 | Purpose | Binding local-v0 source and admission rule |
 |---|---|
-| `host_qualification` | The root step installs a protected root-owned policy containing station UID/GID ranges, operator-principal pins, approved skeleton digests, source labels and a `qualified` flag. Set the flag only after the root qualification passes, including persistence denial and policy-file protection. Qualification evidence binds the exact installed policy/backend and root-run result; a flag by itself is insufficient. |
+| `host_qualification` | Root installs the protected policy and the reviewed binary issues the canonical root-run qualification record in §6.3. The policy pins its digest beside `qualified`; admit only when record protection, all checks, deployed policy/binary/backend/skeleton, boot and current NSS configuration match. A flag alone never admits; mismatch or unavailable evidence refuses `qualification_required`. |
 | `cleanup_admission` | Only the configured authenticated operator principal may retire in v0. Each exact-generation retire request is the explicit direct-operator act in helper §4.4: authentication, exact-content confirmation and durable per-act export-obligation waiver. No generic waiver field or standing discard is added. Dispatcher retirement with confirmed export is later work. |
 | `managed_content` | A root-owned approved-skeleton directory, with protected ancestors and manifest/content digest pinned in policy. Verify the complete selected skeleton and approved bytes, not a caller path or freshly trusted digest of live home content. The Curator composition/start interlock provider comes later; no launcher is admitted meanwhile. |
 | `persistence_denial` | The root step installs cron.deny/at.deny coverage for station accounts in the configured range and ensures no linger. Verify exact station **names** because these deny files are not numeric UID filters, allow-file precedence, no user-manager/session persistence and no linger. Each reserved name must be covered before activation; a host qualification flag cannot excuse a missing new-name entry. |
-| `process_fence` | There is no v0 launcher and the platform starts no process under a station UID. Accounts have locked passwords and no login. Maintain this deployment restriction through unlocked work and perform complete UID process/object inventory before `active` and `removed`. Any UID process before `active` refuses activation and records an incident; partial/unknown inventory refuses. Owned expected objects must match receipts; unexplained objects never become owned by inventory. |
+| `process_fence` | Policy pins `no_launcher=true`; no launcher is deployed and the platform starts no process under a station UID. Accounts have locked passwords and no login. Maintain this restriction through unlocked work and require a fresh complete process/object inventory for the exact target before `active` and `removed` (§6.5). Any UID process before `active` refuses activation and records an incident; partial/unknown inventory refuses. No separate fence provider or flag-only absence proof is required or admitted. |
 | `activation_guard` | The local verified journal guard performs final generation/fence validation and commit under the journal's exclusive `gate.lock` then `data.lock`, after the separate effect-store `effects.lock`; full order is effects -> gate -> data. It accepts only fresh evidence from the other sources. It cannot hold any of those locks while acquiring external evidence; the §4 protocol still applies. |
 
 The policy file itself must be root:root 0600, a regular single-link file,
@@ -482,8 +482,10 @@ under protected root-owned ancestors, opened without following links. Missing
 file, wrong owner/group, broader permissions (including group write), unsafe
 ancestors, unqualified flag or mismatched qualification evidence returns
 `qualification_required`. This qualifies no new policy schema implicitly:
-the implementation must introduce a reviewed version supporting these source
-selections and operator pins; the current closed v1 policy cannot accept them.
+the implementation must use a reviewed version supporting these source
+selections, operator pins and qualification fields; the closed v1 policy cannot
+accept them, and current v2 decoding does not implicitly accept the new §6.3–6.5
+maintenance selection or `no_launcher` member.
 
 The root qualification must actively verify cron.deny, at.deny, effective
 allow-file precedence and no linger, plus the owner/mode of the policy file
@@ -515,6 +517,191 @@ by a qualification flag. The future launcher/dispatcher providers require
 their stronger published interlocks before use. The bump Keymaker contract,
 external restore custody and receipt ownership rules remain independent gates.
 
+### 6.3 Root issuer and closed qualification record
+
+The reviewed installed `swarma-user-manager` binary supplies the maintenance
+entry `swarma-user-manager qualify`. It is invoked only from the operator's
+trusted root maintenance entry with admission stopped and exclusive deployment
+configuration ownership. Dispatcher/station callers cannot invoke it; their
+empty-argv sudo rules do not widen. `qualify` is not a `helper-op/1` operation.
+It reads fixed protected configuration, never caller-supplied paths, digests,
+check verdicts or environment authority. It verifies every host prerequisite
+of §6.2, writes evidence, and does not repair policy, account or persistence
+state, run a launcher, or set `qualified`. The disposable primitive
+`root-qualification.sh` does not issue this record. This maintenance entry and
+its production reader are specified here, not implemented or qualified.
+Checks run on the unqualified candidate policy; they do not require an already
+passing host record or invoke lifecycle admission to bootstrap the issuer.
+
+The protected policy root determines the fixed record location
+`<protected-root>/lib/user-manager/qualification/record.json`. The directory is
+root:root 0700 under protected root-owned ancestors; the record is a regular,
+single-link root:root 0600 file. No symlink traversal, untrusted ancestor or
+alternate caller location is accepted. Publish with exclusive same-filesystem
+temporary creation, file fsync, atomic replacement and parent fsync; collision
+with an unrelated temporary object refuses. A failed or interrupted issuance
+cannot install a passing pin. Keep failed diagnostics in protected maintenance
+logs; never record account hashes, secrets or raw tool output in the record.
+
+The closed record has exactly these mandatory fields, encoded with the pinned
+registrar CCJ-1 implementation, no trailing LF and no second canonicalizer:
+
+```text
+Q = {format:"station-qualification/1",policy_digest,binary_digest,backend_digest,
+     skeleton_digest,nss_configuration:{passwd,group,shadow},nss_modules,
+     station_range:{uid_min,uid_max,gid_min,gid_max},station_names,
+     checks,boot_id,issued_at_unix_ms}
+nss_modules entry = {name,implementation_digest,configuration_digest,
+                     uid_ranges,gid_ranges}
+uid_ranges / gid_ranges entry = {min,max}
+checks = {policy_protection,source_configuration,approved_skeleton,
+          cron_denial,at_denial,allow_precedence,no_linger,account_directory,
+          dynamic_user_ranges,no_launcher,account_restrictions}
+each check = {result,reason}
+```
+
+All objects are closed. Reject unknown/duplicate members, omitted fields,
+noncanonical bytes, unknown format, invalid types, overflow and exceeded finite
+bounds from the reviewed policy. Digests are lowercase 64-hex SHA-256 strings.
+Range endpoints are inclusive nonzero UID/GID integers within the existing
+policy bounds; arrays of ranges are sorted and nonoverlapping. `station_range`
+is exactly the installed policy's two ranges, not an observed free subset.
+`station_names` is a sorted unique array of the complete protected
+policy-derived station-name coverage being checked, including all reserved
+names. It does not exempt a later new name from fresh denial checks.
+`boot_id` is the current kernel boot identifier; `issued_at_unix_ms` is a
+positive integer audit timestamp, not an authority TTL or monotonic fence.
+Each result is exactly `ok`, `failed` or `unknown`; `ok` has empty `reason`,
+otherwise reason is one of `unsafe`, `mismatch`, `unavailable`, `unsupported`
+or `limit`. Every check must be `ok` for a passing record. A skipped,
+unsupported, partial or missing check cannot pass. Check meanings are fixed:
+
+| Check | Required observation |
+|---|---|
+| `policy_protection` | Exact policy owner/group/mode, regular single-link file, protected no-follow ancestry. |
+| `source_configuration` | All six §6.2 source labels/version/configuration pins and their reviewed implementations selected; explicit finite bounds and operator-principal scopes present. This does not issue an operator act or prove a future cleanup confirmation. |
+| `approved_skeleton` | Complete protected manifest and every approved content digest match deployed policy. |
+| `cron_denial`, `at_denial` | Every name in the full recorded coverage is denied by the corresponding qualified mechanism; no numeric-range inference. |
+| `allow_precedence` | Effective cron/at allow-file precedence cannot admit any covered station name. |
+| `no_linger` | No station linger, user-manager or session persistence is enabled for covered identities. |
+| `account_directory` | Complete qualified authoritative-local/NSS agreement under §6.4, covering reserved identities and the station number/name namespaces. |
+| `dynamic_user_ranges` | Proven module UID/GID ranges are disjoint from the entire configured station ranges. |
+| `no_launcher` | Protected deployment configuration and installed entry/service inventory agree with `no_launcher=true`; no platform launcher is deployed or enabled. |
+| `account_restrictions` | Every present reserved station identity has its exact admitted identity fields, locked password, no-login shell and forbidden memberships absent; future identities require the same fresh checks. |
+
+`binary_digest` hashes the exact installed reviewed executable bytes; issuance
+and runtime verify that the executing binary is that installed object through
+trusted retained handles. `backend_digest` equals the policy's pinned reviewed
+backend/configuration digest; changed backend dependencies are a version change.
+`skeleton_digest` equals the approved manifest/content digest pinned in policy,
+after complete protected no-follow verification of that skeleton. Equal path
+names or a digest freshly taken from station content cannot substitute.
+
+The two-way policy/record binding must not require a hash fixed point. For
+this record only, let P0 be the validated closed deployed policy with exactly
+`qualified=false` and `qualification_digest` set to 64 zeroes, all other fields
+unchanged. Define:
+
+```text
+Q.policy_digest = SHA256(CCJ({domain:"station-qualification-policy/1",policy:P0}))
+P.qualification_digest = SHA256(CCJ(Q))
+```
+
+The operator installs P0 with admission stopped, runs `qualify`, verifies a
+passing protected record and matching inputs, then atomically installs the
+same policy with only its record pin and `qualified=true` changed. These two
+attestation fields are the only normalization exception. Any other policy
+change, including source/module configuration, ranges, skeleton selection,
+operator pins or backend version, requires re-qualification; so does changing
+the executable or approved skeleton. Reboot requires a new same-boot record.
+The full policy digest in §4/§6.1 authority evidence is unchanged by this
+qualification-specific formula: prepared authority still binds the actual
+complete current policy, including its pin and flag. Installing a new pin
+therefore invalidates already prepared authority evidence.
+
+`host_qualification` validates policy and record protection and canonical
+format, `qualified=true`, the exact record digest pin, the normalized policy
+digest, current executing/installed binary, backend and approved skeleton,
+exact range, every `ok` check, current boot and the current NSS inputs in §6.4.
+Read/revalidate under the §4 configuration exclusion and exact-basis protocol;
+protection or digests checked once at startup are insufficient. Missing,
+unreadable, malformed, failed, unknown, drifted or mismatched evidence yields
+`unknown` (or a conclusive `refuse`) and the public gate refuses
+`qualification_required` before lifecycle writes/activation. Keep reservations
+and holds; neither an old record nor the flag permits fallback. This historical
+host record grants no account ownership, cleanup act or cached target absence.
+
+### 6.4 Qualified local account directory and NSS configuration
+
+Local protected `passwd`, `group` and `shadow` are authoritative. Read the
+complete bounded databases from trusted directory descriptors without following
+links; verify root ownership, regular single-link files, safe modes and
+protected ancestors. Shadow must not be readable by a station. Read all three
+under qualified account-database change exclusion and reconcile with an
+independent complete NSS view, as required by `ObserveAccounts`; a boolean
+NSS-availability claim is insufficient. Check both number and name namespaces,
+primary/supplementary group memberships, UID/GID, home, shell and password-lock
+state. Missing databases/providers, duplicate/ambiguous entries, NSS-only
+relevant entries, local/NSS disagreement, unsupported enumeration, timeout or
+partial reads are unknown. Conclusive local/NSS agreement on absence is valid
+collision evidence, never a creation receipt. A positive lookup alone cannot
+prove collision-free absence or full agreement. Never retain password hashes in qualification evidence.
+
+Qualification captures exactly one physical `passwd:`, `group:` and `shadow:`
+line from protected `nsswitch.conf` in the corresponding `nss_configuration`
+strings, preserving all bytes including spacing, action clauses, comments and
+the terminating LF when present. Require valid UTF-8; reject NUL/CR, duplicate
+or missing database lines, continuations and unsupported syntax. Do not expand
+an omitted database to a libc default or silently normalize a line. At runtime
+re-read these protected lines and require byte equality with the record before
+using the account directory; any difference makes the directory and host
+qualification unknown and requires re-qualification.
+
+`nss_modules` lists exactly the modules selected by those three lines, once
+each in first-appearance order (`passwd`, then `group`, then `shadow`). Each
+module needs a reviewed bounded complete lookup/agreement implementation plus
+protected provenance for its implementation/configuration digests and every
+UID/GID interval it can synthesize dynamically. Those digests bind the complete
+reviewed module dependency/configuration closure, not only a module label or
+one arbitrarily selected file; an uninspectable dependency cannot qualify. A module with no dynamic IDs
+has explicitly empty arrays, supported by its reviewed semantics; an unknown
+or unbounded range is not empty and cannot qualify. Include all reachable
+module behavior under NSS action clauses; one successful earlier module does
+not excuse an unqualified later source. No module name, such as a local-file
+module, grants authority by name alone.
+
+Qualification fails if either station UID range or station GID range overlaps
+any corresponding module dynamic range, including one shared endpoint.
+Record the checked ranges in each module entry; do not invent host defaults
+or infer ranges from currently present users. Runtime must verify the same
+module implementation/configuration digests and ranges as well as the exact
+three lines. Module configuration drift with unchanged lines is also unknown.
+The approved account-directory provider and its module support matrix ship as
+part of the pinned reviewed backend; an unimplemented or unqualified module
+refuses rather than producing a best-effort NSS view. Fresh per-target local
+and NSS agreement is still mandatory at allocation/restoration/verification;
+the record does not snapshot live account data or turn NSS matches into receipts.
+
+### 6.5 Local-v0 process fence
+
+The reviewed policy must explicitly pin `no_launcher=true`; qualification
+verifies that no launcher is deployed, station accounts are password-locked
+and no-login, and persistence restrictions hold. This policy member belongs
+to the reviewed policy update implementing this contract; it is not an
+extension accepted implicitly by the current closed policy decoder.
+Maintain this deployment restriction across unlocked preparation. Before each
+`active` or `removed` append, obtain a fresh complete process and object
+inventory for the exact reserved UID/GID/name/home and generation under §4's
+current policy/tail/boot/fence binding and maintained exclusion. Before `active`,
+any UID process refuses and records an incident; expected owned objects require
+receipts. Before `removed`, require quiescence and all stage-specific cleanup
+postconditions; a partial, dirty-forbidden or unknown observation cannot prove
+absence. No-launcher policy and a passing host record cannot replace inventory.
+The existing local inventory/source and activation guard supply this fence;
+there is no additional external fence provider to wait for or invent. This
+remains the privileged-platform deployment assumption and residual risk in
+§6.2, not a kernel prohibition on root creating processes.
+
 ## 7. Qualification plan: negative cases first
 
 These are required future executable qualifications, **all PENDING**. This
@@ -541,6 +728,10 @@ not crash or fail setup; every positive neighbor must run in the same harness.
 | `UnknownAuthorityCannotQualify`: missing/unknown source, wrong source label/version, stale evidence or cached clean cannot open production or bump activation | `ExplicitAuthorityEvidenceValidated`: exact accepted version-bound provider evidence passes only its qualified scope | Treat unknown evidence as admitted; assert refusal before write and before any successor selection. The real provider positive awaits implementation/root qualification. |
 | `PolicyProtectionQualificationRefused`: policy missing, non-root-owned, group-writable or otherwise broader than 0600 refuses `qualification_required` before writes | `ProtectedPolicyQualifies`: root:root 0600 policy and ancestors, pinned source versions and successful root-run evidence qualify | Ignore the file owner/mode or trust flag alone; the named negative must fail on forbidden admission. |
 | `PersistenceQualificationRefused`: missing cron.deny entry, missing at.deny entry, effective allow-file admission or lingering enabled refuses `qualification_required` | `CompletePersistenceDenialQualifies`: exact reserved names denied in both mechanisms, effective precedence verified and no linger; host and per-target checks pass | Omit each deny/linger check separately; the corresponding named case must fail on forbidden qualification/activation. |
+| `QualificationRecordMismatchRefused`: change record bytes/pin, policy content, executable/backend or skeleton after issuance; refuse `qualification_required` before writes | `QualificationRecordMatches`: protected canonical record with matching deployment, boot, all checks `ok` and exact pin admits only the host gate | Skip one binding comparison; the corresponding negative must fail on forbidden admission. Normalize only the two attestation fields; changing another policy field must invalidate qualification. |
+| `NSSLineDriftRefused`: change any recorded passwd/group/shadow line, including spacing or action clauses, after qualification; host and account-directory results become unknown | `NSSConfigurationMatches`: exact unchanged lines, qualified module configuration and complete local/NSS agreement permit the relevant observation | Ignore one database line or normalize whitespace; the named drift assertion must fail. Also plant a module configuration/range change while lines remain equal. |
+| `DynamicUserRangeOverlapRefused`: station UID or GID interval overlaps a configured NSS module dynamic interval, including a shared endpoint; qualification fails | `DynamicUserRangesDisjoint`: proven complete module ranges are disjoint from both station ranges; the immediately adjacent nonoverlapping boundary passes | Skip the overlap check, ignore GIDs or use exclusive endpoints; the corresponding case must fail. Unknown module ranges separately refuse rather than count as empty. |
+| `QualificationFlagWithoutRecordRefused`: set `qualified=true` with missing record, missing pin, unsafe record, nonpassing/missing check or another boot; refuse before any OS/lifecycle write | `QualifiedFlagWithPassingRecord`: root issuer's durable protected all-`ok` same-boot record, verified inputs and exact policy pin pass only host qualification | Admit from the flag alone or omit one record prerequisite; named negative fails on forbidden host admission. A passing host neighbor still needs fresh per-target checks. |
 | `NonOperatorRetirementRefused`: dispatcher or wrong pinned operator cannot waive export or enter retirement; no cleanup writes | `ExplicitOperatorRetirementAdmitted`: exact authenticated/confirmed operator act journals its scoped export waiver and unresolved broker obligation before forward retirement | Reuse dispatcher authority or omit exact-act confirmation; named negative fails on unauthorized retirement. |
 | `PreactiveProcessIncident`: any station UID process before active prevents activation and leaves an incident/reservation | `NeverLaunchedInventoryClean`: no station process and complete accounted UID-object inventory permit only the locally provisioned active state | Treat no-launcher configuration as proof without inventory; named negative fails on active append. |
 
