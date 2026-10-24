@@ -291,7 +291,7 @@ func verify(ctx context.Context, p Profile, base Baseline, inv Invocation, b Bun
 			return fail(ErrMissing)
 		}
 		md5sum := fmt.Sprintf("%x", md5.Sum(member.data))
-		if installed.MD5 == "" || installed.MD5 != md5sum || payload.md5[strings.TrimPrefix(leaf.Path, "/")] != "" && payload.md5[strings.TrimPrefix(leaf.Path, "/")] != md5sum || Digest(installed.Bytes) != Digest(member.data) || Digest(installed.Bytes) != leaf.SHA256 || installed.SHA256 != "" && installed.SHA256 != Digest(member.data) {
+		if leaf.MD5 != "" && leaf.MD5 != installed.MD5 || leaf.DpkgSHA256 != "" && leaf.DpkgSHA256 != installed.SHA256 || installed.MD5 == "" || installed.MD5 != md5sum || payload.md5[strings.TrimPrefix(leaf.Path, "/")] != "" && payload.md5[strings.TrimPrefix(leaf.Path, "/")] != md5sum || Digest(installed.Bytes) != Digest(member.data) || Digest(installed.Bytes) != leaf.SHA256 || installed.SHA256 != "" && installed.SHA256 != Digest(member.data) {
 			return fail(ErrChecksum)
 		}
 		if installed.Mode != m.Mode || installed.UID != m.UID || installed.GID != m.GID || member.mode != m.Mode || member.uid != m.UID || member.gid != m.GID {

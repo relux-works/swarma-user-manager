@@ -146,7 +146,10 @@ identity is bound to the root parent process's boot/PID/start/executable instanc
 that instance token is not a transaction ID. Dpkg associates to an actual pinned
 APT parent, never to whichever aggregate happens to be open. Exact package status,
 ordinary ownership lists, diversions and regular no-follow closure reads are
-captured. Incoming archives are retained durably before recording their identities.
+captured. Incoming archives and descriptor-checked installed leaf bytes are retained
+durably by content digest before their identities are recorded. Each leaf also
+retains its required installed MD5 entry and optional dpkg SHA-256 entry, so
+later package metadata cannot silently replace an invocation's checksum evidence.
 Boot scan takes package frontend/database exclusion and refuses incomplete or
 unattributed transitions. The hooks do not call apt, install, qualify or re-pin.
 

@@ -81,6 +81,8 @@ type Package struct {
 func (p Package) key() string { return p.Name + ":" + p.Architecture }
 
 type Leaf struct {
+	MD5          string `json:"md5"`
+	DpkgSHA256   string `json:"dpkg_sha256"`
 	Path         string `json:"path"`
 	Package      string `json:"package"`
 	Architecture string `json:"architecture"`

@@ -406,7 +406,30 @@ func captureNative(ctx context.Context, cfg HookConfig, r *Recorder, artifacts [
 		if e != nil || st.Nlink != 1 {
 			return Snapshot{}, ErrOwnership
 		}
-		snapshot.Leaves = append(snapshot.Leaves, Leaf{Path: m.Path, Package: m.Package, Architecture: m.Architecture, SHA256: Digest(bytes), Mode: st.Mode & 07777, UID: st.Uid, GID: st.Gid})
+
+		md5Bytes, e := packageMetadata(m.Package+":"+m.Architecture, m.Package, "md5sums", cfg.Profile.Limits.Bytes, false)
+		if e != nil {
+			return Snapshot{}, e
+		}
+		md5sum, e := checksumEntry(md5Bytes, strings.TrimPrefix(m.Path, "/"), 32)
+		if e != nil {
+			return Snapshot{}, e
+		}
+		shaBytes, e := packageMetadata(m.Package+":"+m.Architecture, m.Package, "sha256sums", cfg.Profile.Limits.Bytes, true)
+		if e != nil {
+			return Snapshot{}, e
+		}
+		shaSum := ""
+		if len(shaBytes) > 0 {
+			shaSum, e = checksumEntry(shaBytes, strings.TrimPrefix(m.Path, "/"), 64)
+			if e != nil {
+				return Snapshot{}, e
+			}
+		}
+		if e = retainArtifact(bytes, cfg.Profile.Limits); e != nil {
+			return Snapshot{}, e
+		}
+		snapshot.Leaves = append(snapshot.Leaves, Leaf{MD5: md5sum, DpkgSHA256: shaSum, Path: m.Path, Package: m.Package, Architecture: m.Architecture, SHA256: Digest(bytes), Mode: st.Mode & 07777, UID: st.Uid, GID: st.Gid})
 	}
 	sort.Slice(snapshot.Packages, func(i, j int) bool { return snapshot.Packages[i].key() < snapshot.Packages[j].key() })
 	sort.Slice(snapshot.Leaves, func(i, j int) bool { return snapshot.Leaves[i].Path < snapshot.Leaves[j].Path })
@@ -537,4 +560,58 @@ func retainArtifact(b []byte, l Limits) error {
 
 func supportedNativeProfile(p Profile) bool {
 	return p.MaxAge == UbuntuReleaseMaxAge && p.P7Deadline == RevocationResponseDeadline && p.Distribution == "ubuntu" && p.Release == "26.04" && p.Architecture == "amd64" && p.Origin == "Ubuntu" && p.Component == "main" && nameRE.MatchString(p.Codename) && (p.Suite == p.Codename || p.Suite == p.Codename+"-updates" || p.Suite == p.Codename+"-security")
+}
+
+func packageMetadata(qualified, name, suffix string, limit int64, optional bool) ([]byte, error) {
+	d, e := openProtectedDir("/var/lib/dpkg/info", 0, "/")
+	if e != nil {
+		return nil, ErrChecksum
+	}
+	defer d.Close()
+	for _, n := range []string{qualified + "." + suffix, name + "." + suffix} {
+		var st unix.Stat_t
+		e := unix.Fstatat(int(d.Fd()), n, &st, unix.AT_SYMLINK_NOFOLLOW)
+		if e == unix.ENOENT {
+			continue
+		}
+		if e != nil {
+			return nil, ErrChecksum
+		}
+		b, e := readRootFile("/var/lib/dpkg/info/"+n, limit)
+		if e != nil {
+			return nil, ErrChecksum
+		}
+		return b, nil
+	}
+	if optional {
+		return nil, nil
+	}
+	return nil, ErrChecksum
+}
+func checksumEntry(b []byte, path string, length int) (string, error) {
+	found := ""
+	for _, line := range strings.Split(string(b), "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) != 2 || len(fields[0]) != length {
+			return "", ErrChecksum
+		}
+		for _, c := range fields[0] {
+			if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
+				return "", ErrChecksum
+			}
+		}
+		if fields[1] == path {
+			if found != "" {
+				return "", ErrChecksum
+			}
+			found = fields[0]
+		}
+	}
+	if found == "" {
+		return "", ErrChecksum
+	}
+	return found, nil
 }

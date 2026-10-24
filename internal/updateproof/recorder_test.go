@@ -248,3 +248,17 @@ func TestRecorderCrossHandleExclusion(t *testing.T) {
 		t.Fatal("failed contender wrote/blocked state", id, e)
 	}
 }
+
+// Claim: the captured checksum view selects exactly one complete entry; missing,
+// malformed and duplicate attribution cannot substitute for the mapped leaf.
+func TestUpdateCapturedChecksumEntry(t *testing.T) {
+	entry := "0123456789abcdef0123456789abcdef"
+	if got, e := checksumEntry([]byte(entry+"  usr/lib/fixture\n"), "usr/lib/fixture", 32); e != nil || got != entry {
+		t.Fatal("checksum control", got, e)
+	}
+	for _, b := range []string{entry + "  usr/lib/other\n", entry + "  usr/lib/fixture\n" + entry + "  usr/lib/fixture\n", "bad  usr/lib/fixture\n"} {
+		if _, e := checksumEntry([]byte(b), "usr/lib/fixture", 32); e != ErrChecksum {
+			t.Fatal("ambiguous checksum", e)
+		}
+	}
+}
