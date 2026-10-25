@@ -35,16 +35,29 @@ jobs:
       - name: Vet
         run: go vet ./...
       - name: Check formatting
-        run: test -z "$(gofmt -l .)"
+        run: |
+          out="$(gofmt -l .)"
+          if test -n "$out"; then
+            printf '%s\n' "$out"
+          fi
+          test -z "$out"
       # Repository-specific, read-only diagnostics; unavailable probes are nonfatal.
       - name: Report bootstrap and loader prerequisites
         continue-on-error: true
         run: |
           cat /etc/os-release || printf '%s\n' 'os-release unavailable'
-          ldd --version | head -1 || printf '%s\n' 'glibc version unavailable'
+          if ldd_version="$(ldd --version)"; then
+            printf '%s\n' "${ldd_version%%$'\n'*}"
+          else
+            printf '%s\n' 'glibc version unavailable'
+          fi
           ls -l /usr/bin/python3.14 || printf '%s\n' '/usr/bin/python3.14 absent or unreadable'
           sha256sum /etc/ld.so.cache || printf '%s\n' 'loader cache digest unavailable'
-          ldconfig -p | awk '$1 == "libc.so.6" || $1 == "libm.so.6" || $1 == "libnss_systemd.so.2"' || printf '%s\n' 'loader cache rows unavailable'
+          if loader_cache="$(ldconfig -p)"; then
+            awk '$1 == "libc.so.6" || $1 == "libm.so.6" || $1 == "libnss_systemd.so.2"' <<< "$loader_cache" || printf '%s\n' 'loader cache rows unavailable'
+          else
+            printf '%s\n' 'loader cache rows unavailable'
+          fi
       # Repository-specific: peerUID skips peer fixtures only for this exact value.
       # Verbose output includes each skip and reason; review leaves it unset.
       - name: Test without privileged qualification
