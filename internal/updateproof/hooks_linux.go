@@ -287,6 +287,17 @@ func packageReadExclusion() (func(), error) {
 	return func() { release(); d.Close() }, nil
 }
 func packageReadExclusionAt(d *os.File, owner uint32) (func(), error) {
+	files, err := openPackageLocks(d, owner)
+	if err != nil {
+		return nil, ErrGap
+	}
+	return func() {
+		for i := len(files) - 1; i >= 0; i-- {
+			files[i].Close()
+		}
+	}, nil
+}
+func openPackageLocks(d *os.File, owner uint32) ([]*os.File, error) {
 	if protected(d, owner, true) != nil {
 		return nil, ErrGap
 	}
@@ -316,12 +327,12 @@ func packageReadExclusionAt(d *os.File, owner uint32) (func(), error) {
 			}
 		}
 		lock := unix.Flock_t{Type: unix.F_WRLCK, Whence: 0, Start: 0, Len: 0}
-		if unix.FcntlFlock(f.Fd(), unix.F_OFD_SETLK, &lock) != nil {
+		if e := unix.FcntlFlock(f.Fd(), unix.F_OFD_SETLK, &lock); e != nil {
 			release()
-			return nil, ErrGap
+			return nil, e
 		}
 	}
-	return release, nil
+	return files, nil
 }
 
 func captureNative(ctx context.Context, cfg HookConfig, r *Recorder, artifacts []Package) (Snapshot, error) {

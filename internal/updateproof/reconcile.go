@@ -46,6 +46,20 @@ func reconcile(ctx context.Context, r *Recorder, accepted AcceptedState, profile
 		return fail(ErrGap)
 	}
 	defer release()
+	return reconcileObserved(ctx, r, accepted, profile, base, load, source, boot, state)
+}
+
+// PackageObservation supplies observations only; a held session owns exclusion.
+type PackageObservation interface {
+	Audit(context.Context) error
+	Capture(context.Context) (Snapshot, error)
+}
+
+func reconcileObserved(ctx context.Context, r *Recorder, accepted AcceptedState, profile RepositoryProfile, base RepositoryBaseline, load func(context.Context, ScanResult) (map[ID]RepositoryBundle, error), source TimeSource, boot string, state PackageObservation) (Reconciled, error) {
+	fail := func(e error) (Reconciled, error) { return Reconciled{}, e }
+	if state == nil || r == nil || !tokenRE.MatchString(boot) || !same(accepted.Snapshot.Packages, base.Common.Packages) || !same(accepted.Snapshot.Leaves, base.Common.Leaves) {
+		return fail(ErrGap)
+	}
 	current, e := state.Capture(ctx)
 	if e != nil {
 		return fail(e)
