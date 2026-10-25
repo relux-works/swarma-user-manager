@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -119,9 +120,9 @@ func TestLoaderCacheTableRefusal(t *testing.T) {
 	}
 }
 
-// The host cache is read-only. With an empty native environment and no embedded
-// RUNPATH, dlopen+dlinfo supply the actual loader-selected objects independently
-// of this parser; each supported SONAME resolves to that same device/inode. This
+// The read-only host cache must refuse each SONAME with a foreign-ABI row;
+// otherwise the model must agree with native dlopen+dlinfo on device/inode.
+// At least one SONAME must prove agreement, so all-refusal cannot pass. This
 // exercises this host's glibc, not a claim that the host runs glibc 2.42.
 func TestLoaderCacheHostAgreement(t *testing.T) {
 	b, e := os.ReadFile("/etc/ld.so.cache")
@@ -150,9 +151,60 @@ int main(int argc,char **argv) {
 	if out, e := cmd.CombinedOutput(); e != nil {
 		t.Fatalf("native cache helper: %v %s", e, out)
 	}
+	// glibc's own cache printer is independent of cacheResolve's binary reader
+	// and ABI flags. Its annotations, not the model's verdict, select expectations.
+	// ABI spellings: glibc 2.42 elf/cache.c print_entry (x86-64 and AArch64).
+	nativeABI := ""
+	switch runtime.GOARCH {
+	case "amd64":
+		nativeABI = "libc6,x86-64"
+	case "arm64":
+		nativeABI = "libc6,AArch64"
+	default:
+		t.Fatal("host agreement requires a reviewed native ABI")
+	}
+	cmd = exec.Command("/usr/sbin/ldconfig", "-p", "-C", "/etc/ld.so.cache")
+	cmd.Env = []string{"LC_ALL=C"}
+	cmd.Dir = "/"
+	out, e := cmd.Output()
+	if e != nil {
+		t.Fatal("independent glibc cache inventory", e)
+	}
+	foreignABIs := map[string][]string{"libc.so.6": nil, "libm.so.6": nil, "libnss_systemd.so.2": nil}
+	for _, line := range strings.Split(string(out), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			continue
+		}
+		name := fields[0]
+		if _, queried := foreignABIs[name]; !queried {
+			continue
+		}
+		_, annotation, ok := strings.Cut(strings.TrimSpace(line), " (")
+		if !ok {
+			t.Fatalf("unrecognized glibc cache row: %q", line)
+		}
+		annotation, _, ok = strings.Cut(annotation, ") => ")
+		if !ok {
+			t.Fatalf("unrecognized glibc cache annotation: %q", line)
+		}
+		// A following ', hwcap: ...' describes selection, not the entry ABI.
+		abi, _, _ := strings.Cut(annotation, ", ")
+		if abi != nativeABI {
+			foreignABIs[name] = append(foreignABIs[name], abi)
+		}
+	}
+	agreements := 0
 	for _, name := range []string{"libc.so.6", "libm.so.6", "libnss_systemd.so.2"} {
 		t.Run(name, func(t *testing.T) {
 			got, e := cacheResolve(b, name)
+			if abis := foreignABIs[name]; len(abis) != 0 {
+				if got != "" || e != qualification.ErrRequired {
+					t.Fatalf("foreign-ABI cache row must refuse with qualification_required: got %q, err %v", got, e)
+				}
+				t.Logf("%s: foreign cache ABIs %v (native %s); loader profile refuses by design", name, abis, nativeABI)
+				return
+			}
 			if e != nil {
 				t.Fatal("host positive cache refused", e)
 			}
@@ -175,7 +227,11 @@ int main(int argc,char **argv) {
 				t.Fatalf("native object %q differs from cache model %q", native, got)
 			}
 			t.Logf("%s: model=%s native=%s", name, got, native)
+			agreements++
 		})
+	}
+	if agreements == 0 {
+		t.Error("no SONAME exercised native loader agreement")
 	}
 	after, e := os.ReadFile("/etc/ld.so.cache")
 	if e != nil || !bytes.Equal(before, after) {

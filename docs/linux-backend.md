@@ -666,6 +666,13 @@ section decoys and mismatches refuse. ELF objects must match the reviewed native
 64-bit little-endian amd64/arm64 ABI. Only the reviewed new-format little-endian
 cache with matching libc6 ABI flags and zero legacy OS-version field is supported;
 unknown formats, ambiguous choices and `/etc/ld.so.preload` refuse.
+
+A cache row matching the query with a non-native ABI (for example a 32-bit
+multilib row) MUST refuse with `qualification_required`, fail-closed, although
+glibc itself would skip that row. Hosts with multilib caches are therefore not
+supported by this loader profile; supporting them requires a separate product
+change.
+
 All cache keys must be in descending `_dl_cache_libcmp` order. Distinct key
 spellings that compare equal numerically refuse, even outside the requested
 name; identical duplicate keys must still yield one unambiguous supported path.
