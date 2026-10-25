@@ -406,6 +406,10 @@ and static checks with `go vet ./internal/manager ./internal/pc2store
 ./tools/genjournal`. Output is named test results and owned temporary fixtures;
 Linux amd64 close-error controls trace only their own children. Resource-limited
 hosts must use their configured test scheduling wrapper for these commands.
+The retained review regressions run with `go test -p 1 ./internal/manager
+-run '^TestReviewQ2S3'`; their fixtures cover specific evidence provenance,
+omitted authority holds, captured inode identities, staged effects successors
+and the exact prospective head bound. These checks also support `-race`.
 
 | Tool | Purpose / exact entry point | Output |
 |---|---|---|

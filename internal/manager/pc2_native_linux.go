@@ -115,10 +115,27 @@ func censusNativeHistory(images []nativeCensusImage, history []pc2store.NativeOb
 		if !ok || state.Revision != *old.Revision || state.Floor != nativeCheckpoint(old.Floor) {
 			return errNativeCensus
 		}
+		prospective := false
+		for _, current := range images {
+			n := current.observation
+			if n.CopyID == old.CopyID && n.Role == "effects-temporary" && n.Destination != nil && *n.Destination == "effects-store" {
+				prospective = true
+			}
+		}
 		for _, current := range images {
 			if current.observation.Encoding == "effects" && current.observation.Role == "effects-store" {
 				next, e := decodeCensusEffects(current.image.Bytes())
-				if e != nil || next.Revision < state.Revision || immutablePrefix(state, next) != nil {
+				if e != nil {
+					return errNativeCensus
+				}
+				if prospective {
+					// A complete .write-* is an output beside the installed
+					// predecessor. Validate in the writer's forward direction;
+					// do not demand that the installed state already contains it.
+					if state.Revision < next.Revision || state.Revision > next.Revision+1 || immutablePrefix(next, state) != nil || (state.Revision == next.Revision && old.Digest != current.image.Digest) {
+						return errNativeCensus
+					}
+				} else if next.Revision < state.Revision || immutablePrefix(state, next) != nil {
 					return errNativeCensus
 				}
 			}

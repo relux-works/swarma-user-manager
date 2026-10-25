@@ -713,8 +713,12 @@ cleanup, then scans and validates outside F_auth. It compares exact C1/C2 images
 and complete snapshots, validates native whole-file bytes using format-owner
 parsers, and returns five canonical G4 class inventories plus immutable evidence.
 The evidence binds the independent fixture transcript, exact owner-index head,
-captured head digests, all native observation versions, held funding and output
-bounds. It provides neither a consumed lifetime nor a publication receipt.
+captured head digests and device/inode/mount identities, named directory/parent
+bindings and protections, the authority-fence identity, and every measured PC2
+and native physical identity. The returned copied evidence also binds all native
+observation versions, held funding and output bounds. Equal bytes on different
+captured inodes produce different evidence. It provides neither a consumed
+lifetime nor a publication receipt.
 
 The fixture transcript carries original intent/hold links, explicit pending
 owner association and independently retained logical effects checkpoints.
@@ -723,6 +727,15 @@ OSRecords, terminal identities and receipt evidence must survive in the current
 closure. These checkpoints are in-memory fixture inputs, not invented physical
 copies of replaced native envelopes. Native journal prefixes are verified within
 the current whole journal. A ledger must match that complete journal view.
+An extant complete effects temporary is checked prospectively against its
+installed predecessor, preserving its logical history. The fixture validator
+admits an identical-state copy or the writer's next revision; it does not demand
+that the installed predecessor already contain the staged successor. Incomplete,
+unfunded or unlinked temporary bytes remain unavailable. Specific attempt/hold
+evidence additionally resolves to the retained immutable attempt preimage,
+disposition evidence or hold origin/recovery graph and its original role
+allocation. A retained authority hold vetoes availability even if the current
+guard omits it.
 
 Supported slot controls are an explicitly clear, never-spent fixture and the
 exact current pending activation owner. Authority-only holds veto. Terminal,
