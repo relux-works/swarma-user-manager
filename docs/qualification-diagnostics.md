@@ -28,10 +28,20 @@ The service artifact and its closed validator now require `RestrictSUIDSGID=no`.
 This removes that broad set-ID syscall restriction; it is a deliberate
 profile change for review. The qualifier executes only its qualified fixed programs and
 creates only protected records with fixed non-set-ID modes. `NoNewPrivileges`,
-AF_UNIX-only sockets, IP denial, io_uring denial, native ABI, namespace/realtime/
+local UNIX sockets plus D1's exact SOCK_DIAG socket triple, IP denial, io_uring denial, native ABI, namespace/realtime/
 personality restrictions and UMask 0077 remain required. Filesystem confinement,
 metadata checks and publication semantics are unchanged. No service was installed
 or restarted on the system manager during the reproduction.
+
+D1 now adds `AF_NETLINK` at the unit layer while the process filter admits only
+`socket(AF_NETLINK, SOCK_RAW|SOCK_CLOEXEC, NETLINK_SOCK_DIAG)` beside UNIX
+handling. The root unit excludes CAP_NET_ADMIN; version-3 Q binds actual kernel
+CapEff and refuses retained authority or missing evidence. Capability refusals
+use `issuer/effective_capabilities` or `recapture/effective_capabilities`; an
+incomplete dump remains unknown, with no capability restoration or fallback.
+The narrower AF_UNIX-only read-probe below remains a tool preflight, not complete
+account inventory or acceptance of the full D1 profile. Installed root/audit and
+nonempty reserved-account qualification remain PENDING.
 
 ## Ordered refusal walk and ranked candidates
 

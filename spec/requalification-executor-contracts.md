@@ -701,7 +701,14 @@ types, maximum bytes/counts and finite deadline derive from the approved
 profile. No shell interpretation, caller environment, raw output logging,
 implicit timeout or unsupported topology is allowed. Cwd is `/` for native
 commands. Existing qualification entry sanitization and unit network denial
-remain mandatory; no new socket/network exception is introduced.
+remain mandatory. The sole narrowly named `D1QualifierUnixSockDiag` exception
+permits qualifier inventory's exact
+`socket(AF_NETLINK, SOCK_RAW|SOCK_CLOEXEC, NETLINK_SOCK_DIAG)` beside existing
+AF_UNIX handling, under the [decided D1 profile](../docs/design/socket-inventory-sandbox.md#decided-exact-profile-and-contract-delta):
+CAP_NET_ADMIN excluded, executable-bound root-installed audit rule and actual
+effective-capabilities Q evidence. No other family/protocol/type/flag or
+AF_NETLINK socketpair exception is introduced; all other call, identity, lease,
+deadline and failure requirements remain unchanged.
 
 Graph enumerates **all** synchronous and asynchronous transitive dependencies,
 native service/provider waits, helper children, files/IPC endpoints and locks,

@@ -79,7 +79,7 @@ func TestD1IssuerCapabilities(t *testing.T) {
 // 1/2 are unsupported and never inferred/upgraded. A prepared reader also
 // refuses any later capability-field change, even to another reduced mask.
 func TestD1QualificationCapabilityField(t *testing.T) {
-	for _, mode := range []string{"valid", "missing", "null", "net-admin", "upper", "short", "bad-hex", "old-v1", "old-v2", "unknown-version"} {
+	for _, mode := range []string{"valid", "valid-other-capability", "missing", "null", "net-admin", "upper", "short", "bad-hex", "old-v1", "old-v2", "unknown-version"} {
 		t.Run(mode, func(t *testing.T) {
 			s, p, _, m, _ := issued(t)
 			_ = s
@@ -88,6 +88,8 @@ func TestD1QualificationCapabilityField(t *testing.T) {
 				t.Fatal(e)
 			}
 			switch mode {
+			case "valid-other-capability":
+				v["effective_capabilities"] = "0000000000000001"
 			case "missing":
 				delete(v, "effective_capabilities")
 			case "null":
@@ -112,7 +114,7 @@ func TestD1QualificationCapabilityField(t *testing.T) {
 				t.Fatal(e)
 			}
 			_, e = Decode(raw, p)
-			if mode == "valid" {
+			if mode == "valid" || mode == "valid-other-capability" {
 				if e != nil {
 					t.Fatal("valid control", e)
 				}

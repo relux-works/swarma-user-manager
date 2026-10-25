@@ -456,8 +456,10 @@ contract is unchanged here and must be updated in the implementation PR.
   set, including the real initial/boot flow. If the dump is incomplete without
   CAP_NET_ADMIN, stop and ask the owner; never silently restore the capability.
   Existing empty-set or tool-preflight success is not that evidence.
-- Implementation/profile review must apply the decided exact exception,
-  versioned Q capability evidence and refreshed protected binary/unit/backend
-  identities. Current AF_UNIX-only unit/process code is unchanged. Until
-  implementation, review and native qualification, unsupported observation
-  stays unknown and admission remains closed. No activation is authorized.
+- The exact D1 filter, unit artifact, named executor §7.1 exception, owner-installed
+  audit rule and version-3 effective-capabilities Q are implemented locally.
+  Refreshed protected binary/unit/backend identities, root audit installation,
+  the reduced-capability initial launch and native qualification remain gates.
+  Unsupported observation stays unknown and admission remains closed. No
+  activation or capability restoration is authorized; old Q versions 1/2 refuse
+  rather than upgrading implicitly.

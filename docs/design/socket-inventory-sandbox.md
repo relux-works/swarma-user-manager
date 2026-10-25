@@ -1,7 +1,8 @@
 # Socket inventory inside the qualification sandbox
 
-Status: **D1 decided (owner decision, 2026-10-25); documentation only, no
-implementation or deployed-profile change.**
+Status: **D1 decided (owner decision, 2026-10-25); filter, unit artifact and
+version-3 Q evidence implemented. Installed root/audit and full nonempty
+reserved-account qualification remain PENDING; no activation is claimed.**
 Reproduction source baseline: `b1308c6d4396882a5df9dd165fa18ba09c162009`.
 
 Option A is decided with hardening: retain inventory in the qualifier, add
@@ -10,8 +11,9 @@ Option A is decided with hardening: retain inventory in the qualifier, add
 filter alongside existing local UNIX sockets. Remove `CAP_NET_ADMIN` through
 `CapabilityBoundingSet`, audit creation of that exact socket by the qualifier
 executable, and record effective capabilities in Q. The implementation must
-apply the narrowly named executor §7.1 exception specified below; this design
-does not edit that contract, activate requalification or relax inventory.
+apply the narrowly named executor §7.1 exception specified below; the implementation
+applies that one contract delta without activating requalification or relaxing
+inventory.
 
 Acceptance requires other-family/protocol/type refusal controls and complete
 inventory with the reduced capability set over a nonempty set of accounts.
@@ -20,6 +22,8 @@ never silently restore that capability. B and C are rejected alternatives for
 this decision, retained below with their reasons.
 
 ## Verified failure path
+
+This section describes the reproduction source baseline, before the D1 fix.
 
 1. [The maintenance entry](../../cmd/swarma-user-manager/qualify.go) installs
    `DenyNetwork` before loading policy and invoking `Issue`, for initial and boot
@@ -78,7 +82,7 @@ A protocol exception is **not** a kernel-enforced read-only UNIX-query channel.
 `NETLINK_SOCK_DIAG` dispatches by the family inside the message; the
 [Linux v6.12 dispatcher](https://github.com/torvalds/linux/blob/v6.12/net/core/sock_diag.c)
 also exposes supported socket-destroy requests subject to capability checks.
-The current unit sets no `CapabilityBoundingSet` and no `PrivateUsers`;
+The reproduction-baseline unit sets no `CapabilityBoundingSet` and no `PrivateUsers`;
 `NoNewPrivileges` and `RestrictNamespaces` do not drop existing capabilities.
 The decided profile removes `CAP_NET_ADMIN` from the qualifier through
 `CapabilityBoundingSet=~CAP_NET_ADMIN`, so it must not retain that capability
@@ -239,7 +243,8 @@ other capability. Effective unit/drop-in validation and the actual issuer must
 confirm the exclusion. Do not claim a reduced-capability initial qualification
 from an unrestricted direct root launch: initial and boot acceptance both need
 the actual reduced capability set. The initial launch composition remains
-implementation review work, not a change to executor §7.1 in this document.
+implementation review work for the installed launch, separate from the narrowly scoped
+executor §7.1 exception.
 
 The owner-selected root installer configures this persistent audit rule for the
 fixed qualifier executable, for example in
@@ -268,8 +273,11 @@ Q must carry an `effective_capabilities` field recording the issuer's actual
 effective capability set (the kernel `CapEff` value), not a set inferred from
 unit text or a caller assertion. Both initial and boot Q must bind that evidence
 to the reviewed qualification profile and show `CAP_NET_ADMIN` absent. The
-versioned Q field encoding, capture and reader validation are implementation
-review work; no field is added to the current closed codec by this design.
+versioned codec is now `station-qualification/3`: exactly 16 lowercase hexadecimal
+digits, sampled from the kernel before checks and before publication, with
+agreement required across the bounded existing-thread set. Versions 1/2 refuse;
+no old record is upgraded or treated as capability evidence. Reader preparation
+validates the field and retains the complete record bytes through use.
 Missing capability evidence or a retained `CAP_NET_ADMIN` cannot satisfy the
 reduced-profile acceptance control.
 
@@ -309,17 +317,18 @@ Implementation must update these contracts together:
 | Unit, `linuxbackend/unit_linux.go`, `TestQualificationUnitProfile`, `TestSystemdQualificationUnit` | Accept exactly the new family string and CapabilityBoundingSet exclusion of CAP_NET_ADMIN; reject old incompatible full-qualification profile, retained capability, other families/properties, missing IP/io_uring denial and hidden namespaces |
 | `docs/linux-backend.md` unit and deployment sections | Replace literal AF_UNIX-only claim and exact profile value; retain host visibility, descriptor hygiene and pin/deployment review |
 | `docs/qualification-diagnostics.md`, preflight documentation | Describe the exception and distinguish protected-tool preflight from full account inventory; a narrower AF_UNIX-only user read-probe is not proof of full-profile success |
-| `spec/requalification-executor-contracts.md` §7.1 | Implementation PR adds the narrowly named `D1QualifierUnixSockDiag` exception to the current no-new-socket/network-exception rule: only qualifier inventory's socket(AF_NETLINK, SOCK_RAW\|SOCK_CLOEXEC, NETLINK_SOCK_DIAG). Preserve all other target, identity, lock and failure requirements; no executor text changes in this design PR |
+| `spec/requalification-executor-contracts.md` §7.1 | The implementation adds the narrowly named `D1QualifierUnixSockDiag` exception: only qualifier inventory's socket(AF_NETLINK, SOCK_RAW\|SOCK_CLOEXEC, NETLINK_SOCK_DIAG). Preserve all other target, identity, lock and failure requirements; only §7.1 changes |
 | `spec/station-effect-receipts.md` boot contract; A3 networkless guarantees | Clarify that local kernel diagnostics are permitted, with no network dependency, remote proof acquisition or fallback fetch |
 | Root-owned audit configuration | Install the exact executable/argument-bound audit rule above through the owner-selected root installer; verify loaded rule and event, never delegate installation to the daemon |
 | Q record and consumers | Add actual effective-capabilities evidence through reviewed versioned encoding, issuer capture and reader validation; bind the reduced profile, no acceptance from missing evidence or unit text alone |
 | Protected deployment inputs and full Q | Changed binary/unit/backend bytes invalidate old bindings; regenerate/review pins and requalify through the owner procedure; no old success is transferred to the new profile |
 
-The planned `D1QualifierUnixSockDiag` exception admits exactly
+The `D1QualifierUnixSockDiag` exception admits exactly
 `socket(AF_NETLINK, SOCK_RAW|SOCK_CLOEXEC, NETLINK_SOCK_DIAG)` for the qualifier's
 local inventory; it admits no other family, protocol, type, flags or socketpair
 exception. The implementation PR applies that §7.1 delta under the decided
-capability/audit/Q profile. This design leaves the executor contract unchanged.
+capability/audit/Q profile. Only that §7.1 rule changes in the executor contract;
+its other composition and activation gates remain unchanged.
 
 For the rejected B alternative, the qualifier would keep its family text and
 existing creation tests, but would need to add the independently reviewed helper
@@ -447,10 +456,10 @@ choices and provide no implementation or qualification evidence.
 
 ## Remaining implementation and qualification gates
 
-Apply the already-decided, narrowly named §7.1 exception in the implementation
-PR, capture and bind the Q field through the reviewed versioned encoding/reader
-contract, establish the reduced-capability initial launch, and refresh protected
-deployment identities before integration. Execute the acceptance controls above;
+The local implementation supplies the named §7.1 exception, exact filter/unit
+artifact, version-3 Q field and shipped audit rule. Establish the installed
+reduced-capability initial launch and root audit configuration, then refresh
+protected deployment identities before integration. Execute the acceptance controls above;
 these are implementation/qualification gates, not a reopened D1 option choice.
 Existing unresolved lock, provider, chronology, pinning and root-qualification
 gates remain unchanged; publication of this design closes none of them.

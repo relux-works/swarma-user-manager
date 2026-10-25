@@ -428,13 +428,20 @@ the latest successful current-boot unit result and matching protected record.
 Retry withdrawal, input revalidation and record publication belong to the
 qualifier/reader implementation; this unit never sets the policy pin.
 
-The unit permits only AF_UNIX socket creation and denies IP traffic. It also
+The unit permits `AF_UNIX AF_NETLINK` families and denies IP traffic. The
+process filter admits only `socket(AF_NETLINK, SOCK_RAW|SOCK_CLOEXEC,
+NETLINK_SOCK_DIAG)` beside existing UNIX handling; AF_NETLINK socketpair and
+other family/protocol/type/flag combinations refuse. It also
 disables io_uring to avoid an alternate socket-creation route. It retains the
 host mount, IPC, network and temporary-file views needed by complete inventory;
 PrivateTmp, PrivateIPC, PrivateNetwork, ProtectProc and filesystem overlays are
 not enabled. The fixed environment and loader-variable removals supplement the
 maintenance entry's required environment sanitization before checks. Root
-capabilities needed for read-only inventory are retained; no-new-privileges,
+capabilities except `CAP_NET_ADMIN` are retained within the existing bounding
+set; `CapabilityBoundingSet=~CAP_NET_ADMIN` excludes that capability. Initial
+qualification must likewise be launched through owner-approved root configuration
+with CAP_NET_ADMIN already excluded; an unrestricted direct root launch refuses
+at the capability gate. The issuer never restores capabilities. No-new-privileges,
 namespace creation, realtime and SUID/SGID restrictions do not hide host state.
 These settings follow the
 [systemd execution contract](https://www.freedesktop.org/software/systemd/man/257/systemd.exec.html);
@@ -489,9 +496,20 @@ contains exactly the specified policy, binary, backend and skeleton digests,
 physical NSS lines, module closure facts and station ranges. The binary digest
 is checked against the running executable, rather than a different installed file.
 
-`station-qualification/2` adds the inputs digest, current boot, audit issue time,
+`station-qualification/3` retains the inputs digest, current boot, audit issue time,
 complete reserved-name coverage, eleven closed check results and mandatory
-`issuer:{mode,invocation_id}`. Initial records carry an empty invocation ID and
+`issuer:{mode,invocation_id}`. Its required `effective_capabilities` is the actual
+issuer kernel CapEff mask, encoded as exactly 16 lowercase hexadecimal digits.
+The public issuer samples it with capget before checks and immediately before
+publication, requiring agreement across a bounded kernel task enumeration;
+thread mismatch/read error, CAP_NET_ADMIN (bit 12), malformed evidence or drift
+withdraws the prior Q and publishes no successor. The initial/boot record and
+retained reader's full-record digest bind the field; it is not stable deployment
+input or inferred from the unit. Readers reject missing/null/malformed fields or
+CAP_NET_ADMIN. Versions 1 and 2 remain unsupported (`qualification_required`),
+with no implicit conversion or downgrade; old records require explicit reviewed
+requalification, not a new policy pin inferred from installed state.
+Initial records carry an empty invocation ID and
 never admit. Boot issuer invocation IDs are nonzero 32-character lower-case hexadecimal systemd
 invocation IDs. The reader requires the latest current-boot unit invocation to
 be terminal and successful and its invocation ID to equal the boot record's ID.
@@ -728,7 +746,8 @@ exclusion; an arbitrary hostile root is outside that guarantee.
 `configuration` is a nonempty list of reviewed protected configuration file pins.
 The pinned qualification unit must specify root, oneshot, exact absolute
 `ExecStart=<root>/libexec/swarma-user-manager qualify --boot` and the landed
-service profile: `RestrictAddressFamilies=AF_UNIX`, `IPAddressDeny=any` and
+service profile: `RestrictAddressFamilies=AF_UNIX AF_NETLINK`,
+`CapabilityBoundingSet=~CAP_NET_ADMIN`, `IPAddressDeny=any` and
 `SystemCallFilter=~io_uring_setup io_uring_enter io_uring_register`. Private network,
 IPC or temporary-file namespaces must not hide host inventory. Missing, duplicate,
 changed or extra service directives refuse; unit/drop-in load scope and ordering
@@ -912,3 +931,22 @@ the required openat2 reads; reintroducing it is rejected by the closed validator
 Regenerate deployment/binary/unit pins for a corrected delivery and repeat the
 owner qualification procedure. The nonroot environment check cannot substitute
 for root qualification, publication, or latest successful boot-unit evidence.
+
+### D1 audit and qualification limits
+
+The [deployed audit rule](../deploy/audit/swarma-qualify-sock-diag.rules) is
+root/owner configuration, never installed or changed by the daemon. The concrete
+installer and approved loading/verification procedure remain deployment gates;
+see the [decided design](design/socket-inventory-sandbox.md#capability-bound-audit-rule-and-q-evidence).
+The rule selects the exact native b64 socket triple and fixed executable path;
+it records attempts/results, not payloads or completeness authority. Qualification
+must verify actual CapEff, loaded audit rule/event and complete inventory over
+nonempty receipted reserved accounts in both initial and boot flows.
+
+An incomplete dump without CAP_NET_ADMIN stays unknown with admission closed:
+stop and ask the owner, never restore the capability or fall back to a helper or
+proc-only clean result. The unprivileged child test proves a completed kernel
+UNIX dump containing this account's owned socket under the actual filter and
+zero CapEff; it is not full root/account/unit qualification. Foreign or unreadable
+network namespaces still refuse. Root-host, audit delivery, installed input pins
+and native amd64/arm64 qualification remain PENDING.

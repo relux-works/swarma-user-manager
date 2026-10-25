@@ -24,11 +24,11 @@ expiry/revocation and publication policy remain explicit activation gates; this
 documentation supplies no generic installer or submission command.
 
 The [socket inventory sandbox design](docs/design/socket-inventory-sandbox.md)
-traces why the current AF_UNIX-only qualifier cannot complete reserved-account
-socket checks. It compares a protocol exception, an isolated helper and proc
-scans. D1 is decided by owner decision: the exact diagnostic exception, removal
+traces the former AF_UNIX-only qualification conflict and its hardened fix. It
+compares a protocol exception, an isolated helper and proc scans. D1 is decided by owner decision: the exact diagnostic exception, removal
 of CAP_NET_ADMIN, executable-bound audit and effective-capabilities Q evidence.
-Implementation and reduced-capability populated-account qualification remain pending.
+The fixed-triple filter, unit profile and version-3 Q capability evidence are
+implemented. Installed root/audit and full populated-account qualification remain pending.
 
 ## Principles
 
@@ -282,6 +282,8 @@ are documented in the package README; observations never establish provenance.
 | Go | Compile Linux primitives | `go build ./internal/linuxos` | Compiler verdict |
 | Go, Python 3, existing sudo peer access | Narrow positive/negative primitive and disposable peer fixtures | `GOMAXPROCS=2 go test -p 1 ./internal/linuxos -count=1 -v -timeout=45s` | Named test results; temporary fixtures cleaned by exact path/PID |
 | Shell/Python 3 | Owner-run opt-in root qualification; r1 pass recorded | `/usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin /usr/bin/dash /abs/path/root-qualification.sh apply ABS_TEST_BINARY APPROVED_SHA`; `verify`; `rollback` | Guarded disposable fixture; exact-build evidence and prerequisites in the package README |
+| D1 socket profile tests | Exact seccomp triple, reduced-capability kernel dump, Q binding and deploy artifact checks | `go test -p 1 ./internal/linuxos ./internal/linuxbackend ./internal/qualification -run '^(TestD1|TestQualificationNetworkDenial|TestQualificationUnitProfile|TestSystemdQualificationUnit)'`; add `-race` for race checks | Named test results and owned child/namespace fixtures; no root-host qualification |
+| Root audit configuration | Owner-selected root installer installs [the executable-bound rule](deploy/audit/swarma-qualify-sock-diag.rules) | `install -o root -g root -m 0600 deploy/audit/swarma-qualify-sock-diag.rules /etc/audit/rules.d/swarma-qualify-sock-diag.rules`; load through the approved audit configuration procedure; `auditctl -l` and `ausearch -k swarma-qualify-sock-diag` verify rule/events | Protected root configuration and audit events; the daemon never installs or changes it; loading and event delivery remain PENDING native qualification |
 | C compiler | Native loader-entry regression fixture | `/usr/bin/cc -shared -fPIC -o PLANT_SO PLANT_C` (package test invokes it) | Temporary test-owned shared object and sentinel |
 
 The root qualification command above is its only supported entry, from the
