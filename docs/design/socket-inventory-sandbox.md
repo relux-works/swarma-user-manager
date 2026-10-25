@@ -89,8 +89,11 @@ in the [seccomp contract](https://www.kernel.org/doc/html/latest/userspace-api/s
 Do not add an exec flag or assume a second filter can override an earlier denial.
 
 A viable alternative is an independently launched, protected fixed service, or a
-separately reviewed pre-filter worker arrangement. An independent service keeps
-the qualifier's unit AF_UNIX-only. The service needs its own netlink-protocol
+separately reviewed pre-filter worker arrangement. A worker created earlier
+inside the existing AF_UNIX-only unit is still blocked: that variant needs an
+external launch boundary or a broader launch unit followed by per-process
+tightening, not merely an earlier fork. An independent service keeps the
+qualifier's unit AF_UNIX-only. The service needs its own netlink-protocol
 filter, denied IP/io_uring creation, native ABI, no-new-privileges and the same
 visible host namespace. Minimize its credentials/capabilities for supported-host
 UID visibility; do not assume dropping a capability preserves dump completeness.
@@ -129,3 +132,223 @@ unknown field, output overflow, timeout, interrupted dump, helper death and
 lock-cycle controls, with a fresh authentic positive response. Existing inventory
 and namespace negatives remain. This is a larger ownership/deployment contract
 than a socket-filter correction and is not recommended for the first fix.
+
+### C. Proc table and descriptor scans without netlink
+
+The observed proc header is `Num RefCount Protocol Flags Type St Inode Path`;
+it contains no UID. A pathname's filesystem owner does not establish the owner
+of a live socket, and abstract/unnamed sockets have no such pathname. Scanning
+`/proc/<pid>/fd` and inspecting socket descriptors can attribute some inodes, but
+using the holder process's UID is wrong after descriptor transfer or credential
+changes. The kernel's [UNIX diagnostic implementation](https://github.com/torvalds/linux/blob/v6.12/net/unix/diag.c)
+reports the socket inode's UID, not the holder's current identity; the
+[UID attribute and request flag](https://github.com/torvalds/linux/blob/v6.12/include/uapi/linux/unix_diag.h)
+are explicit parts of the ABI.
+
+The kernel tracks [in-flight UNIX descriptor references](https://github.com/torvalds/linux/blob/v6.12/net/unix/garbage.c)
+separately from installed descriptors. Consequently, even inspecting descriptor
+inode ownership cannot ensure every table socket has an accessible userspace
+descriptor at the scan instant: transfers, queued rights,
+process exit, close/reuse, pending connections and inaccessible processes leave
+gaps or ambiguous joins. Proc and FD scans are not a single atomic snapshot.
+A bounded scan must refuse an unresolved inode, unreadable required descriptor,
+namespace gap or exhausted limit; it cannot call these clean. Repeated matching
+scans alone do not prove that no object was missed between observations.
+
+Cost is proportional to visible processes plus their descriptor counts, in
+addition to the socket table, with per-entry protected reads and bounded retries
+for observable races. Existing open-file inventory does not supply a complete
+socket-owner oracle. Achieving stronger coverage would require another qualified
+kernel interface or a separately proven quiescence/coverage model, not a proc
+fallback. Retain `TestUnixDiagnosticRequiresUID`'s names-only refusal. Tests for
+this option would need transferred descriptors, abstract/unnamed sockets,
+unmatched inodes, inaccessible processes, foreign namespaces and close/reuse,
+alongside valid matching-owner controls. It would change the ownership evidence
+contract and could remain permanently unknown on legitimate host states; reject
+it for the present general inventory contract.
+
+## Recommended exact profile and contract delta
+
+Select A for the next implementation review. It reuses the existing bounded
+kernel UID observation without adding a service, provenance channel or lock
+handoff. The broadened diagnostic authority is explicit, and is acceptable only
+if the profile owner accepts it; choose B instead if a separately isolated
+request handler is a mandatory boundary. C cannot meet the existing completeness
+claim by treating best-effort descriptor joins as authority.
+
+The proposed complete `[Service]` section is below. Keep the artifact's existing
+`[Unit]` ordering and `[Install]` target unchanged; change only the family value
+and its explanatory comment. This is proposed text, not an installed override.
+
+```ini
+[Service]
+Type=oneshot
+User=root
+Group=root
+UMask=0077
+WorkingDirectory=/
+ExecStart=/opt/swarma/libexec/swarma-user-manager qualify --boot
+RemainAfterExit=yes
+Restart=no
+TimeoutStartSec=120
+StandardInput=null
+StandardOutput=journal
+StandardError=journal
+Environment=PATH=/usr/sbin:/usr/bin LANG=C LC_ALL=C
+UnsetEnvironment=LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT GLIBC_TUNABLES GCONV_PATH LOCPATH
+# Host inventory stays visible; the process filter limits netlink to SOCK_DIAG.
+RestrictAddressFamilies=AF_UNIX AF_NETLINK
+IPAddressDeny=any
+SystemCallFilter=~io_uring_setup io_uring_enter io_uring_register
+SystemCallArchitectures=native
+NoNewPrivileges=yes
+RestrictSUIDSGID=no
+RestrictRealtime=yes
+LockPersonality=yes
+RestrictNamespaces=yes
+```
+
+The process-filter policy must be exactly:
+
+- For native `socket`: preserve AF_UNIX handling; additionally permit only
+  `(domain=AF_NETLINK, type=SOCK_RAW|SOCK_CLOEXEC,
+  protocol=NETLINK_SOCK_DIAG)`. No other netlink type, extra type flag or protocol
+  is enabled by this profile. A future nonblocking collector requires its own
+  explicit profile change.
+- For `socketpair`: preserve AF_UNIX handling; refuse AF_NETLINK and every other
+  family. Do not accidentally send both syscalls through the new socket exception.
+- Preserve other-syscall behavior, architecture checks, x32 refusal, TSYNC,
+  irreversible no-new-privileges and specific EPERM creation refusals. Refuse if
+  filter installation or thread synchronization cannot be established.
+- Keep IP creation denied, io_uring creation routes denied by the installed unit,
+  and no inherited network descriptor. Socket-creation checks cannot revoke a
+  passed descriptor or inspect subsequent netlink payloads. Pinned native code
+  sends only the existing fixed UNIX dump, with no caller selector or NSS/network
+  fallback. Initial and boot qualification use the same reviewed filter.
+
+The literal AF_UNIX-only creation guarantee changes to local UNIX plus this
+socket-diagnostic protocol exception for the qualifier and its inherited children.
+Account/workplace egress rules and station socket-reachability guarantees do not
+change. This is neither general IP networking nor permission for a collector to
+perform remote acquisition; the local-only dependency graph remains required.
+
+Implementation must update these contracts together:
+
+| Surface | Required update / retained negative obligation |
+| --- | --- |
+| `network_linux.go`, qualification entry | Exact socket-only exception, all threads and inherited collectors; unsupported ABI/filter failure refuses |
+| Unit, `linuxbackend/unit_linux.go`, `TestQualificationUnitProfile`, `TestSystemdQualificationUnit` | Accept exactly the new family string; reject old incompatible full-qualification profile, other families/properties, missing IP/io_uring denial and hidden namespaces |
+| `docs/linux-backend.md` unit and deployment sections | Replace literal AF_UNIX-only claim and exact profile value; retain host visibility, descriptor hygiene and pin/deployment review |
+| `docs/qualification-diagnostics.md`, preflight documentation | Describe the exception and distinguish protected-tool preflight from full account inventory; a narrower AF_UNIX-only user read-probe is not proof of full-profile success |
+| `spec/requalification-executor-contracts.md` §7.1 | Replace the current “no new socket/network exception” rule only through explicit review, naming this fixed local diagnostic exception; preserve all other target, identity, lock and failure requirements |
+| `spec/station-effect-receipts.md` boot contract; A3 networkless guarantees | Clarify that local kernel diagnostics are permitted, with no network dependency, remote proof acquisition or fallback fetch |
+| Protected deployment inputs and full Q | Changed binary/unit/backend bytes invalidate old bindings; regenerate/review pins and requalify through the owner procedure; no old success is transferred to the new profile |
+
+For B, keep the qualifier's family text and existing creation tests, but add the
+helper's independently reviewed unit/filter, authenticated provider identity and
+complete fixed-call/IPC contracts to the same protected inputs. Parent AF_UNIX
+confinement does not exempt a new helper/provider graph from §7.1 review. Keep
+all eleven full-Q checks; authenticated helper transport is no new clean-check
+shortcut. For C, any
+supported restricted-host alternative would need a new ownership/completeness
+qualification contract and FD-scan negatives; no profile text alone repairs it.
+
+## Reproduction and validation plan
+
+An unprivileged owned test process at the baseline on Linux
+`7.0.0-38-generic`, amd64, Go 1.26.10 called the actual `DenyNetwork`; no copied or
+weakened filter was substituted. A scratch Go overlay appended a probe to the
+existing test package without changing repository code. Before installation,
+the collector's diagnostic socket opened successfully. Afterwards:
+
+| Operation | Observed result |
+| --- | --- |
+| AF_UNIX stream socket | Success, then closed |
+| AF_NETLINK raw/CLOEXEC, NETLINK_SOCK_DIAG | EPERM |
+| AF_INET and AF_INET6 stream sockets | EPERM |
+| Actual `unixDiagnostic` with a finite deadline | EPERM; socket-class result unknown |
+
+The probe exited 0 because these expected refusals and the positive controls
+were asserted. It opened no IP connection, sent no diagnostic destruction
+request and changed no service, account, namespace or firewall. This proves the
+process-filter conflict on this host. It does not prove systemd enforcement,
+root inventory completeness, arm64 behavior or a passing populated-account Q.
+
+Run a matching isolated probe via the shared-host slot with Go 1.26.10:
+
+```sh
+env GOTOOLCHAIN=local GOMAXPROCS=2 CGO_ENABLED=1 \
+  /home/agent/keeper/ops/bin/heavy-slot --label architect -- \
+  go test -v -count=1 -run '^TestD1SocketSandboxProbe$' \
+  -overlay <task-scratch>/probe-overlay.json ./internal/linuxos
+```
+
+The scratch source/overlay and exact command/output are retained in task evidence;
+they are not a shipped test or an implementation of A. The existing
+`TestQualificationNetworkDenial`, `TestUnixDiagnosticRequiresUID`,
+`TestUnixDiagnosticRetainsPartialDump`, `TestSystemdQualificationUnit` and
+`TestQualificationUnitProfile` provide nearby current controls. Run only these
+narrow tests for this design note; do not treat a design-only pass as the future
+implementation's test evidence.
+
+The implementation acceptance plan is negative-first:
+
+1. Add child-process tests using the actual revised filter, with legitimate UNIX
+   socket and socketpair controls, and the exact diagnostic socket/dump as a new
+   positive control. Reject other netlink protocols (including route, usersock,
+   generic, audit and an unknown value), wrong socket type/extra flags,
+   AF_NETLINK socketpair, AF_INET/AF_INET6 stream/datagram/raw and other families
+   such as AF_PACKET. Assert filter EPERM, not an unrelated unsupported-protocol
+   failure. Exercise existing/new threads and exec inheritance. Retain native
+   ABI/x32/filter-installation/thread-sync refusal controls on the supported
+   architecture matrix. No packet transmission is needed.
+2. Show bounded narrowing plants are killed: unit-only change still fails the
+   real diagnostic call under the old process filter; process-only change still
+   fails inside the old unit; family-wide process permission fails the other-
+   protocol controls; an overly narrow policy fails the valid diagnostic control.
+   Assert each plant is applied and fails at its named intended check.
+3. Preserve parser/collector negatives: missing/duplicate UID, wrong family or
+   sequence/sender, malformed lengths, truncation, interrupted/error/incomplete
+   dump, missing table inode, entry/time limits and foreign/unreadable namespaces.
+   Partial known objects survive an error, but never become a clean class.
+   Keep the abstract-socket and real peer UID tests with distinct account controls.
+4. On an explicitly approved disposable root test host, install the exact reviewed
+   binary, unit/drop-ins, backend/manifest and policy inputs. Use the established
+   owner procedure with at least one real, properly receipted reserved locked
+   account and no residual UID-owned inventory objects. The set must be nonempty
+   in the real `reservedNames` snapshot; a fake account/provider or empty test
+   fixture does not satisfy this case. Preserve deployment exclusion and closed
+   admission throughout; do not activate the pending automatic executor.
+5. Run full initial qualification, explicitly install only the owner-reviewed
+   resulting input pin through the existing maintenance procedure, then run the
+   actual boot unit. Require all eleven checks including account restrictions,
+   no collector error, fresh protected Q with the full expected inputs and boot
+   invocation, and the normal reader's successful verification. A unit start
+   acknowledgement, stdout digest or a cached previous Q is insufficient.
+6. Within that approved fixture, create one reserved-UID filesystem UNIX socket
+   and one abstract socket in separate negative cases. Require dirty/unknown
+   account inventory, no newly valid Q and closed admission; preserve documented
+   old-Q withdrawal semantics. Remove only the owned objects and repeat the
+   populated-set positive control. Separately deny diagnostic socket creation,
+   remove dump/UID support and plant an incomplete response: each must refuse,
+   never fall back to names-only/proc-only clean. These are future authorized
+   fixture actions, not operations performed for this note.
+
+Any unsupported kernel/configuration, ABI, namespace, ownership view, deadline
+or collector completion remains a refusal. Do not enable private network/IPC/tmp
+views to make inventory empty, skip a reserved account, suppress an unknown class
+or accept stale evidence to obtain a passing run.
+
+## Decisions still required
+
+- Profile owner: accept the whole local SOCK_DIAG protocol surface for the
+  qualifier and its inherited native children, plus broader AF_NETLINK creation
+  during pre-filter initialization, while relying on pinned code for the fixed
+  UNIX request; otherwise
+  require B's independent authenticated helper. Neither choice is approved here.
+- Platform maintainers: define the supported amd64/arm64 kernel/configuration
+  matrix and execute the populated-reservation root/unit qualification above.
+  This note's unprivileged reproduction supplies no class-wide host claim.
+- Executor/profile owners: approve the explicit §7.1 exception and refreshed
+  deployment identities before integration. Existing unresolved lock, provider,
+  chronology, pinning and root-qualification gates remain unchanged.

@@ -23,6 +23,11 @@ is an empty format proposal with no qualified rows. Signing/enrollment, catalog,
 expiry/revocation and publication policy remain explicit activation gates; this
 documentation supplies no generic installer or submission command.
 
+The [socket inventory sandbox design](docs/design/socket-inventory-sandbox.md)
+traces why the current AF_UNIX-only qualifier cannot complete reserved-account
+socket checks. It compares a protocol exception, an isolated helper and proc
+scans; its recommended profile remains a proposal pending review and qualification.
+
 ## Principles
 
 - [A3 package-update requalification](spec/upgrade-requalification.md) specifies the sole signed-apt-chain automatic re-pin exception. Its evidence recorder, chain verifier and state reconciler are implemented for review; time/deployment integration, automatic pinning, containment/notification and root qualification remain pending; station admission stays closed until that slice is landed and qualified. It does not implement A1p's separate administrator command.

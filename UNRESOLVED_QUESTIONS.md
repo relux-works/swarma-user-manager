@@ -437,3 +437,23 @@ remain activation gates until implemented and qualified; nothing is activated.
 Until owner confirmation, required reviews, implementation and proving tests,
 no trusted generic signing/submission/publication service or verified matrix row
 is claimed. Existing local boot, drift, update and admission gates remain.
+
+## D1 qualification socket inventory sandbox
+
+The [design proposal](docs/design/socket-inventory-sandbox.md) recommends a fixed
+local SOCK_DIAG creation exception, with an explicit unit/process/executor-profile
+review. The current AF_UNIX-only unit and process filter still deny that socket;
+no implementation or installed-profile change is made here.
+
+- The profile owner must accept the diagnostic protocol authority, inherited-child
+  scope and broader netlink creation before filter installation, or select the independently
+  authenticated helper alternative. A protocol filter cannot enforce UNIX-only
+  message payloads or read-only operations.
+- Platform maintainers must qualify the supported kernel/ABI matrix and the real
+  initial/boot flow with a nonempty receipted reserved-account set, including the
+  proposed refusal controls. Existing empty-set or tool-preflight success is not
+  evidence for that case.
+- Executor/profile owners must review the explicit change to the no-new-socket-
+  exception rule and refreshed protected binary/unit/backend identities. Until
+  implementation, review and native qualification, unsupported socket observation
+  remains unknown and admission remains closed.
