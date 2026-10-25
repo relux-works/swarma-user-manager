@@ -67,7 +67,7 @@ lexicographic order shown; arrays have the explicit semantic orders below.
 | Member | Type and exact constraint |
 |---|---|
 | `attempt` | Integer 1..9007199254740991; sequence of this attempt's `intent` entry |
-| `boot_id` | Current writer boot, canonical lowercase UUID `8-4-4-4-12` hex, not all zero |
+| `boot_id` | Current writer boot, canonical lowercase UUID `8-4-4-4-12` hex, not all zero; exception: a notification-only update preserves the terminal entry's `boot_id`, even when appended on a later boot (§3) |
 | `candidate_inputs` | `D`; expected candidate `SHA256(CCJ(I))`, independently computed before intent and confirmed by both qualifier modes |
 | `candidate_state` | `Ref` to the candidate `qual-maint-state/1` object (§2.4) |
 | `evidence_manifest` | `Ref` to the complete `qual-maint-evidence/1` object (§2.4) |
@@ -272,7 +272,13 @@ receipt may disappear or change, no incident identity may change, and at least
 one recipient must advance. This can occur after another attempt, but never
 changes any acceptance/frontier. Accepted records have no notification-update
 transition. Delivery retries happen through the durable incident interface;
-the local enqueue result alone cannot advance a recipient.
+the local enqueue result alone cannot advance a recipient. On a later boot,
+the notification-only append still preserves the terminal entry's recorded
+`boot_id` (including a later-boot interrupted closure's boot); it must not
+substitute the delivery writer's boot. The incident's original detection,
+response deadline and qualification/unit identities remain unchanged. This
+exception identifies the historical terminal outcome, not current-boot
+qualification or authorization for ordinary renewal.
 
 Replay verifies all entries, not just the newest accepted one. New transaction
 acceptance must start at the currently last accepted state and advance through
@@ -338,9 +344,10 @@ That is the existing A3 threat-model limit, not a new restore guarantee.
 ### 4.2 Lock order and qualifier handoff
 
 Name locks `F` (package frontend), `B` (dpkg database), `W` (worker serialization),
-`D` (exclusive deployment lease), `R` (short recorder lock). The only nested
-order is **F -> B -> W -> D -> R**, skipping unneeded locks. F/B use the qualified
-native package exclusion, not an unrelated flock that dpkg ignores. The root
+`D` (deployment lease: exclusive for the issuer/writer, shared for admission
+preparation), `R` (short recorder lock). The maintenance recorder branch is
+**F -> B -> W -> D -> R**, skipping unneeded locks. F/B use the qualified native
+package exclusion, not an unrelated flock that dpkg ignores. The root
 configuration-writer exclusion is established before capture and retained with
 package exclusion; it may not acquire a lock earlier in this graph. W prevents
 a second worker from taking over an intent during a D handoff. Nonblocking or
@@ -348,37 +355,51 @@ bounded acquisitions use the profile's finite deadline; no unbounded waits.
 
 Hooks that may already own F/B may use only R to record/enqueue and MUST NOT wait
 for W/D or a qualifier. A worker must not hold R while capturing, executing tools
-or acquiring another lock. A qualifier acquires only D, never F/B/W/R; the
+or acquiring another lock. A qualifier acquires its own exclusive D, never
+F/B/W/R; it also takes the local snapshot locks on the branch below. The
 reconciler releases D before launching/waiting for **either** qualifier and
 reacquires it for local revalidation and journal writes. It never lends an
 inherited locked D descriptor to the child. F/B, W, root-writer exclusion and
-stopped admission remain continuous across that handoff.
+stopped admission remain continuous across that handoff. No lock upgrades.
 
-Generation/effect locks are a disjoint path: **effects -> gate -> data** under
-the existing receipt protocol. This reconciler never takes them or performs a
-generation operation. Admission reads external facts before that path; under
-state locks it performs only bounded local rechecks of retained authenticated
-facts/guards. It must never wait for F/B/W/D/R, run a qualifier or issue any RPC
-under generation/effect locks. Conversely maintenance never waits for a
-lifecycle state lock while holding this maintenance graph. No lock upgrades.
+The required local reservation snapshot branch is
+**D -> effects -> gate -> data**, with **R and journal append excluded** from
+this branch. It applies under exclusive issuer D and shared admission-preparation
+D. It is not disjoint from deployment exclusion. The production
+[issuer and admission preparation](../internal/qualification/protocol.go) retain
+D while `Capture` calls
+[`reservedNames`](../internal/linuxbackend/environment_linux.go), which takes
+[`effects.lock`](../internal/manager/store_linux.go) and then
+[`genjournal.Checkpoint`](../tools/genjournal/native_linux.go)'s shared gate/data
+reader locks. `CheckAll` also uses this reservation snapshot. Preserve these
+reservation and generation-bound checks; an input-only or unlocked replacement
+snapshot does not satisfy this contract. The standalone lifecycle branch remains
+**effects -> gate -> data** under the existing receipt protocol. The reconciler
+performs no generation mutation.
 
-No RPC is permitted under D or R, or any generation/effect lock. Network proof
-acquisition, notification delivery and general provider RPC run outside **all**
-of the above locks; only local retained proof is consumed while excluded.
-A3 §4 requires retaining package exclusion while launching/waiting for the
-fixed initial command and qualification unit. Unit control normally entails a
-service-manager call while F/B/W exclusion is held. The literal blanket
-"no RPC under locks" rule and that required handoff therefore need the explicit
-architect disposition in Q1 (§9). **Neither requirement is silently waived.**
-The same question reaches the issuer's own D lease: the existing
-[qualification protocol](../internal/qualification/protocol.go) acquires its
-lease before `Capture`/`CheckAll` and retains it through publication, including
-qualified NSS/provider observations. An absolute RPC prohibition on D would
-also need that existing interface revised; moving calls to a relay or dropping
-D would not preserve its exclusion contract.
-Until the disposition and its no-cycle qualification are accepted, the unit
-control/issuer-call integration is an A3d activation blocker; this spec provides
-no relay process or lock-release workaround that weakens continuous exclusion.
+Release the inner state/generation locks before every provider or unit call.
+Never acquire or wait for F/B/W/D/R from inside lifecycle locks; do not run a
+qualifier, append this journal or issue external/provider/service-manager calls
+under effects/core, generation gate/data, R or journal-append critical sections.
+Only bounded local checks and local durable operations are allowed there.
+Admission's final lifecycle commit uses retained authenticated facts/guards for
+bounded local revalidation, without acquiring a new D inside the state locks.
+R and journal append never overlap the local snapshot branch. The graph records
+a real required local dependency; it does not by itself prove every transitive
+callee has no back edge or establish a runtime deadlock.
+
+Continuous exclusion leases and their permitted calls require the explicit
+Q1 recommendation and curator decision (§9.1). The literal blanket "no RPC under
+locks" wording conflicts with A3's required fixed unit-control handoff under
+F/B/W and with existing issuer observations under exclusive D and admission
+preparation under shared D. The landed state/generation critical-section rules
+are narrower; they do not independently prohibit every exclusion-lease call.
+General network proof acquisition and notification delivery remain outside all
+maintenance locks. A relay does not remove a wait, and dropping exclusion does
+not preserve the contract. Until Q1 and its bounded no-back-edge call graph are
+accepted, the unit-control/issuer/admission-call integration is an A3d
+activation blocker. This document does not approve those calls or implement
+the integration.
 
 Interlock evidence must authenticate stopped new starts/resumes, the current
 maintenance assertion and the original P7 detection/deadline/response, plus
@@ -564,15 +585,19 @@ The **future** A3-enabled guard and boot precheck MUST validate all of:
    owner alone may clear its fence under existing authority; no human approval
    flow, automatic resume or generation mutation is added by this journal.
 
-Get unit/provider/external facts on the unlocked preparation path; bind them
-to current boot, invocation, inputs and journal checkpoint. At final admission
-commit under the existing lifecycle lock order, use only bounded local guard
-revalidation with retained version/lease evidence. Changed inputs, recorder
-frontier, journal tail, unit result or interlock version invalidates preparation;
-release locks and reprepare or refuse. Never perform service-manager RPC while
-holding lifecycle/journal/deployment locks, and never rely on a cached clean
-verdict or a timestamp-only lease. The integration must qualify this boundary;
-this specification does not implement it.
+Get unit/provider/external facts during preparation outside lifecycle state,
+generation, R and journal-append critical sections; bind them to current boot,
+invocation, inputs and journal checkpoint. Existing admission preparation retains
+shared D across `Capture` and the latest-unit observation; issuer observations
+retain exclusive D. These exclusion-lease calls require Q1's explicit review
+and decision, not an assumed absolute D prohibition or an implicit waiver.
+At final admission commit under the existing lifecycle lock order, use only
+bounded local guard revalidation with retained version/lease evidence. Changed
+inputs, recorder frontier, journal tail, unit result or interlock version
+invalidates preparation; release locks and reprepare or refuse. Never perform
+service-manager RPC in those short critical sections, acquire D from inside
+lifecycle locks, or rely on a cached clean verdict or timestamp-only lease. The
+integration must qualify this boundary; this specification does not implement it.
 
 ## 7. Required future tests and narrowing controls — PENDING
 
@@ -598,10 +623,12 @@ is not the intended rejection. Run only isolated disposable owned fixtures.
 | `QualMaintPinWithoutOutcome`: qualified pin, initial Q, or valid boot Q while intent is unresolved | Matching durable accepted attempt and separate admission authority | Admit from flag/pin/Q alone |
 | `QualMaintWrongTransactionSet`: otherwise valid outcome for another subset/order/parent/frontier | Exact full frozen group list, manifest and old/candidate states | Bind only input digest or one transaction ID |
 | `QualMaintHandoffLost`: parent retains D, another worker takes ownership, root writer races or exclusion lapses during qualifier | Parent releases D; issuer owns D; F/B/W/root-writer exclusion remains continuous; final reacquisition/revalidation passes | Inherit D, drop exclusion during RPC or skip continuity check |
+| `QualMaintQualifierStateSnapshotOrder`: real production issuer `Issue -> Capture -> reservedNames -> effects.lock -> genjournal.Checkpoint` is forbidden by an omitted D-to-state edge, overlaps R/append, retains inner locks into a provider/unit call, or acquires F/B/W/D/R from inside lifecycle locks | Real initial/boot issuer under exclusive D and real admission preparation under shared D take the complete generation-bound reservation snapshot via D -> effects -> gate -> data; release inner locks before every provider/unit call; no R/append overlap or reverse acquisition; standalone effects -> gate -> data also passes | Omit the D -> effects -> gate -> data edge (restore the disjoint-only rule); never replace the real issuer path with a mock or drop reservation/generation checks |
 | `QualMaintStaleInvocation`: wrong/zero invocation, different boot, running/failed/latest mismatch or newer unaccepted changed-input Q | Exact accepting Q/invocation; later unchanged ordinary renewal uses stable accepted binding and fresh latest invocation | Use earlier same-boot success or equate initial with boot |
 | `QualMaintBootGap`: unchanged closure but an unmatched recorder/database transition, pending old intent or corrupt tail | Fully accounted unchanged accepted frontier followed by a fresh networkless ordinary boot run | Skip boot precheck or infer transactions from current versions |
 | `QualMaintUncertainAck`: complete visible line after failed sync, lost accepted reply or stale frontier cache | Established durable checkpoint redelivers once; uncertain case stays fenced and full exact-set retry creates no second frontier effect | Parseability implies durability, append duplicate acceptance effect or trust cache |
 | `QualMaintNotificationHeld`: one recipient missing, counterfeit receipt, changed incident or restarted response deadline | Both authenticated incident-bound receipts; original detection/deadline retained | Treat enqueue as delivery, drop pending incident or reset P7 time |
+| `QualMaintNotificationLaterBoot`: notification-only retry rewrites terminal boot, incident, detection/deadline or qualification fields to the later writer's identity | On a later writer boot, append valid incident-bound pending-to-delivered receipts with the terminal entry's boot, qualification fields and original incident/deadline unchanged; seq/prev advance and acceptance/frontier do not | Replace terminal `boot_id` with current delivery boot or restart the incident clock |
 | `QualMaintSaturation`: entry/object/member/total/sequence/reserve budget exceeded, including orphan bytes | Exact bounded request with full terminal/incident reserve | Truncate arrays, prune history, ignore temporary bytes or reset sequence |
 | `QualMaintProtectedStore`: symlink, unsafe ancestry/ACL, hard link, lock inode replacement or unqualified mount | Exact protected retained descriptors on qualified local filesystem | Trust textual path/mode or substitute unrelated package flock |
 | `QualMaintNoLifecycleEffect`: recovery/success attempts marker clearing, reopening, resume, generation/effect rewrite or credential/account export | Accepted result reports evidence only; independent authorized admission action is separate | Couple accepted phase to reopening, rollback or data export |
@@ -650,11 +677,37 @@ implement or qualify A3d, its guard, hooks, P7 response or notification transpor
 
 | Question | Recommendation | Safe state until resolved |
 |---|---|---|
-| Q1 — Meaning of no RPC under locks at the unit-control handoff | Distinguish local state/journal critical sections from continuous maintenance-exclusion leases: prohibit RPC under journal append, recorder, generation and effect locks; explicitly review only the fixed unit-control path under F/B/W and the already qualified issuer/provider observations under its own D. Prove every permitted callee has no back edge or reacquisition of caller-owned locks. All unrelated RPC remains outside every lock. If the prohibition is absolute for F/B/W or issuer D, revise A3 §4 and the existing qualifier interface first; never release exclusion or insert a relay to disguise the wait | No unit-control integration or A3d activation from this document; continuous exclusion and the no-cycle rule are both retained |
+| Q1 — External calls under continuous exclusion and the local snapshot edge | Adopt the [proposed exact rule below](#91-q1-recommendation--pending-curator-decision), covering exclusive issuer D, shared admission-preparation D and the actual D -> effects -> gate -> data branch; pending curator decision | No unit-control/issuer/admission-call integration or A3d activation from this document; continuous exclusion, complete reservation checks and the no-back-edge rule remain required |
 | Q2 — Initial baseline import and checkpoint/restore custody | Use a separate explicit owner-qualified install/import of the existing A3b accepted baseline and retain a trusted journal checkpoint with its deployment identity. Never seed from current state. If coherent rollback resistance is required, select independent custody outside the restored failure domain; otherwise disclose A3's existing limitation | Empty/unknown/lost baseline or fork refuses; no invented restore floor or bootstrap acceptance |
 | Q3 — Concrete interlock, recovery fencing and notification receipt interfaces | Publish closed bounded authenticated schemas and validators for worker/qualifier quiescence, admission/P7 version continuity, affected-set/response evidence and both transport receipts. Preserve original clock/deadline across retries/boots and reserve durable incident capacity. Missing delivery capability blocks deployment; pending delivery blocks readiness but not immediate P7 response | No marker-only interlock, timer-only worker takeover, unverified delivery or unimplemented guard claim |
 | Q4 — Capacity, serialization pins and deployment budgets | Review these exact hard limits and source-pinned A3b byte mappings against the supported Ubuntu/profile archive sizes before implementation. Retain the profile's separately confirmed freshness/P7 values and finite operation deadlines. A larger encoding/store limit or revised payload serialization requires explicit versioned review, not a fallback | Saturation/unsupported payload refuses; these bounds never authorize a destructive capacity fix or permissive timeout |
 | Q5 — Migration and privileged qualification | Publish an evidence-preserving migration/recovery procedure and run §7 on an owner-approved disposable root fixture, including actual fsync/failure, package exclusion and unit invocation cuts, plus independent guard review | No compaction/tail repair, automatic journal upgrade, production re-pin or admission claim |
+
+### 9.1 Q1 recommendation — pending curator decision
+
+Proposed exact rule for curator review, **not an approved waiver**:
+
+External/provider/service-manager calls MUST run outside manager effects/core locks, generation gate/data locks, the short recorder lock R, and the journal-append critical section. Inside those critical sections only bounded local checks and local durable operations are allowed.
+
+Continuous exclusion leases are a separately enumerated boundary. Retain native F/B, W, root-writer exclusion and closed admission across both qualifier runs. The parent MUST release D before launching/waiting for the qualifier; the child acquires its own exclusive D, with no inherited held descriptor. Permit only the reviewed fixed local unit-control operations under F/B/W, and the explicitly reviewed Capture/CheckAll/provider and latest-unit observations under the issuer's exclusive D or the admission-preparation shared D. Each permitted operation requires a fixed authenticated target, bounded completion/failure behavior, and a transitive call/dependency graph showing no acquisition or wait for any caller-owned exclusion lock. General network proof acquisition and notification delivery remain outside all maintenance locks. A relay does not make a wait unlocked; dropping exclusion is not a workaround.
+
+The existing reservation snapshot requires the additional local edge D -> effects -> gate -> data. Publish that edge explicitly (with R and journal append excluded from this branch), or replace it with a separately reviewed equivalent snapshot handoff. Release the inner state/generation locks before every provider or unit call; never acquire F/B/W/D/R from inside lifecycle locks. Preserve final bounded local revalidation of retained boot, invocation, input, journal and interlock identities. Unknown continuity/callee dependency or exceeded deadline refuses with admission fenced.
+
+Source assessment: [A3's evidence boundary and write-ahead steps](upgrade-requalification.md#4-requalification-and-durable-outcome),
+[receipt locking](station-effect-receipts.md) and
+[generation locking](generation-journal.md) scope the external-call ban to
+state/generation critical sections. The broader literal all-locks wording is
+the conflict with required exclusion-lease calls; those scoped landed rules
+do not independently contradict each other. The current
+[protocol](../internal/qualification/protocol.go) holds exclusive D through
+issuer `Capture`/`CheckAll`, and shared D through admission-preparation
+`Capture`/`Unit.Successful`; the
+[unit reader](../internal/qualification/unit_linux.go) invokes `systemctl show`.
+The snapshot edge is published in §4.2, not deferred to a replacement interface.
+No intrinsic runtime cycle has been demonstrated by this source inspection.
+Curator acceptance and a bounded transitive no-back-edge qualification remain
+required before A3d integration; unknown dependencies refuse with admission
+fenced.
 
 ## 10. Tools and current delivery limits
 

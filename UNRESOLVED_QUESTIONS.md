@@ -55,18 +55,24 @@ The A3c specification names the separate closed `qual-maint/1` journal, immutabl
 transaction/evidence bindings and every A3 step's crash/recovery obligation. It
 is specification-only; its guard, automatic pinning and runtime/root tests are
 unimplemented. The [five open decisions and recommendations](spec/qualification-maintenance-journal.md#9-open-decisions-and-recommendations)
-remain gates: Q1 resolves the tension between continuous package exclusion and
-the blanket no-RPC-under-locks rule at unit control; Q2 selects explicit initial
-baseline import/checkpoint custody; Q3 publishes authenticated interlock,
-recovery-fencing and both notification receipt interfaces; Q4 reviews hard
-budgets and source-pinned byte encodings; Q5 owns migration and disposable root
-qualification. Recommendation Q1 distinguishes short local journal/state
-critical sections from maintenance-exclusion leases; review only the fixed
-unit-control path under package/worker exclusion and already qualified issuer
-observations under its own deployment lease, proving no lock back edges.
-This is an unapproved recommendation, not a waiver; an absolute prohibition
-needs both A3's and the existing qualifier's interfaces revised before
-implementation. Neither a surviving pin/Q nor a published
+remain gates: Q1 resolves external-call boundaries under continuous package/worker
+exclusion, exclusive issuer D and shared admission-preparation D; Q2 selects
+explicit initial baseline import/checkpoint custody; Q3 publishes authenticated
+interlock, recovery-fencing and both notification receipt interfaces; Q4 reviews
+hard budgets and source-pinned byte encodings; Q5 owns migration and disposable
+root qualification. The [proposed exact Q1 rule](spec/qualification-maintenance-journal.md#91-q1-recommendation--pending-curator-decision)
+forbids external/provider/service-manager calls inside effects/core, generation,
+R and journal-append critical sections. Continuous exclusion leases are a
+separately enumerated boundary: review only fixed unit-control operations under
+F/B/W and issuer/admission observations under exclusive/shared D, with bounded
+authenticated targets and no wait on caller-owned exclusion locks. The parent
+releases D before either qualifier; network proof acquisition and notification
+delivery stay outside all maintenance locks. The real local snapshot branch is
+D -> effects -> gate -> data, excluding R/append; preserve complete reservation
+and generation checks, release inner locks before every provider/unit call and
+never acquire F/B/W/D/R from inside lifecycle locks. This recommendation remains
+pending curator decision, not a waiver; relays or dropping exclusion do not
+resolve the boundary. Neither a surviving pin/Q nor a published
 canonical example can admit; generation/effect/qualification codecs stay closed.
 
 There is no open choice about account pooling, station-readable private keys
