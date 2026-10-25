@@ -333,3 +333,5 @@ The optional race step is omitted after local measurement put the manager
 package within about twelve seconds of the 20-minute package timeout. The
 workflow keeps the normal test command and its existing budget; the race result
 does not establish sufficient timing margin on the unverified hosted runner.
+The same full race run exited nonzero on existing journal reader/writer deadline
+assertions; those assertions and their budgets remain unchanged.
