@@ -26,7 +26,9 @@ documentation supplies no generic installer or submission command.
 The [socket inventory sandbox design](docs/design/socket-inventory-sandbox.md)
 traces why the current AF_UNIX-only qualifier cannot complete reserved-account
 socket checks. It compares a protocol exception, an isolated helper and proc
-scans; its recommended profile remains a proposal pending review and qualification.
+scans. D1 is decided by owner decision: the exact diagnostic exception, removal
+of CAP_NET_ADMIN, executable-bound audit and effective-capabilities Q evidence.
+Implementation and reduced-capability populated-account qualification remain pending.
 
 ## Principles
 

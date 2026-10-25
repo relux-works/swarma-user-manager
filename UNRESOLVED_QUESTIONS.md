@@ -440,20 +440,24 @@ is claimed. Existing local boot, drift, update and admission gates remain.
 
 ## D1 qualification socket inventory sandbox
 
-The [design proposal](docs/design/socket-inventory-sandbox.md) recommends a fixed
-local SOCK_DIAG creation exception, with an explicit unit/process/executor-profile
-review. The current AF_UNIX-only unit and process filter still deny that socket;
-no implementation or installed-profile change is made here.
+**D1 — decided (owner decision, 2026-10-25): option A with hardening.** The
+[decided design](docs/design/socket-inventory-sandbox.md) adds AF_NETLINK to the
+unit, admits exactly `socket(AF_NETLINK, SOCK_RAW|SOCK_CLOEXEC,
+NETLINK_SOCK_DIAG)` in the process filter, removes CAP_NET_ADMIN through
+CapabilityBoundingSet, adds the qualifier-executable-bound audit rule and records
+actual effective capabilities in Q. B and C are rejected alternatives, not
+fallbacks. The design names the exact planned executor §7.1 exception; that
+contract is unchanged here and must be updated in the implementation PR.
 
-- The profile owner must accept the diagnostic protocol authority, inherited-child
-  scope and broader netlink creation before filter installation, or select the independently
-  authenticated helper alternative. A protocol filter cannot enforce UNIX-only
-  message payloads or read-only operations.
-- Platform maintainers must qualify the supported kernel/ABI matrix and the real
-  initial/boot flow with a nonempty receipted reserved-account set, including the
-  proposed refusal controls. Existing empty-set or tool-preflight success is not
-  evidence for that case.
-- Executor/profile owners must review the explicit change to the no-new-socket-
-  exception rule and refreshed protected binary/unit/backend identities. Until
-  implementation, review and native qualification, unsupported socket observation
-  remains unknown and admission remains closed.
+- Root/owner configuration must install and verify the audit rule; the daemon
+  does not. The concrete installer role and procedure remain to be named.
+- Platform maintainers must qualify other-family/protocol/type refusals and a
+  complete inventory with the reduced capability set over a nonempty account
+  set, including the real initial/boot flow. If the dump is incomplete without
+  CAP_NET_ADMIN, stop and ask the owner; never silently restore the capability.
+  Existing empty-set or tool-preflight success is not that evidence.
+- Implementation/profile review must apply the decided exact exception,
+  versioned Q capability evidence and refreshed protected binary/unit/backend
+  identities. Current AF_UNIX-only unit/process code is unchanged. Until
+  implementation, review and native qualification, unsupported observation
+  stays unknown and admission remains closed. No activation is authorized.
