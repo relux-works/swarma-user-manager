@@ -359,6 +359,18 @@ implicitly.
 
 ### 5.1 Protected state and writer privileges
 
+**MC-Q4 — decided (owner decision, 2026-10-25).** Deployment roles are:
+
+| Role | Decided authority |
+|---|---|
+| Owner's root authority | Approves the deployment version |
+| Installer | Installs that version under the owner's root approval |
+| Daemon | Receives no root authority |
+
+The root writer/coordinator roles below do not grant the daemon root authority.
+Their exact participant privileges, recovery authentication, exclusion and direct
+sync qualification remain gates; G17/G18/G19 mechanisms are not implemented.
+
 Installation publishes the root/role-to-directory mapping in protected deployment
 configuration. The manager's PC2 directory is `<root>/lib/user-manager/pc2/`.
 Its parents/subdirectories are root-owned 0750, group the dedicated key-service
@@ -452,6 +464,12 @@ timer evidence. Root recovery may block indefinitely on storage/authority loss;
 affected issuance stays suppressed and withdrawal completion cannot be promised
 within a finite crash-recovery deadline.
 
+**MC-Q6 — decided (owner decision, 2026-10-25).** On storage or custody loss,
+fail closed: the status remains "revocation incomplete" indefinitely. Immediate
+containment still applies; an unknown recovery outcome never grants completed
+revocation or a finite completion promise. This decision does not supply the
+missing custody/recovery implementation or close the other joint PC2 gates.
+
 ## 6. C0 and independently current floor custody (G5-E)
 
 The manager publishes a **consumer** boundary, not a genesis authority. Its
@@ -461,9 +479,17 @@ Validate their closed codecs, protected custody, installation/incarnation,
 epoch, Q0 digest and permission for this first initialization, and prove that
 authorization is independently current with old/restored writers excluded.
 An owner-supplied boolean, signature without a qualified authority binding,
-local root ownership or a matching checksum is not that proof. The authority's
-authorization/continuity codec, trust root and privilege/durability API remain
-**Q2/G2 owner decisions**; absent publication keeps this consumer refusing.
+local root ownership or a matching checksum is not that proof.
+
+**MC-Q5 / Q2 / G2 — decided (owner decision, 2026-10-25):** an isolated signer
+on the trust node signs C0 under a one-time owner grant; the independent G17
+custodian holds the floor. Unknown C0 outcome and recovery use the owner-run
+G19 recovery runbook; the G18 fencing mechanism excludes a restored old writer.
+The custodian has not been chosen and G17/G18/G19 mechanisms are not implemented.
+Activation stays closed until the custodian is chosen; selection alone does not
+satisfy implementation or qualification. The authorization/continuity codec,
+trust root and privilege/durability API remain unpublished runtime gates;
+absent publication keeps this consumer refusing.
 
 Enforce the existing acyclic sequence without a new phase or serving format:
 
@@ -483,8 +509,9 @@ and cleanup must be eligible first. No future M0 hash in Q0 or uncommitted Q1
 reference in M0 is allowed.
 
 Unknown C0 outcome is a separate unresolved bootstrap incident. Preserve exact
-evidence and exclusion, refuse M0/R0/slot use and ask the owning admitted
-bootstrap recovery API to establish that **same** commit's outcome. Do not
+evidence and exclusion, refuse M0/R0/slot use and use the owner-run G19 recovery
+runbook with the owning admitted bootstrap recovery API to establish that
+**same** commit's outcome. The runbook mechanism remains unimplemented. Do not
 reinitialize, fabricate its receipt or clear a PC2 guard to resolve it. C0 is
 **not** an authority transaction or a `pc2-hold/1` origin. Only the exact
 `keymaker-authority-tx/1` transaction ID may originate an authority hold,
@@ -521,16 +548,16 @@ acceptance/qualification still have to supply authentic runtime inputs.
 | P3 — Protected participants/common writer and recovery ownership | §4 journal lifetime/S4 and §5 root coordinator, direct manager release consumption and root-owned participant installation | G5-A/C plus platform/root-policy/participant owners publish privileges, all-writer exclusion, old/restored-writer termination and qualified sync/call graph; no hidden locks or RPC |
 | P4 — Independent C0/floor transition | §6 manager's exact C0/Q0/M0/Q1/R0 consumer, floor checks and preserved origins | Q2/G2 and G5-E owner publishes independent authorization/latestness/commit and C0 recovery; manager cannot create that authority |
 
-Open decisions are owned, not implicit permission:
+Decisions and remaining gates are owned, not implicit permission:
 
 | ID | Owner | Artifact/decision required; state while absent |
 |---|---|---|
 | MC-Q1 / P1 | Deployment/package and platform owners | Admit the package publication's profile, mount/namespace provenance and protected head/currentness/replacement protocol; qualify actual native-writer lock conflict. No authenticated F_pkg provider until then |
 | MC-Q2 / G5-B / P2 | Manager and key-service capacity owners | Accept complete class/object ownership, pending-slot interpretation, exact prospective inventory/metadata/native-copy bounds and once-only materialization under every crash cut. Pre-funded credit is never permission for an unspecified census |
 | MC-Q3 / G5-A / P3 | Generation-journal and manager owners | Implement and review AppendPreparedLifetime with guard entry/unwind, all-exit reverse release and unchanged outcome/budget tests. Existing AppendPrepared remains insufficient |
-| MC-Q4 / G5-C / P3 | Platform, root-policy and each participant owner | Publish who may install root policy/ten participant roles, offline coordinator authentication and writer termination, service stop/start authority, direct read-only sync privileges and latency. No new root privilege for a participant by assumption |
-| MC-Q5 / Q2 / G2 / G5-E / P4 | Deployment/bootstrap and independent restore-custody owners | Select original authorization and independent per-transaction latestness/old-writer exclusion, C0 commit/unknown recovery and protected floor transition APIs. No genesis or floor authority inferred locally |
-| MC-Q6 / joint PC2 | Manager and key-service protocol owners | Resolve observation absorption versus RPC correlation and independently current custody; accept potentially indefinite withdrawal-completion blocking on failed recovery. This spec does not close any of the three joint gates |
+| MC-Q4 / G5-C / P3 — decided role matrix | Platform, root-policy and each participant owner | Owner decision: the owner's root approves the deployment version; the installer installs under that approval; the daemon receives no root authority (§5.1). Exact participant privileges, offline coordinator authentication, service stop/start authority, writer exclusion/termination and direct read-only sync privileges/latency remain implementation/qualification gates |
+| MC-Q5 / Q2 / G2 / G5-E / P4 — decided authority roles | Deployment/bootstrap and independent restore-custody owners | Owner decision: isolated trust-node signer under one-time owner grant signs C0; G17 custodian holds the independent floor; owner-run G19 runbook handles unknown C0 outcome/recovery; G18 fences restored old writers (§6). Custodian not chosen; G17/G18/G19 mechanisms not implemented; activation stays closed. Protected commit/floor transition APIs and qualification remain gates; no genesis/floor authority is inferred locally |
+| MC-Q6 / joint PC2 — decided failure policy | Manager and key-service protocol owners | Owner decision: storage/custody loss keeps "revocation incomplete" indefinitely while immediate containment applies (§5). Observation absorption/RPC correlation and independent custody remain open; no joint implementation/qualification gate is closed |
 | MC-Q7 / G5-D | Message-authority/provider owners | Publish original cumulative/restore/time/scope/WC1 evidence and continuity/privilege interfaces. Manager neither fabricates provider evidence nor persists runtime receipt authority |
 
 The [central open questions](../UNRESOLVED_QUESTIONS.md#pc2-manager-contract-publication-gates)

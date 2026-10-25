@@ -7,6 +7,26 @@ The [manager contracts](pc2-manager-contracts.md) and their
 [owned gates](../UNRESOLVED_QUESTIONS.md#pc2-manager-contract-publication-gates)
 still govern implementation and qualification.
 
+## Decided authority roles and closed runtime gates
+
+Owner decision, 2026-10-25: **MC-Q4 is decided** as an explicit role matrix.
+The owner's root approves the deployment version; the installer installs it
+under that approval; the daemon receives no root authority.
+
+**MC-Q5 / Q2 / G2 is decided:** an isolated signer on the trust node signs C0
+under a one-time owner grant. The independent G17 custodian holds the floor;
+unknown C0 outcome and recovery use the owner-run G19 runbook; G18 fencing
+excludes a restored old writer. The custodian has not been chosen and G17/G18/G19
+mechanisms are not implemented. Activation remains closed; choosing a custodian
+alone is not implementation or qualification.
+
+**MC-Q6 is decided:** storage or custody loss keeps "revocation incomplete"
+indefinitely, with immediate containment still applying. This policy grants no
+cleanup, completed-revocation, genesis or admission authority. Fixture baselines
+and storage success do not satisfy the remaining implementation, independent
+custody, fencing, recovery or qualification gates in the
+[manager contracts](pc2-manager-contracts.md#7-publication-ownership-and-remaining-decisions).
+
 ## Byte contract
 
 `internal/pc2state` implements the manager-owned subset of
@@ -392,8 +412,10 @@ custody, filesystem allocation or power-loss durability. ACL controls use actual
 xattrs and explicitly skip when unsupported. Production still needs the admitted
 catalog/installation, C0 and initial funding frontier, qualified overhead and
 zero-length representation, independent per-transaction custody/fencing, finite
-recovery envelope, and both joint spend anchors. Defaults are unavailable and
-retained debt, never implicit genesis, cleanup, fold or replenishment.
+recovery envelope, and both joint spend anchors. That envelope is not a finite
+recovery-completion promise on storage or custody loss; MC-Q6 keeps "revocation
+incomplete" indefinitely in that case. Defaults are unavailable and retained
+debt, never implicit genesis, cleanup, fold or replenishment.
 
 ## Census preparation: native-observation index contract
 

@@ -43,7 +43,8 @@ encoding proposal is now published separately; remaining gates follow.
 Publish the supported repository/package/closure profile and stable verifier
 custody; protected transaction/exclusion and review of the
 [A3c maintenance-journal encoding](spec/qualification-maintenance-journal.md);
-finite resource/freshness bounds and clock policy; P7 deadline/containment owner;
+finite resource/freshness bounds and clock policy; implementation of the decided
+5-minute P7 response and naming the admission owner for joint containment;
 and owner/curator notification adapters and qualified root recovery. Integrate
 the A2 macOS §7.1 companion reference when it lands. The
 [A3 qualification plan](spec/upgrade-requalification.md#7-qualification-plan--negative-cases-first)
@@ -58,12 +59,13 @@ its [retained F/B and Writer-owned D sessions](docs/requalification-coordinator.
 are implemented, while the coordinator preflight refuses before mutation.
 The guard, automatic pinning, five-step mutating orchestration and root
 qualification remain unimplemented. The coverage maps name the remaining PENDING
-runtime obligations. The [Q1 decision and four open recommendations](spec/qualification-maintenance-journal.md#9-open-decisions-and-recommendations)
+runtime obligations. The [Q1 decision and remaining publication gates](spec/qualification-maintenance-journal.md#9-open-decisions-and-recommendations)
 record Q1 as decided by the curator on 2026-10-25: external-call boundaries under
 continuous package/worker exclusion, exclusive issuer D and shared admission-preparation
-D follow the accepted rule. Q2 selects
-explicit initial baseline import/checkpoint custody; Q3 publishes authenticated
-interlock, recovery-fencing and both notification receipt interfaces; Q4 reviews
+D follow the accepted rule. A3d-2's owner decisions below fix Q2's custody roles
+and Q3's fencing, continuous admission/P7 ownership and response bound; exact
+baseline import/checkpoint, interlock, recovery-fencing and both notification
+receipt publications remain implementation/qualification gates. Q4 reviews
 hard budgets, source-pinned byte encodings and supported userdb provider classes;
 Q5 owns migration and disposable root qualification. The
 [decided Q1 rule](spec/qualification-maintenance-journal.md#91-q1-curator-decision--2026-10-25)
@@ -238,8 +240,22 @@ publication, composed sessions and fixed-call requirements. Its
 [external-owner matrix and open questions](spec/requalification-executor-contracts.md#8-external-owners-and-open-publication-decisions)
 separate those duties from Q2 baseline/checkpoint custody, real worker/qualifier
 fencing and root-writer continuity, qualified time and joint Q3 interlock/P7/
-incident/two-recipient receipt publication. These are still open authority and
-qualification gates, not interfaces implemented or authorized by the spec.
+incident/two-recipient receipt publication. The decisions below settle authority
+roles and policy; the remaining publication, implementation and qualification
+gates stay closed.
+
+### A3d-2 owner decisions — 2026-10-25
+
+| Item | Decision | Remaining gate / refusal default |
+|---|---|---|
+| p1 — Initial baseline custody: decided | Owner decision: G17 custodian plus owner approval of the first baseline | Custodian not chosen; G17 not implemented. Exact import/checkpoint/restore evidence and qualification remain required; no implicit genesis |
+| p2 — Old-worker quiescence: decided | Owner decision: use the G18 mechanism | G18 not implemented; absent qualified fencing/quiescence forbids overlapping recovery or retry. G19 recovery also remains unimplemented |
+| p3 — Continuous admission block with P7: decided | Owner decision: this component together with the admission owner owns the block for the whole requalification or unqualified period | Admission owner to be named; joint interlock implementation and qualification remain required; no admission through an unknown interval |
+| p4 — P7 response deadline: decided | Owner decision: 5 minutes from the original detection event | Immediate containment remains required; clock continuity, response implementation and qualification remain gates; no restart on retry/reboot |
+
+The [executor contracts](spec/requalification-executor-contracts.md#8-external-owners-and-open-publication-decisions)
+record these decisions with the remaining artifacts. They authorize no
+activation, implicit baseline, deadline extension or accepting recovery path.
 
 The [evidence implementation](docs/update-evidence.md) adds a recorder, local
 archive-chain verifier and uninstalled hook examples. It supplies neither an
@@ -374,16 +390,17 @@ The [manager state codec contract](spec/pc2-manager-state.md) implements
 pure representation/identity plus fixture-only retained storage mechanics. MC-Q2
 still requires qualified durable state, complete owner indexing/census and the
 cross-owner reservation API; MC-Q3 still requires journal-owned lifetime integration. Codec/vector success
-does not resolve these gates or the MC-Q4/5/6 authority and recovery decisions.
+does not resolve these gates. MC-Q4/5/6 role and failure-policy decisions are
+recorded below; their implementation and qualification remain closed.
 
-| Open question | Owner / remaining artifact |
+| Decision / gate | Owner / remaining artifact |
 |---|---|
 | MC-Q1 — Real F_pkg publication origin/currentness | Deployment/package and platform owners: admit actual native-writer database/mount/profile participation, protected publication/head custody, lock-conflict qualification and replacement exclusion; F_auth remains distinct |
 | MC-Q2 / G5-B — Complete census and credit | Manager and key-service capacity owners: complete authenticated five-plus-nine class inventories, pending ownership and pre-funded once-only conversion with all materialized/staged/native/integrity copies in the same 256 MiB |
 | MC-Q3 / G5-A — Journal-owned lifetime | [Journal mechanics](docs/design/prepared-append-lifetime.md) are implemented without production wiring. Manager/authority owners must supply the authentic retained effects/credit/A2/hold preparation, fixed native Check/Consume/Finish implementation and same-hold late release/acknowledgement recovery contract. Qualify protected fence/ACL/mount identities, real G4 maximum work and storage/close latency inside the original 1000 ms; no accepting provider or activation until these gates pass |
-| MC-Q4 / G5-C — Root participants/recovery and direct sync | Platform, root-policy and participant owners: authorize exact installers, old/restored-writer exclusion, offline root coordinator and principal-specific direct sync privileges/latency. No new service root privilege or RPC under F_auth |
-| MC-Q5 / Q2 / G2 / G5-E — C0 and independent floors | Deployment/bootstrap and independent restore-custody owners: original C0/Q0 authorization, independently current per-transaction commit/floor transition, C0 unknown-outcome recovery and old-writer exclusion; no authority from empty/lost files or C0 hold origin |
-| MC-Q6 — Three joint PC2 gates | Manager and key-service protocol owners: settle observation absorption/RPC correlation, independent restore custody and potentially indefinite withdrawal-completion blocking; no deadline/TTL or local epoch substitution |
+| MC-Q4 / G5-C — Role matrix: decided | Owner decision: owner's root approves the deployment version; installer installs under that approval; daemon receives no root authority. Platform/root-policy/participant owners still owe exact privileges, offline recovery authentication, writer exclusion and qualified direct-sync privileges/latency; no RPC under F_auth |
+| MC-Q5 / Q2 / G2 / G5-E — Authority roles: decided | Owner decision: isolated trust-node signer under a one-time owner grant signs C0; independent G17 custodian holds the floor; owner-run G19 runbook handles unknown C0 outcome/recovery; G18 excludes restored old writers. Custodian not chosen; G17/G18/G19 mechanisms not implemented; activation stays closed. Exact current commit/floor APIs and qualification remain gates; no local genesis or C0 hold origin |
+| MC-Q6 — Failure policy: decided | Owner decision: storage/custody loss keeps "revocation incomplete" indefinitely while immediate containment applies. Manager/key-service owners still owe observation absorption/RPC correlation and independent custody implementation/qualification; no deadline/TTL or local epoch substitute |
 | MC-Q7 / G5-D — External message authority | Message/provider owners: publish original cumulative/restore/time/scope/WC1 evidence and continuity/privilege interfaces; manager supplies no synthetic provider, persisted receipt authority or automatic witness activation |
 
 The [protected retained-store mechanics](spec/pc2-manager-state.md#protected-retained-storage-and-owner-index)

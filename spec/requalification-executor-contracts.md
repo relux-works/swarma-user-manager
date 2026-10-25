@@ -128,10 +128,13 @@ or an `accepted` enum as their authority.
 
 ### 3.1 Import and whole-history validation
 
-Q2's initial baseline, deployment identity and trusted checkpoint/restore
-custody are an **owner and platform decision**. The executor MUST NOT choose or
-provision them implicitly. An empty journal or recorder, installed-looking
-packages, existing pin/Q or current snapshot can never become genesis.
+**A3d-2 p1 — decided (owner decision, 2026-10-25).** Initial baseline custody
+uses the G17 custodian together with the owner's approval of the first baseline.
+The custodian is not yet chosen and the G17 mechanism is not implemented.
+Deployment identity, the exact import/checkpoint/restore publication and native
+qualification remain required; the executor MUST NOT choose or provision them
+implicitly. An empty journal or recorder, installed-looking packages, existing
+pin/Q or current snapshot can never become genesis.
 Explicitly installed genesis alone maps recorder `(Z,0)` to A3b's empty event
 hash and sequence zero. Owner qualification is not a fabricated accepted update.
 
@@ -338,6 +341,11 @@ domain and clock/boot continuity; unbounded or unspecified subrecords refuse.
 The executor verifies exact scope, complete subjects, enforcement epoch,
 irreversible cutoff relative to retry and continuing root-writer exclusion.
 This required normalized record is not a published native fencing mechanism.
+
+**A3d-2 p2 — decided (owner decision, 2026-10-25).** Old-worker quiescence
+uses the G18 mechanism. That mechanism is not implemented; naming it supplies
+neither quiescence evidence nor permission to retry. G19 recovery is likewise
+not implemented, and the existing refusal and non-overlap rules remain in force.
 
 Context cancellation, timeout, process exit, successful wait, absent PID,
 service-manager acknowledgement or a released advisory lock alone is never
@@ -585,6 +593,12 @@ execute this vector or qualify continuity, authentication or native completion.
 
 ### 6.2 Continuous admission and maintenance interlock
 
+**A3d-2 p3 — decided (owner decision, 2026-10-25).** This component together
+with the admission owner owns continuous admission blocking with P7 throughout
+the entire requalification or unqualified period. The admission owner remains
+to be named. This decision does not implement the joint interlock or its native
+qualification; an unknown interval still refuses admission.
+
 The proposed closed `InterlockFacts` record, to be published jointly with the
 admission/P7 and root-writer owners, is exactly
 `{authority,evidence,scope,version,epoch,maintenance,new_starts,resumes,root_writers,worker,p7,invalidation}`.
@@ -608,6 +622,11 @@ semantics, refuse and obtain versioned contract review instead of adding an
 entry field, replacing its ref or inventing evidence of future continuity.
 
 ### 6.3 Original P7 event and response
+
+**A3d-2 p4 — decided (owner decision, 2026-10-25).** The P7 response deadline
+is **5 minutes** from the original detection event. This confirms the response
+bound; implementation, clock-continuity evidence and qualification remain gates.
+It does not postpone immediate containment or restart the deadline on recovery.
 
 `P7Facts` is exactly
 `{authority,evidence,scope,event,affected,detected,deadline,response,continuity}`.
@@ -866,9 +885,9 @@ cannot all be delegated back to an owner as an unspecified service.
 
 | External owner | Required publication / decision | Safe state while absent |
 |---|---|---|
-| Baseline authority and platform restore owner (Q2) | Explicit initial accepted baseline/import association, deployment identity, trusted checkpoint provisioning/restore procedure, evidence/source pins and independent custody if coherent rollback resistance is claimed | No genesis or lower floor from current state; empty/lost/incoherent custody refuses |
+| Baseline authority and platform restore owner (Q2) | A3d-2 p1 is decided: G17 custodian plus owner approval of the first baseline (§3.1). Custodian selection and G17 implementation remain open, together with exact accepted baseline/import association, deployment identity, checkpoint provisioning/restore procedure and evidence/source pins | No genesis or lower floor from current state; empty/lost/incoherent custody refuses |
 | Platform/service-manager owner | Dedicated maintenance artifact with no reverse dependency/consumer lifecycle effects; separately fixed issuer/latest contexts; retained cgroup.kill/populated=0 fence with reactivation closed, PID1/delegated-work accounting and commit currency; full GetAll, queue/stop and native failure graphs | No ordinary-boot-unit substitution, dual-name fallback, timer/PID/exit-only takeover or accepting child launch |
-| Admission/P7 and root-writer owners jointly (Q3) | Versioned bounded authenticated interlock schema/validator, pre-package stopped starts/resumes, continuous root-writer ownership/epoch/invalidation; affected-set authority and original detection/clock/deadline/timely response; reboot continuity | Marker-only proof/unknown interval or P7 compliance refuses; owner retains immediate containment |
+| Admission/P7 and root-writer owners jointly (Q3) | A3d-2 p2–p4 are decided: G18 old-worker quiescence, continuous admission/P7 blocking owned jointly by this component and the admission owner (to be named), and a 5-minute original P7 deadline (§§5–6). G18/G19 mechanisms are not implemented; publish and qualify the versioned bounded authenticated interlock schema/validator, pre-package stopped starts/resumes, continuous root-writer ownership/epoch/invalidation; affected-set authority and original detection/clock/deadline/timely response; reboot continuity | Marker-only proof/unknown interval or P7 compliance refuses; owner retains immediate containment |
 | Timeconf/platform time owner | §6.1 retains the receipt/API pins `a1c69eb`, `8cdea82` (QT-2a `07f9e6b`); the amended time/handoff/schema/macOS contracts and inactive OriginalReader interface are published at `7294b7a`. The [consumer window profile](requalification-time-windows.md) selects one suspend-aware read after append/use admission, the original durable endpoint and proposed v2 burn. Implement/qualify accepting original reading, handoff codec/preparer/verifier/consume and witness; establish independent rollback custody, Linux/macOS clock/deadline mappings and installed no-back-edge/subtree/reboot/remaining-delay enforcement | Keyless use is conditional on the trusted process/machine boundary; production remains closed. Decode is structural, not authentication; no reset, wall fallback, cached pass or expiry extension |
 | Incident authority | Authentic minimized incident issuance/validation, complete affected/response provenance, original event/deadline association and durable failure capacity | No fabricated failure terminal entry or dropped incident |
 | Owner recipient/transport authority | Versioned authenticated owner-role capability/receipt codec, incident binding, durable delivered acknowledgement and retry/capacity contract | Owner pending/unknown delivery holds acceptance/readiness |
@@ -886,12 +905,13 @@ required; this decision grants no runtime admission or codec extension.
 
 Open questions are requests for precise artifacts, not approval by implication:
 
-1. Which protected deployment/baseline/checkpoint import and restore-custody
-   record does Q2 select, and what independent failure domain supports any
-   stronger rollback claim? How does it retain the accepted time floor?
-2. Which real mechanism fences every old worker/qualifier/delegated writer and
-   proves quiescence across timeout/reboot? Which root-writer and interlock
-   epochs can our finite local guards retain continuously?
+1. Given the decided G17 custody and owner approval of the first baseline,
+   which custodian and protected deployment/baseline/checkpoint import and
+   restore record implement Q2? Qualify the independent failure domain and
+   retention of the accepted time floor; selection alone supplies no authority.
+2. Which G18 implementation proves every old worker/qualifier/delegated writer
+   quiescent across timeout/reboot? Which root-writer and interlock epochs can
+   our finite local guards retain continuously? G18/G19 remain unimplemented.
 3. Can the joint Q3 schemas bind original pre-package P7 events and later attempt
    scopes to the same immutable interlock ref, with authoritative invalidation,
    affected-set completeness and no deadline reset?
