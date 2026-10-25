@@ -125,9 +125,10 @@ Origin verification remains a separate mandatory check before any future use.
 both validated records and their immutable identities. Same-attempt pending
 may resolve once to absent or durable; exact replay is idempotent. Resolution
 cannot reverse or change outcome/evidence. A fresh pending attempt requires
-the preceding attempt conclusively resolved and ordinal incremented by exactly
-one without overflow. Manager/effect/target/owner/provision-effect stay fixed;
-new source/tail/process observations may be freshly prepared. A new generation
+the preceding attempt conclusively absent and ordinal incremented by exactly
+one without overflow. A durable append returns its retained result, never a
+fresh attempt for that same effect. Manager/effect/target/owner/provision-effect
+stay fixed; new source/tail/process observations may be freshly prepared. A new generation
 or OS act is never a retry of this effect.
 
 `CheckAttemptHistory` checks a nonempty ordered per-effect chain of in-memory

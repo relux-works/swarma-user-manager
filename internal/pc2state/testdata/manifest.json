@@ -1,0 +1,118 @@
+{
+  "source": "relux-works/swarma-keymaker",
+  "commit": "28b1c8839fa59cbd1ac7409510716c7929c77e2e",
+  "goldens": [
+    {
+      "id": "transaction",
+      "path": "transaction.json",
+      "encoding": "identity",
+      "bytes": 243,
+      "sha256": "ca605968290d62605131c574f35565c6ee4a2fe468800d489f400c48cf3d2c99",
+      "domain": "keymaker-authority-tx/1"
+    },
+    {
+      "id": "attempt",
+      "path": "attempt.json",
+      "encoding": "identity",
+      "bytes": 1136,
+      "sha256": "2d01eba6c1a3cb37aeaa9b492a38c593dbba5e037a0e9e20519b97fbcaf9c93f",
+      "domain": "pc2-activation-attempt/1"
+    },
+    {
+      "id": "attempt-preimage",
+      "path": "attempt-preimage.json",
+      "encoding": "identity",
+      "bytes": 1002,
+      "sha256": "217b02fb222d97d6967bdf72e639b465dd1f200e0523f287476961cabac6301b",
+      "domain": "pc2-activation-attempt/1"
+    },
+    {
+      "id": "hold",
+      "path": "hold.json",
+      "encoding": "identity",
+      "bytes": 127,
+      "sha256": "12c46af7531737a3e0af0777fa0ce08faeccd30f2add74cee426662313dcc3fe",
+      "domain": "pc2-hold/1"
+    },
+    {
+      "id": "manager-inventory",
+      "path": "manager-inventory.json",
+      "encoding": "identity",
+      "bytes": 474,
+      "sha256": "432c699e90b1f11198a61545278f5fe01168e37feadb0e86816df94449b98f84",
+      "domain": "pc2-manager-inventory/1"
+    },
+    {
+      "id": "recovery-open",
+      "path": "recovery-open.json",
+      "encoding": "identity",
+      "bytes": 431,
+      "sha256": "a9953d22dd6544fb7752bb10f10a80f499335fa6aa9fb34201c051981c6a913a",
+      "domain": "pc2-recovery-record/1"
+    },
+    {
+      "id": "recovery-resolved",
+      "path": "recovery-resolved.json",
+      "encoding": "identity",
+      "bytes": 572,
+      "sha256": "23cfd2db5d2d1218a329f16b80550ed0b50fb523ef5213d5278e33ce629ac8f4",
+      "domain": "pc2-recovery-record/1"
+    },
+    {
+      "id": "recovery-release-prepared",
+      "path": "recovery-release-prepared.json",
+      "encoding": "identity",
+      "bytes": 580,
+      "sha256": "54513791777dd21e20ff1401252f7f1d2d471cebe2ada4145f0d79186bea5fc8",
+      "domain": "pc2-recovery-record/1"
+    },
+    {
+      "id": "recovery-released",
+      "path": "recovery-released.json",
+      "encoding": "identity",
+      "bytes": 572,
+      "sha256": "cb19fb448b99504e951ae65f53e146c528499578e8db7df2358f41816511e8cd",
+      "domain": "pc2-recovery-record/1"
+    },
+    {
+      "id": "capacity-inventory-empty",
+      "path": "capacity-inventory-empty.json",
+      "encoding": "identity",
+      "bytes": 94,
+      "sha256": "193d9bd22fd8cf133a5989c647532f08799d13efb589c41a5f9deab4eb0294ad",
+      "domain": "keymaker-capacity-inventory/1"
+    },
+    {
+      "id": "capacity-genesis-commit",
+      "path": "capacity-genesis-commit.json",
+      "encoding": "identity",
+      "bytes": 386,
+      "sha256": "e242983dfbceab824d8797c3f16da89bdb273b87998711c85b6c0cbaf5d1e7f7",
+      "domain": "keymaker-capacity-genesis/1"
+    },
+    {
+      "id": "capacity-genesis-migration-history",
+      "path": "capacity-genesis-migration-history.json",
+      "encoding": "identity",
+      "bytes": 201,
+      "sha256": "9cfee85935b0c552b2ea5ebf6ccf9fa36569d000120b33b4e92b183c1208fae3",
+      "domain": "keymaker-migration-history/1"
+    },
+    {
+      "id": "journal-genesis-guard",
+      "path": "journal-genesis-guard.json",
+      "encoding": "identity",
+      "bytes": 408,
+      "sha256": "e0858520d8c576edd1dd37f1f91ef85d308c4c7d67c3e9687599c400260a1e7c",
+      "domain": "pc2-recovery-guard/1"
+    },
+    {
+      "id": "journal-genesis-recovery",
+      "path": "journal-genesis-recovery.json",
+      "encoding": "identity",
+      "bytes": 431,
+      "sha256": "d81036d01be8282b5dc74ed644e675f4744cfd3a6cc7cbd527c77ef047578a46",
+      "domain": "pc2-recovery-record/1"
+    }
+  ]
+}

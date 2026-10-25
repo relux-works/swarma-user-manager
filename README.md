@@ -207,7 +207,7 @@ once-only slot conversion, journal-owned append lifetime, root recovery and
 direct release consumption. They preserve C0/floor authority as an independent
 owner input and map the key service's four prerequisites to our publications.
 These are specifications only; the [owned publication gates](UNRESOLVED_QUESTIONS.md#pc2-manager-contract-publication-gates)
-and all implementation/native qualification remain open.
+and runtime integration/native qualification remain open.
 
 The [PC2 manager state codec contract](spec/pc2-manager-state.md) defines the
 pure `internal/pc2state` representations and immutable A2/hold identity checks.
