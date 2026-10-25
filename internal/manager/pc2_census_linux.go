@@ -537,6 +537,12 @@ func censusSlot(heads []pc2store.FileImage, proof censusFixtureCommit, entries [
 			if !found {
 				return unavailable()
 			}
+			// The complete index, not the guard's selected hold list, defines
+			// retained authority obligations. Omission cannot erase a veto.
+			m, _ := treeCensus(o.Bytes())
+			if m["kind"] == "authority" {
+				return unavailable()
+			}
 		}
 	}
 	// All non-null guard/history references must resolve against this capture.
