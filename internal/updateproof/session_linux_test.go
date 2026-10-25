@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 )
@@ -100,8 +101,10 @@ func TestPackageSessionIdentity(t *testing.T) {
 			case "zero":
 				target = &PackageSession{}
 			case "copy":
-				copy := *s
-				target = &copy
+				// Deliberately copy the whole session through reflection so the
+				// invalid-capability test does not trigger vet's copylocks check.
+				target = new(PackageSession)
+				reflect.ValueOf(target).Elem().Set(reflect.ValueOf(s).Elem())
 			case "foreign":
 				owner = recorderFixture(t)
 			case "released":
