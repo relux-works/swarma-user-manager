@@ -151,8 +151,9 @@ publication path is separate from the unchanged legacy marker writer.
    exact expected tail/length and reserve. Latch `appendDurable` before any
    following deadline/cancellation/finish failure can mask completed proof.
 6. Still under F_auth repeat full finish verification/capacity, journal/directory
-   sync, exact marker check/unlink and parent sync, then the provider's retained
-   outcome and normal-finish barriers.
+   sync, exact marker read and checked descriptor close, original-budget check,
+   marker unlink and parent sync, then the provider's retained outcome and
+   normal-finish barriers.
 7. Close the journal, release and close F_auth, then data, then gate, then the
    retained directories. Complete a final original-budget/context check.
    Only then can clean success return; the caller releases effects afterwards.
@@ -162,6 +163,7 @@ publication path is separate from the unchanged legacy marker writer.
 | No active write invoked | `NoWrite`; actual prewrite refusal, marker/staging/consumed obligation preserved if created |
 | Write invoked, exact durability not proved | `UnknownWrite`; exact attempt/hold/credit and bytes retained, no retry or abort inference |
 | Exact append proved, later finish/release/check fails | `DurableCleanupUncertain`; checkpoint retained even with absent marker, no duplicate append |
+| Final marker descriptor close reports failure | `DurableCleanupUncertain`; exact checkpoint and marker retained, no provider Finish or clean View; close error recorded without replacing an earlier read/metadata refusal |
 | Exact append, all finish/release steps and original budgets proven | `CleanAppend`; one exact result, no independent admission or promotion grant |
 
 The private verifier extraction preserves legacy validation/check ordering and
@@ -182,6 +184,13 @@ Unlock failure still closes the sole private description before releasing the
 next lock. Close is real, single-owner and never blindly retried by integer FD.
 Every error denies clean success even if the lock was released. Supported Linux
 close and storage behavior remain a platform qualification obligation.
+The final marker read uses its own checked descriptor path; the legacy marker
+and open helpers remain unchanged. Its close runs after metadata/read/decode
+failure too, and a reported close error is retained as cleanup telemetry. No
+unlink follows a failed close or an original-budget expiry during that close.
+The descriptor audit found no other unchecked close in the new final window:
+journal/F_auth/data/gate and four retained directories use checked unwind;
+marker staging uses checked normal/deferred close before short-lock acquisition.
 The original panic propagates after reverse cleanup. `PreparedAppend.Result`
 then exposes a recovery snapshot; a re-panic is not an ordinary returned result
 or evidence that no write occurred. Death is not controlled unwind or abort:
@@ -227,8 +236,8 @@ plant reports failure only after the real close.
 | `SingleWrite` | Short/zero/EINTR/error write is invoked once, remains unknown and never retries |
 | `UnknownWrite` | Journal/directory sync boundaries, late broken chain and unexpected tail cannot prove durability |
 | `DurableCleanup` | Full proof survives every later finish/marker/provider failure, including absent marker |
-| `ReleaseFailure` | Each release/close failure, real close fallback, multiple diagnostics and preservation of the primary refusal |
-| `Budget` | Just-before/equal/after original bounds, margin refusal, original observation, F wait, clock error/backwards clock and expiry between verifier records |
+| `ReleaseFailure` | Each release/close failure, final marker metadata/read/close boundary, real close fallback, multiple diagnostics and preservation of the primary refusal |
+| `Budget` | Just-before/equal/after original bounds, expired F entry cannot reach authority Check/Consume/write, post-marker-close expiry, margin refusal, original observation, F wait, clock error/backwards clock and expiry between verifier records |
 | `Cancellation` | Cancellation across acquisition, consumption, write, proof, unlink and cleanup boundaries preserves progress and unwinds |
 | `PanicUnwind` | Original provider panic propagates after release; post-proof/post-unlink finishing panic retains recovery evidence |
 | `Death` | Exact child death before write, after write/sync, after unlink/before parent sync retains evidence and releases kernel locks |
@@ -241,16 +250,32 @@ credit, complete G4 validation or qualified normal-release protocol. The native
 provider call graph, real credit/hold encodings and authority disagreements need
 the later manager integration tests; interface success alone proves none of them.
 
-Using Go 1.26.10 on Linux, the selected candidate run passed all 18 new groups
+Using Go 1.26.10 on Linux, the initial implementation run passed all 18 new groups
 plus nine existing journal groups (275 named cases including group results),
 and the selected race run passed four groups (52 named cases). The four selected
 manager regression groups also passed. Build and vet passed. Statement coverage
 was 95.7% for the changed private verifier and 84.1% across the three new lifetime
 implementation files. These narrow measurements do not claim whole-project
-coverage, real storage latency or host qualification.
+coverage, real storage latency or host qualification. Those counts and coverage
+measurements precede the checked final-marker-close change.
 
-The following bounded source plants were compiled and exercised in an isolated
-scratch checkout against the same implementation/tests. A killed plant exited 1
+After that change, all 18 lifetime groups passed (189 named results), as did the
+four selected race groups (58 named results), build and vet: each exited 0,
+without skipped cases. Both existing journal reviewer regression groups also
+exited 0. A separate owned-child syscall probe ran the committed
+test `ReleaseFailure/marker-descriptor/valid` with and without an injected EIO
+after the real successful marker close. Both exited 0 against their respective
+expectations; the original unchecked implementation failed the EIO expectation
+with exit 1. The probe also paired no-fault and EIO controls for
+`ReleaseFailure/marker-descriptor/mode`: both exited 0, preserving the primary
+`journal_mode` refusal while retaining the close diagnostic only on EIO.
+Each injected run observed exactly one real close, return 0, and an absent
+descriptor before changing its return value. No product source path was patched
+for these candidate probes. Fixture BOOTTIME was frozen; this tests error
+propagation and state preservation, not syscall latency or platform qualification.
+
+The following initial bounded source plants were compiled and exercised in an
+isolated scratch checkout before the final-marker-close change. A killed plant exited 1
 with a named assertion failure, without a setup/build failure or panic. The
 survivor exited 0 and is explicitly bounded below. Group names in the last column
 have the same `TestAppendPreparedLifetime` prefix.
@@ -274,11 +299,23 @@ have the same `TestAppendPreparedLifetime` prefix.
 | Reset durable after error | Known append downgraded by finish failure | `DurableCleanup` — killed |
 | Skip final directory sync | Marker-parent durability omitted | `DurableCleanup/before:finish-unlink-sync` — killed |
 | Ignore release errors | Failed cleanup becomes clean | `ReleaseFailure` — killed |
-| Fresh fence timer | F entry restarts writer budget | `Budget/equal` — killed |
+| Fresh fence timer | F entry restarts writer budget | `Budget/equal` — initial failure was a late marker mismatch; the prewrite deadline witness is strengthened and rerun below |
 | Accept copied window | Value clone can validate work | `Window` — killed |
 | Accept stale window | Revoked window can validate work | `Window` — killed |
 | Hide staging progress | Unpublished incident is hidden | `PreMarker/after:marker-create` — killed |
 | Overwrite incident phase | Cleanup hides the failure boundary | `PreMarker/after:marker-create` — killed |
+
+Five affected plants were compiled and rerun after the close change. All five
+exited 1 at the intended named assertion, with no build failure, panic or
+survivor. The two close plants used the same real-close-then-EIO probe.
+
+| Mutant | Gate narrowed to | Named failing test / result |
+| --- | --- | --- |
+| Discard final marker close error | Real close EIO permits clean success | `ReleaseFailure/marker-descriptor/valid` — killed: expected `journal_io`, got success |
+| Discard secondary marker close error | Metadata refusal hides close EIO | `ReleaseFailure/marker-descriptor/mode` — killed: missing close diagnostic |
+| Fresh fence timer | F entry restarts original writer budget | `Budget/equal` — killed: expired original budget reached authority Check before active write; no late marker mismatch |
+| Skip post-marker-close budget check | Expired close allows unlink before checking time | `Budget/after-marker-read-close` — killed: marker was unlinked after expiry |
+| Ignore release errors | Failed retained-descriptor cleanup becomes clean | `ReleaseFailure/after:close:F_auth` — killed: expected `journal_io`, got success |
 
 Reproduce the narrow groups with the supported toolchain. Go creates isolated
 test fixtures; use a local untracked directory for saved JSON/coverage logs.
