@@ -177,6 +177,15 @@ func decode(b []byte) (Record, error) {
 
 func Digest(line []byte) string { h := sha256.Sum256(line); return hex.EncodeToString(h[:]) }
 
+// DecodeRecordBytes validates one existing complete LF-terminated record. It
+// proves neither chain membership nor protected/current native state.
+func DecodeRecordBytes(raw []byte) (Record, error) {
+	if len(raw) < 1 || len(raw) > MaxLine || raw[len(raw)-1] != '\n' {
+		return Record{}, refuse("journal_line_size")
+	}
+	return decode(raw[:len(raw)-1])
+}
+
 // Verify checks the complete bounded file and requires the supplied durable floor on its chain.
 // This byte validator alone does not establish protected paths, locking or restore reconciliation.
 func Verify(src io.Reader, floor Floor) (View, error) {

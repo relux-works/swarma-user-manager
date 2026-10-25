@@ -40,6 +40,7 @@ type censusFixtureCommit struct {
 	Marker          *censusMarkerBinding `json:"marker_binding"`
 	OriginalIntents []string             `json:"original_intents"`
 	Origins         []string             `json:"hold_origins"`
+	Effects         []State              `json:"effects_checkpoints"`
 }
 type censusRow struct {
 	ID        string `json:"id"`
@@ -82,7 +83,7 @@ func boundCensus(n int64) bool       { return n >= 0 && n <= pc2state.AggregateB
 
 // reservationCensus checks the exact shared G4 representation and conservation;
 // the independent fixture commit, not these counters, supplies fixture eligibility.
-func reservationCensus(raw []byte) (string, int64, error) {
+func reservationCensus(raw []byte) (string, int64, map[string]int64, error) {
 	var q struct {
 		Version string  `json:"version"`
 		Base    *string `json:"base_root_digest"`
@@ -107,41 +108,49 @@ func reservationCensus(raw []byte) (string, int64, error) {
 		} `json:"manager_slots"`
 	}
 	if len(raw) > 65536 || strict(raw, &q) != nil || q.Version != "keymaker-reservation/1" || q.Limit != pc2state.AggregateBytes || q.Audit != 8 || len(q.Groups) != 14 || q.Slots.Slots != 1 || q.Slots.Attempt != 4096 || q.Slots.Hold != 4096 || q.Slots.Guard != 65536 || q.Slots.Recovery != 65536 {
-		return "", 0, ErrCensusUnavailable
+		return "", 0, nil, ErrCensusUnavailable
 	}
 	if q.Base != nil && !digestOKCensus(*q.Base) {
-		return "", 0, ErrCensusUnavailable
+		return "", 0, nil, ErrCensusUnavailable
 	}
 	want := []string{"keymaker/artifacts", "keymaker/installed", "keymaker/migration_history", "keymaker/pending_proofs", "keymaker/policy_history", "keymaker/recovery", "keymaker/reservation_metadata", "keymaker/root_history", "keymaker/staging", "manager/attempts", "manager/holds", "manager/inventory", "manager/recovery", "manager/staging"}
 	var total int64
+	sources := map[string]int64{}
 	for i, r := range q.Groups {
 		if r.Owner+"/"+r.Kind != want[i] || !digestOKCensus(r.Inventory) || !boundCensus(r.Bytes) || !boundCensus(r.Integrity) || !boundCensus(r.Reserved) || !boundCensus(r.Objects) {
-			return "", 0, ErrCensusUnavailable
+			return "", 0, nil, ErrCensusUnavailable
 		}
+		sources[r.Owner+"/"+r.Kind] = r.Reserved
 		total += r.Bytes + r.Integrity + r.Reserved
 		if total > pc2state.AggregateBytes {
-			return "", 0, ErrCensusUnavailable
+			return "", 0, nil, ErrCensusUnavailable
 		}
 	}
 	if total != q.Total {
-		return "", 0, ErrCensusUnavailable
+		return "", 0, nil, ErrCensusUnavailable
 	}
-	return digestCensus(raw), total, nil
+	return digestCensus(raw), total, sources, nil
 }
 func digestOKCensus(s string) bool {
 	return len(s) == 71 && strings.HasPrefix(s, "sha256:") && hashOK(s[7:])
 }
 
 func prepareManagerCensus(c *censusContext) (prepared *PreparedCensus, err error) {
-	bad := func(e error) (*PreparedCensus, error) { return nil, errors.Join(ErrCensusUnavailable, e) }
+	var envelope int64
+	bad := func(e error) (*PreparedCensus, error) { return nil, &CensusRefusal{HeldEnvelope: envelope, Cause: e} }
 	if c == nil || len(c.commit) > 65536 || digestCensus([]byte(c.commit)) != c.commitDigest {
 		return bad(nil)
 	}
+	original := c
+	local := *c
+	local.targets = append([]pc2store.HeadTarget(nil), c.targets...)
+	local.native = map[string]*pc2store.ReadDirectory{"native-effects": c.native["native-effects"], "native-generations": c.native["native-generations"]}
+	c = &local
 	var proof censusFixtureCommit
-	if strict([]byte(c.commit), &proof) != nil || proof.Version != "pc2-census-fixture-commit/1" || !hex32Census(proof.Installation) || len(proof.Heads) != 5 || proof.OriginalIntents == nil || proof.Origins == nil || proof.Index != c.baseline.Head || proof.Funding != c.baseline.FundingDigest || proof.Genesis != c.baseline.Genesis {
+	if strict([]byte(c.commit), &proof) != nil || proof.Version != "pc2-census-fixture-commit/1" || !hex32Census(proof.Installation) || len(proof.Heads) != 5 || proof.OriginalIntents == nil || proof.Origins == nil || proof.Effects == nil || proof.Index != c.baseline.Head || proof.Funding != c.baseline.FundingDigest || proof.Genesis != c.baseline.Genesis {
 		return bad(nil)
 	}
-	q, total, e := reservationCensus(proof.Reservation)
+	q, total, sources, e := reservationCensus(proof.Reservation)
 	if e != nil {
 		return bad(e)
 	}
@@ -158,8 +167,22 @@ func prepareManagerCensus(c *censusContext) (prepared *PreparedCensus, err error
 		c.probe("captured")
 	}
 	snapshot, e := pc2store.ReadSnapshot(c.pc2, c.baseline)
+	if e != nil {
+		var debt *pc2store.SnapshotReadError
+		if errors.As(e, &debt) {
+			return nil, &CensusRefusal{ObservedBytes: debt.ObservedBytes, Cause: e}
+		}
+	}
 	if e != nil || snapshot.Reservation() != q || snapshot.Envelope() > total {
 		return bad(e)
+	}
+	envelope = snapshot.Envelope()
+	for _, source := range snapshot.SourceReservations() {
+		key := source.Owner + "/" + source.Kind
+		sources[key] -= source.Bytes
+		if sources[key] < 0 {
+			return bad(nil)
+		}
 	}
 	entries := snapshot.Entries()
 	aliases := map[[2]uint64]bool{}
@@ -203,9 +226,14 @@ func prepareManagerCensus(c *censusContext) (prepared *PreparedCensus, err error
 		held -= n.Bytes + n.Integrity
 	}
 	if e = censusNativeClosure(c, native); e != nil {
+		var debt *CensusRefusal
+		if errors.As(e, &debt) {
+			debt.HeldEnvelope = snapshot.Envelope()
+			return nil, debt
+		}
 		return bad(e)
 	}
-	if e = censusNativeHistory(native, snapshot.History()); e != nil {
+	if e = censusNativeHistory(native, snapshot.History(), proof.Effects); e != nil {
 		return bad(e)
 	}
 	if c.probe != nil {
@@ -314,9 +342,14 @@ func prepareManagerCensus(c *censusContext) (prepared *PreparedCensus, err error
 		}
 	}
 	if e = censusNativeClosure(c, native); e != nil {
+		var debt *CensusRefusal
+		if errors.As(e, &debt) {
+			debt.HeldEnvelope = snapshot.Envelope()
+			return nil, debt
+		}
 		return bad(e)
 	}
-	if digestCensus([]byte(c.commit)) != c.commitDigest {
+	if digestCensus([]byte(c.commit)) != c.commitDigest || original.commitDigest != c.commitDigest || original.baseline != c.baseline {
 		return bad(nil)
 	}
 	evidence := censusEvidence{"pc2-census-evidence/1", proof.Installation, c.commitDigest, c.baseline.Head, append([]string(nil), proof.Heads...), []string{}, held, snapshot.Envelope(), bounds, verdict, owner}
@@ -349,14 +382,30 @@ func sameSnapshotCensus(a, b pc2store.ReadSnapshotResult) bool {
 
 func censusNativeClosure(c *censusContext, images []nativeCensusImage) error {
 	expected := map[string]bool{}
+	roles := map[string]bool{}
 	for _, n := range images {
 		expected[n.observation.Directory+"/"+n.observation.Name] = true
+		roles[n.observation.Role] = true
+	}
+	if !roles["generation-journal"] || !roles["effects-store"] {
+		return ErrCensusUnavailable
 	}
 	for _, dir := range []string{"native-effects", "native-generations"} {
 		d := c.native[dir]
-		names, e := d.Names(256)
+		names, e := d.Names(258)
 		if e != nil {
 			return e
+		}
+		infrastructure := []string{"effects.lock"}
+		mode := uint32(0600)
+		if dir == "native-generations" {
+			infrastructure = []string{"gate.lock", "data.lock"}
+			mode = 0644
+		}
+		for _, name := range infrastructure {
+			if _, e := d.Read(name, mode, 0); e != nil {
+				return e
+			}
 		}
 		for _, name := range names {
 			if (dir == "native-effects" && name == "effects.lock") || (dir == "native-generations" && (name == "gate.lock" || name == "data.lock")) {
@@ -371,7 +420,12 @@ func censusNativeClosure(c *censusContext, images []nativeCensusImage) error {
 				continue
 			}
 			if !expected[dir+"/"+name] {
-				return ErrCensusUnavailable
+				mode := uint32(0600)
+				if dir == "native-generations" {
+					mode = 0644
+				}
+				image, e := d.Read(name, mode, 8388608)
+				return &CensusRefusal{OrphanBytes: image.Length(), Cause: errors.Join(ErrCensusUnavailable, e)}
 			}
 		}
 	}
@@ -444,6 +498,10 @@ func censusSlot(heads []pc2store.FileImage, proof censusFixtureCommit, entries [
 			return unavailable()
 		}
 		for _, link := range history {
+			attemptMap, _ := treeCensus(link.Record.Bytes())
+			if censusAttemptJournal(attemptMap, native) != nil {
+				return unavailable()
+			}
 			if pc2state.CheckEffectIntent(link.Record, raws[effect]) != nil {
 				return unavailable()
 			}

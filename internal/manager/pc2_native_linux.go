@@ -82,9 +82,57 @@ func readCensusNative(d *pc2store.ReadDirectory, n pc2store.NativeObservation) (
 	return nativeCensusImage{n, image}, nil
 }
 
-func censusNativeHistory(images []nativeCensusImage, history []pc2store.NativeObservation) error {
+func censusNativeHistory(images []nativeCensusImage, history []pc2store.NativeObservation, checkpoints []State) error {
+	// Parent-held logical checkpoints authenticate the retained OSRecords and
+	// terminal identities. No historical raw envelope is created on disk.
+	states := map[string]State{}
+	retained := map[string]bool{}
+	for _, image := range images {
+		retained[image.image.Digest] = true
+	}
+	for _, state := range checkpoints {
+		if validateStored(state) != nil || state.Revision < 1 {
+			return errNativeCensus
+		}
+		raw, e := effectBytes(state)
+		if e != nil || states[digestCensus(raw)].Revision != 0 {
+			return errNativeCensus
+		}
+		states[digestCensus(raw)] = state
+	}
+	for _, old := range history {
+		if old.Encoding != "effects" {
+			continue
+		}
+		state, ok := states[old.Digest]
+		if !ok || state.Revision != *old.Revision || state.Floor != nativeCheckpoint(old.Floor) {
+			return errNativeCensus
+		}
+		for _, current := range images {
+			if current.observation.Encoding == "effects" && current.observation.Role == "effects-store" {
+				next, e := decodeCensusEffects(current.image.Bytes())
+				if e != nil || next.Revision < state.Revision || immutablePrefix(state, next) != nil {
+					return errNativeCensus
+				}
+			}
+		}
+	}
 	for _, current := range images {
 		n := current.observation
+		if n.Encoding == "effects" {
+			state, e := decodeCensusEffects(current.image.Bytes())
+			if e != nil {
+				return errNativeCensus
+			}
+			for _, record := range state.OSRecords {
+				if record.Kind == "receipt" {
+					receipt, e := recordBody[Receipt](record)
+					if e != nil || (receipt.EvidenceDigest != "" && !retained["sha256:"+receipt.EvidenceDigest]) {
+						return errNativeCensus
+					}
+				}
+			}
+		}
 		if n.Role == "generation-journal" {
 			raw := current.image.Bytes()
 			for _, old := range history {
@@ -121,6 +169,38 @@ func censusNativeHistory(images []nativeCensusImage, history []pc2store.NativeOb
 				return errNativeCensus
 			}
 		}
+	}
+	return nil
+}
+
+func censusAttemptJournal(attempt map[string]any, images []nativeCensusImage) error {
+	tail := attempt["prepared_tail"].(map[string]any)
+	target := attempt["target"].(map[string]any)
+	found := false
+	for _, image := range images {
+		if image.observation.Role != "generation-journal" {
+			continue
+		}
+		raw := image.image.Bytes()
+		if _, e := genjournal.Verify(bytes.NewReader(raw), genjournal.Floor{Seq: tail["seq"].(int64), Hash: tail["hash"].(string)}); e != nil {
+			return errNativeCensus
+		}
+		for _, line := range bytes.SplitAfter(raw, []byte{'\n'}) {
+			if len(line) == 0 {
+				continue
+			}
+			if genjournal.Digest(line) != attempt["active_record_hash"] {
+				continue
+			}
+			record, e := genjournal.DecodeRecordBytes(line)
+			if e != nil || record.State != "active" || record.UID != target["uid"] || record.Generation != target["generation"] {
+				return errNativeCensus
+			}
+			found = true
+		}
+	}
+	if !found {
+		return errNativeCensus
 	}
 	return nil
 }

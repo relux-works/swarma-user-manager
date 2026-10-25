@@ -218,8 +218,11 @@ The [PC2 manager state codec contract](spec/pc2-manager-state.md) defines the
 pure `internal/pc2state` representations and immutable A2/hold identity checks.
 The adjacent `internal/pc2store` supplies fixture-funded protected file/index
 mechanics, lineage-specific immutable copies and exact-head publication/recovery.
-Production opening/initialization, complete census, committed credit and admission
-remain disabled.
+The private manager census prepares five exact class encodings from bounded
+retained snapshots and whole native files in test fixtures. Its immutable evidence
+is not a grant. Production opening, census preparation, committed credit and
+admission remain disabled pending the publication/currentness producer and native
+qualification described in the state contract.
 
 The [account-directory contract](spec/station-effect-receipts.md#64-qualified-local-account-directory-and-nss-configuration)
 selects `files` and bounded `systemd`. The implementation compares protected
@@ -395,6 +398,14 @@ to the terminal; task-local validation logs stay outside the tracked tree.
 For retained storage, run `go test -p 1 ./internal/pc2store`,
 `go test -race -p 1 ./internal/pc2store` and `go vet ./internal/pc2store`. These
 use unprivileged real-file fixtures; process-death tests are not power-loss proof.
+For the private census regressions, run `go test -p 1 ./internal/manager -run
+'^TestManager(Census|Native|PendingOwner|AuthorityHoldVeto|SlotCredit|PreparedCensus)'`;
+add `-race` for race checks. The pure native byte adapters use `go test
+./tools/genjournal -run '^TestCensusNativeByteValidators$'`. Validate compilation
+and static checks with `go vet ./internal/manager ./internal/pc2store
+./tools/genjournal`. Output is named test results and owned temporary fixtures;
+Linux amd64 close-error controls trace only their own children. Resource-limited
+hosts must use their configured test scheduling wrapper for these commands.
 
 | Tool | Purpose / exact entry point | Output |
 |---|---|---|

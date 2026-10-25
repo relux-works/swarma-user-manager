@@ -25,6 +25,8 @@ type ReadDirectory struct {
 	id, parentID inode
 	policy       protection
 	mode         uint32
+	parentMode   uint32
+	parentPin    *ReadDirectory
 }
 
 func PinReadDirectory(parent *os.File, name string, uid, gid, mode uint32) (*ReadDirectory, error) {
@@ -32,6 +34,17 @@ func PinReadDirectory(parent *os.File, name string, uid, gid, mode uint32) (*Rea
 		return nil, ErrUnavailable
 	}
 	p := protection{uid: uid, gid: gid}
+	var parentStat unix.Stat_t
+	if unix.Fstat(int(parent.Fd()), &parentStat) != nil {
+		return nil, ErrUnavailable
+	}
+	parentMode := parentStat.Mode & 07777
+	if parentMode != 0700 && parentMode != 0750 && parentMode != 0755 {
+		return nil, ErrUnavailable
+	}
+	if check(parent, p, parentMode, true) != nil {
+		return nil, ErrUnavailable
+	}
 	pid, e := identity(parent)
 	if e != nil {
 		return nil, e
@@ -48,7 +61,7 @@ func PinReadDirectory(parent *os.File, name string, uid, gid, mode uint32) (*Rea
 	if e != nil {
 		return nil, errors.Join(e, closeOwned(&f))
 	}
-	d := &ReadDirectory{f, parent, name, id, pid, p, mode}
+	d := &ReadDirectory{file: f, parent: parent, name: name, id: id, parentID: pid, policy: p, mode: mode, parentMode: parentMode}
 	if e = d.check(); e != nil {
 		return nil, errors.Join(e, d.Close())
 	}
@@ -60,6 +73,14 @@ func component(n string) bool {
 }
 func (d *ReadDirectory) check() error {
 	if d == nil || d.file == nil || d.parent == nil {
+		return ErrUnavailable
+	}
+	if d.parentPin != nil {
+		if e := d.parentPin.check(); e != nil {
+			return e
+		}
+	}
+	if check(d.parent, d.policy, d.parentMode, true) != nil {
 		return ErrUnavailable
 	}
 	p, e := identity(d.parent)
@@ -175,7 +196,12 @@ func (d *ReadDirectory) Child(name string) (*ReadDirectory, error) {
 	if d.check() != nil {
 		return nil, ErrUnavailable
 	}
-	return PinReadDirectory(d.file, name, d.policy.uid, d.policy.gid, 0750)
+	child, e := PinReadDirectory(d.file, name, d.policy.uid, d.policy.gid, 0750)
+	if e != nil {
+		return nil, e
+	}
+	child.parentPin = d
+	return child, nil
 }
 
 type HeadTarget struct {

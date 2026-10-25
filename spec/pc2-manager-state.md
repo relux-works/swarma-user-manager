@@ -694,3 +694,52 @@ real-file/mutant, race/build and native privilege/allocation/durability evidence
 are NOT RUN by this specification change. Later implementation must retain the
 accepted plan's negative/positive controls and name actual killed/surviving
 mutants; a document fixture is not runtime qualification.
+
+### Private preparation implementation and limits
+
+`internal/pc2store.ReadSnapshot` is a bounded read adapter for the explicitly
+selected native fixture profile and an exact external head/funding/genesis. It
+does not acquire writer.lock. Associated complete staging copies, installed
+copies, every retained index/checkpoint and residual original allocations are
+accounted together; partial or unindexed material refuses and remains debt.
+The closed `pc2-native-fixture-funding/1` fixture manifest adds original native
+allocations and six distinct prospective class/head outputs. Their reservations
+must fit their original fourteen-row source partitions, including metadata's
+keymaker/reservation_metadata source. A fixture manifest is not an issuer.
+
+The private manager context captures five admitted heads under a distinct
+read-only, nonblocking exclusive F_auth description, releases it with checked
+cleanup, then scans and validates outside F_auth. It compares exact C1/C2 images
+and complete snapshots, validates native whole-file bytes using format-owner
+parsers, and returns five canonical G4 class inventories plus immutable evidence.
+The evidence binds the independent fixture transcript, exact owner-index head,
+captured head digests, all native observation versions, held funding and output
+bounds. It provides neither a consumed lifetime nor a publication receipt.
+
+The fixture transcript carries original intent/hold links, explicit pending
+owner association and independently retained logical effects checkpoints.
+Every observed effects version needs its matching checkpoint; retained native
+OSRecords, terminal identities and receipt evidence must survive in the current
+closure. These checkpoints are in-memory fixture inputs, not invented physical
+copies of replaced native envelopes. Native journal prefixes are verified within
+the current whole journal. A ledger must match that complete journal view.
+
+Supported slot controls are an explicitly clear, never-spent fixture and the
+exact current pending activation owner. Authority-only holds veto. Terminal,
+resolved, discharged or removed-marker histories do not create free credit;
+unsupported recovery/carry transitions stay unavailable. Recovery-history
+references currently accept attempt/hold/recovery bodies only. The fixture root,
+floor and intent heads are opaque independently held commitments, not a real
+Root/custody/publication producer. Production `PrepareManagerCensus` therefore
+always returns unavailable, with no selector or privilege override. Fixture
+provisioning exists only in `_test.go`.
+
+The regression groups exercise real files, growth and inode substitution,
+coherent local rollback against a later independent head, native/PC2 closure,
+reservation arithmetic, protection, nonblocking exclusive capture and checked
+close errors. Tests for ordinary modes/links do not qualify bind mounts,
+cross-principal aliases, production allocation/verity, durability after power
+loss or the all-writer currentness protocol. Those qualification gates and both
+spending anchors above remain open. See the README's PC2 commands; test results
+and actual killed/surviving mutants are reported per candidate, not inferred
+from this specification.

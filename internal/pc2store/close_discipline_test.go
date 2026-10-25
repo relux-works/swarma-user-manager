@@ -5,6 +5,7 @@ import (
 	"go/parser"
 	"go/token"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -13,22 +14,27 @@ import (
 // calls, including direct defer/go calls and blank assignments. This is a
 // guard against that syntax, not a proof of ownership or error propagation.
 func TestPC2StoreCloseDiscipline(t *testing.T) {
-	entries, e := os.ReadDir(".")
-	if e != nil {
-		t.Fatal(e)
-	}
-	for _, entry := range entries {
-		name := entry.Name()
-		if !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
-			continue
-		}
-		set := token.NewFileSet()
-		file, e := parser.ParseFile(set, name, nil, 0)
+	for _, dir := range []string{".", "../manager"} {
+		entries, e := os.ReadDir(dir)
 		if e != nil {
 			t.Fatal(e)
 		}
-		for _, pos := range discardedCloses(file) {
-			t.Error("discarded descriptor cleanup at", set.Position(pos))
+		for _, entry := range entries {
+			name := entry.Name()
+			if !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+				continue
+			}
+			if dir != "." && !strings.HasPrefix(name, "pc2_") {
+				continue
+			}
+			set := token.NewFileSet()
+			file, e := parser.ParseFile(set, filepath.Join(dir, name), nil, 0)
+			if e != nil {
+				t.Fatal(e)
+			}
+			for _, pos := range discardedCloses(file) {
+				t.Error("discarded descriptor cleanup at", set.Position(pos))
+			}
 		}
 	}
 }

@@ -4,6 +4,16 @@ import "errors"
 
 var ErrCensusUnavailable = errors.New("manager census unavailable")
 
+// CensusRefusal preserves measured retained debt as diagnostics. Unknown
+// provenance/overhead still forbids an accepting census; these are not free bytes.
+type CensusRefusal struct {
+	ObservedBytes, OrphanBytes, HeldEnvelope int64
+	Cause                                    error
+}
+
+func (e *CensusRefusal) Error() string   { return "manager census unavailable; retained debt" }
+func (e *CensusRefusal) Unwrap() []error { return []error{ErrCensusUnavailable, e.Cause} }
+
 type SlotVerdict string
 
 const (
@@ -45,7 +55,7 @@ func (p *PreparedCensus) EvidenceBytes() []byte {
 	return []byte(p.evidence)
 }
 func (p *PreparedCensus) Slot() (SlotVerdict, string) {
-	if p == nil || p.evidence=="" {
+	if p == nil || p.evidence == "" {
 		return SlotUnavailable, ""
 	}
 	return p.verdict, p.owner

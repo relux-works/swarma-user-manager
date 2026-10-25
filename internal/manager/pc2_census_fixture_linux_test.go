@@ -31,12 +31,17 @@ type censusOptions struct {
 	occupied, authority, marker bool
 	copies                      int
 	outputBound                 int64
+	spare                       bool
+	history, underfunded        bool
+	staging                     bool
+	allocated                   int
 }
 type censusPayload struct {
 	role, codec, copyID, ticket string
 	raw                         []byte
 	order                       int64
 	identity                    pc2store.FileIdentity
+	staged                      bool
 }
 
 func censusWire(t *testing.T, v any) []byte {
@@ -53,6 +58,13 @@ func censusWrite(t *testing.T, path string, b []byte, mode os.FileMode) {
 	if e != nil {
 		t.Fatal(e)
 	}
+	defer func() {
+		if f != nil {
+			if e := f.Close(); e != nil {
+				t.Error(e)
+			}
+		}
+	}()
 	if e = f.Chmod(mode); e != nil {
 		t.Fatal(e)
 	}
@@ -62,17 +74,28 @@ func censusWrite(t *testing.T, path string, b []byte, mode os.FileMode) {
 	if e = f.Sync(); e != nil {
 		t.Fatal(e)
 	}
-	if e = f.Close(); e != nil {
+	owned := f
+	f = nil
+	if e = owned.Close(); e != nil {
 		t.Fatal(e)
 	}
 	d, e := os.Open(filepath.Dir(path))
 	if e != nil {
 		t.Fatal(e)
 	}
+	defer func() {
+		if d != nil {
+			if e := d.Close(); e != nil {
+				t.Error(e)
+			}
+		}
+	}()
 	if e = d.Sync(); e != nil {
 		t.Fatal(e)
 	}
-	if e = d.Close(); e != nil {
+	owned = d
+	d = nil
+	if e = owned.Close(); e != nil {
 		t.Fatal(e)
 	}
 }
@@ -166,9 +189,18 @@ func newCensusFixture(t *testing.T, opt censusOptions) *censusFixture {
 		if key == "keymaker/reservation_metadata" || key == "manager/recovery" {
 			reserved = 32 * 1024 * 1024
 		}
+		if key == "manager/attempts" || key == "manager/holds" {
+			reserved = 4 * 1024 * 1024
+		}
+		if opt.underfunded && key == "keymaker/reservation_metadata" {
+			reserved = 0
+		}
+		if opt.underfunded && key == "manager/recovery" {
+			reserved += 32 * 1024 * 1024
+		}
 		groups = append(groups, map[string]any{"owner": parts[0], "kind": parts[1], "inventory_digest": "sha256:" + strings.Repeat("a", 64), "materialized_bytes": int64(0), "integrity_bytes": int64(0), "reserved_bytes": reserved, "objects": int64(0)})
 	}
-	qRaw := censusWire(t, map[string]any{"version": "keymaker-reservation/1", "base_root_digest": nil, "limit_bytes": pc2state.AggregateBytes, "groups": groups, "total_bytes": int64(64 * 1024 * 1024), "audit_records_reserved": int64(8), "manager_slots": map[string]any{"slots": int64(1), "attempt_bytes": int64(4096), "hold_bytes": int64(4096), "guard_bytes": int64(65536), "recovery_bytes": int64(65536)}})
+	qRaw := censusWire(t, map[string]any{"version": "keymaker-reservation/1", "base_root_digest": nil, "limit_bytes": pc2state.AggregateBytes, "groups": groups, "total_bytes": int64(72 * 1024 * 1024), "audit_records_reserved": int64(8), "manager_slots": map[string]any{"slots": int64(1), "attempt_bytes": int64(4096), "hold_bytes": int64(4096), "guard_bytes": int64(65536), "recovery_bytes": int64(65536)}})
 	q := digestCensus(qRaw)
 	rootRaw := censusWire(t, map[string]any{"fixture": "independent-root-binding", "reservation": q})
 	for name, raw := range map[string][]byte{"root.json": rootRaw, "floor.json": censusWire(t, map[string]any{"floor": int64(3), "root": digestCensus(rootRaw)}), "intent.json": censusWire(t, map[string]any{"fixture": "explicit-clear-intent"})} {
@@ -188,6 +220,14 @@ func newCensusFixture(t *testing.T, opt censusOptions) *censusFixture {
 		t.Fatal(e)
 	}
 	state := State{Format: stateFormat, Floor: view.Tail, Cursor: 1, Revision: 1, Effects: []Effect{}, OSRecords: []OSRecord{}}
+	var nativeEvidence map[string]json.RawMessage
+	if opt.history {
+		h := setup(t)
+		h.created(t)
+		state = clone(h.s.state)
+		state.Floor, state.Revision = view.Tail, 1
+		nativeEvidence = h.s.evidence
+	}
 	effects, e := effectBytes(state)
 	if e != nil {
 		t.Fatal(e)
@@ -197,7 +237,15 @@ func newCensusFixture(t *testing.T, opt censusOptions) *censusFixture {
 		raw        []byte
 	}
 	seeds := []nativeSeed{{"generation-journal", "journal", f.journal}, {"effects-store", "effects.json", effects}, {"effects-ledger", "ledger.json", censusWire(t, view)}}
-	f.proof = censusFixtureCommit{Version: "pc2-census-fixture-commit/1", Installation: strings.Repeat("1", 32), Reservation: qRaw, OriginalIntents: []string{}, Origins: []string{}, Heads: []string{}}
+	f.proof = censusFixtureCommit{Version: "pc2-census-fixture-commit/1", Installation: strings.Repeat("1", 32), Reservation: qRaw, OriginalIntents: []string{}, Origins: []string{}, Heads: []string{}, Effects: []State{clone(state)}}
+	keys := make([]string, 0, len(nativeEvidence))
+	for key := range nativeEvidence {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		seeds = append(seeds, nativeSeed{"recovery-evidence", "evidence-" + key + ".json", nativeEvidence[key]})
+	}
 	var attempt, hold pc2state.Object
 	if opt.occupied {
 		original := censusWire(t, map[string]any{"operation": "fixture-original-intent", "effect": "one"})
@@ -212,6 +260,9 @@ func newCensusFixture(t *testing.T, opt censusOptions) *censusFixture {
 			t.Fatal(e)
 		}
 		m["effect_digest"] = digestCensus(original)
+		m["prepared_tail"] = map[string]any{"seq": view.Tail.Seq, "hash": view.Tail.Hash}
+		m["active_record_hash"] = genjournal.Digest(second)
+		m["source"].(map[string]any)["authority_incarnation"] = strings.Repeat("2", 32)
 		m["manager_id"] = f.proof.Installation
 		m["source"].(map[string]any)["root_digest"] = digestCensus(rootRaw)
 		attempt, e = pc2state.NewPendingAttempt(censusWire(t, m))
@@ -258,6 +309,10 @@ func newCensusFixture(t *testing.T, opt censusOptions) *censusFixture {
 		f.payloads = append(f.payloads, censusPayload{role: "inventory", codec: string(pc2state.CapacityInventory), raw: censusWire(t, censusClass{string(pc2state.CapacityInventory), "manager", "staging", []censusRow{}})})
 	}
 	classPos := len(f.payloads)
+	if opt.staging {
+		f.payloads = append(f.payloads, censusPayload{role: "inventory", codec: string(pc2state.CapacityInventory), raw: censusWire(t, censusClass{string(pc2state.CapacityInventory), "manager", "staging", []censusRow{}}), staged: true})
+		classPos++
+	}
 	for range 3 {
 		f.payloads = append(f.payloads, censusPayload{role: "inventory", codec: string(pc2state.CapacityInventory)})
 	}
@@ -272,6 +327,22 @@ func newCensusFixture(t *testing.T, opt censusOptions) *censusFixture {
 			t.Fatal(e)
 		}
 		allocations = append(allocations, map[string]any{"ticket": p.ticket, "copy_id": p.copyID, "role": p.role, "disposition_version": int64(1), "max_bytes": int64(65536), "integrity_bytes": int64(128), "ordinal": int64(i + 1)})
+	}
+	if opt.spare {
+		id := fmt.Sprintf("%032x", 900)
+		ticket, e := pc2store.TicketID(q, "keymaker", "reservation_metadata", "inventory", int64(900))
+		if e != nil {
+			t.Fatal(e)
+		}
+		allocations = append(allocations, map[string]any{"ticket": ticket, "copy_id": id, "role": "inventory", "disposition_version": int64(1), "max_bytes": int64(65536), "integrity_bytes": int64(128), "ordinal": int64(900)})
+	}
+	for i := len(allocations) + len(seeds); i < opt.allocated; i++ {
+		ordinal := int64(1000 + i)
+		ticket, e := pc2store.TicketID(q, "keymaker", "reservation_metadata", "inventory", ordinal)
+		if e != nil {
+			t.Fatal(e)
+		}
+		allocations = append(allocations, map[string]any{"ticket": ticket, "copy_id": fmt.Sprintf("%032x", ordinal), "role": "inventory", "disposition_version": int64(1), "max_bytes": int64(65536), "integrity_bytes": int64(128), "ordinal": ordinal})
 	}
 	nativeAlloc := []pc2store.NativeAllocation{}
 	observations := []pc2store.NativeObservation{}
@@ -321,7 +392,11 @@ func newCensusFixture(t *testing.T, opt censusOptions) *censusFixture {
 	for i, k := range append(censusClasses[:], "head") {
 		outputs = append(outputs, pc2store.CensusOutput{Kind: k, Ordinal: int64(i + 1), MaxBytes: bound, Integrity: 128})
 	}
-	funding := censusWire(t, map[string]any{"version": "pc2-native-fixture-funding/1", "deployment": strings.Repeat("1", 32), "incarnation": strings.Repeat("2", 32), "q": q, "metadata_bytes": int64(8 * 1024 * 1024), "metadata_integrity": int64(256), "allocations": allocations, "native_allocations": nativeAlloc, "census_outputs": outputs})
+	metadata := int64(8 * 1024 * 1024)
+	if opt.history {
+		metadata = 16 * 1024 * 1024
+	} // Original reserve covers the larger retained index frontier.
+	funding := censusWire(t, map[string]any{"version": "pc2-native-fixture-funding/1", "deployment": strings.Repeat("1", 32), "incarnation": strings.Repeat("2", 32), "q": q, "metadata_bytes": metadata, "metadata_integrity": int64(256), "allocations": allocations, "native_allocations": nativeAlloc, "census_outputs": outputs})
 	fundingD := digestCensus(funding)
 	classRows := map[string][]censusRow{"attempts": {}, "holds": {}, "recovery": {}}
 	for _, n := range observations {
@@ -381,8 +456,12 @@ func newCensusFixture(t *testing.T, opt censusOptions) *censusFixture {
 		censusDir(t, filepath.Join(root, "pc2/staging", p.copyID), 0750)
 		censusDir(t, filepath.Join(root, "pc2", p.role, p.copyID), 0750)
 		name := digestBytes(p.raw) + ".json"
-		censusWrite(t, filepath.Join(root, "pc2", p.role, p.copyID, name), p.raw, 0640)
-		d := censusChild(t, censusChild(t, c.pc2, p.role), p.copyID)
+		physicalRole := p.role
+		if p.staged {
+			physicalRole = "staging"
+		}
+		censusWrite(t, filepath.Join(root, "pc2", physicalRole, p.copyID, name), p.raw, 0640)
+		d := censusChild(t, censusChild(t, c.pc2, physicalRole), p.copyID)
 		image, e := d.Read(name, 0640, 65536)
 		if e != nil {
 			t.Fatal(e)
@@ -393,6 +472,9 @@ func newCensusFixture(t *testing.T, opt censusOptions) *censusFixture {
 		head = pc2store.Head{head.Sequence + 1, digestCensus(raw)}
 		p.order = head.Sequence
 		appendRecord(raw)
+		if p.staged {
+			continue
+		}
 		rec["sequence"] = head.Sequence + 1
 		rec["previous"] = head.Digest
 		rec["event"] = "install"

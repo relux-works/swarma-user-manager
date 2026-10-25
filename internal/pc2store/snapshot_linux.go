@@ -64,7 +64,26 @@ type ReadSnapshotResult struct {
 	held, envelope  int64
 	q               string
 	outputs         []CensusOutput
+	sources         []SourceReservation
 }
+type SourceReservation struct {
+	Owner, Kind string
+	Bytes       int64
+}
+
+func (s ReadSnapshotResult) SourceReservations() []SourceReservation {
+	return append([]SourceReservation(nil), s.sources...)
+}
+
+// SnapshotReadError reports only bytes actually observed before refusal; it is
+// neither a complete census nor authority to reclaim their original allocation.
+type SnapshotReadError struct {
+	ObservedBytes int64
+	Cause         error
+}
+
+func (e *SnapshotReadError) Error() string   { return "retained snapshot unavailable" }
+func (e *SnapshotReadError) Unwrap() []error { return []error{ErrUnavailable, e.Cause} }
 
 func (s ReadSnapshotResult) OutputBounds() []CensusOutput {
 	return append([]CensusOutput(nil), s.outputs...)
@@ -193,6 +212,16 @@ func ReadSnapshot(root *ReadDirectory, baseline SnapshotBaseline) (result ReadSn
 		return result, errors.Join(ErrUnavailable, e)
 	}
 	all := map[string]FileImage{}
+	defer func() {
+		if err != nil {
+			var observed int64
+			for _, image := range all {
+				observed += image.Length()
+			}
+			err = &SnapshotReadError{observed, err}
+			result = ReadSnapshotResult{}
+		}
+	}()
 	dirs := map[string]bool{}
 	remaining := int64(pc2state.AggregateBytes)
 	if e := walkSnapshot(root, "", 0, all, dirs, &remaining); e != nil {
@@ -208,12 +237,14 @@ func ReadSnapshot(root *ReadDirectory, baseline SnapshotBaseline) (result ReadSn
 		return result, ErrUnavailable
 	}
 	result.envelope = f.Metadata + f.MetadataIntegrity
+	metadataSource := result.envelope
 	result.q = f.Q
 	alloc := map[string]NativeAllocation{}
 	copies := map[string]bool{}
 	for _, a := range f.Allocations {
 		copies[a.CopyID] = true
 		result.envelope += a.MaxBytes + a.Integrity
+		metadataSource += a.MaxBytes + a.Integrity
 	}
 	for _, a := range f.Native {
 		r, ok := NativeRoleCatalog(a.Role)
@@ -224,6 +255,7 @@ func ReadSnapshot(root *ReadDirectory, baseline SnapshotBaseline) (result ReadSn
 		copies[a.CopyID] = true
 		alloc[a.Ticket] = a
 		result.envelope += a.MaxBytes + a.Integrity
+		result.sources = append(result.sources, SourceReservation{a.SourceOwner, a.SourceKind, a.MaxBytes + a.Integrity})
 	}
 	seenOutput := map[string]bool{}
 	for _, o := range f.Outputs {
@@ -232,7 +264,9 @@ func ReadSnapshot(root *ReadDirectory, baseline SnapshotBaseline) (result ReadSn
 		}
 		seenOutput[o.Kind] = true
 		result.envelope += o.MaxBytes + o.Integrity
+		metadataSource += o.MaxBytes + o.Integrity
 	}
+	result.sources = append(result.sources, SourceReservation{"keymaker", "reservation_metadata", metadataSource})
 	result.outputs = append([]CensusOutput(nil), f.Outputs...)
 	if result.envelope > pc2state.AggregateBytes {
 		return result, ErrUnavailable
@@ -335,23 +369,29 @@ func ReadSnapshot(root *ReadDirectory, baseline SnapshotBaseline) (result ReadSn
 	}
 	sort.Slice(result.native, func(i, j int) bool { return result.native[i].StorageID < result.native[j].StorageID })
 	for ticket, st := range states {
-		if st.installed == nil {
-			return result, ErrUnavailable
-		}
 		a, _ := legacy.find(ticket)
-		loc := st.installed.To
+		r := st.association
+		class := "staging"
+		if st.installed != nil {
+			r = *st.installed
+			class = string(a.Role)
+			if a.Role == Capacity {
+				class = "inventory"
+			}
+		}
+		loc := r.To
 		image, ok := all[loc]
-		if !ok || image.Digest != st.installed.Digest || image.Length() != st.installed.Bytes || image.Identity != (FileIdentity{st.installed.Identity.Device, st.installed.Identity.Inode, st.installed.Identity.Mount}) {
+		if !ok || image.Digest != r.Digest || image.Length() != r.Bytes || (st.installed != nil && image.Identity != (FileIdentity{r.Identity.Device, r.Identity.Inode, r.Identity.Mount})) {
 			return result, ErrUnavailable
 		}
-		if _, e := pc2state.Decode(st.installed.Codec, image.Bytes()); e != nil {
+		if _, e := pc2state.Decode(r.Codec, image.Bytes()); e != nil {
 			return result, ErrUnavailable
 		}
-		class := string(a.Role)
-		if a.Role == Capacity {
-			class = "inventory"
+		sid, e := legacy.identity(a, image.Digest, loc)
+		if e != nil {
+			return result, e
 		}
-		result.entries = append(result.entries, SnapshotEntry{st.installed.StorageID, class, loc, string(st.installed.Codec), image, a.Integrity, st.association.Sequence})
+		result.entries = append(result.entries, SnapshotEntry{sid, class, loc, string(r.Codec), image, a.Integrity, st.association.Sequence})
 		expected[loc] = "payload"
 	}
 	allowedDirs := map[string]bool{"attempts": true, "holds": true, "recovery": true, "inventory": true, "capacity": true, "staging": true, indexDir: true, indexDir + "/records": true, indexDir + "/heads": true, indexDir + "/pending": true}

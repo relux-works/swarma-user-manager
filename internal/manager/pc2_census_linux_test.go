@@ -21,7 +21,7 @@ import (
 // Claim: real complete fixtures yield all five exact G4 inventories and no
 // writes; missing retained class population or physical evidence refuses.
 func TestManagerCensusCompleteness(t *testing.T) {
-	f := newCensusFixture(t, censusOptions{})
+	f := newCensusFixture(t, censusOptions{staging: true})
 	before := censusTreeBytes(t, f.root)
 	p, e := prepareManagerCensus(f.c)
 	if e != nil {
@@ -31,6 +31,9 @@ func TestManagerCensusCompleteness(t *testing.T) {
 		if _, e := pc2state.Decode(pc2state.CapacityInventory, p.ClassBytes(kind)); e != nil {
 			t.Fatal(kind, e)
 		}
+	}
+	if len(decodePreparedClass(t, p, "staging").Objects) != 1 {
+		t.Fatal("retained staging copy omitted")
 	}
 	if v, _ := p.Slot(); v != SlotUnspent {
 		t.Fatal(v)
@@ -42,6 +45,16 @@ func TestManagerCensusCompleteness(t *testing.T) {
 	if p, e = prepareManagerCensus(f.c); p != nil || !errors.Is(e, ErrCensusUnavailable) {
 		t.Fatal("missing native file accepted", e)
 	}
+	t.Run("allocated-lineage-limit", func(t *testing.T) {
+		at := newCensusFixture(t, censusOptions{allocated: 256})
+		censusValid(t, at.c)
+		over := newCensusFixture(t, censusOptions{allocated: 257})
+		info, e := os.Stat(filepath.Join(over.root, "pc2/inventory/owner-index/funding.json"))
+		if e != nil || info.Size() > 65536 {
+			t.Fatal("count witness exceeded byte cap", e)
+		}
+		censusRefuses(t, over.c)
+	})
 }
 
 func censusRefuses(t *testing.T, c *censusContext) error {
@@ -56,6 +69,10 @@ func censusValid(t *testing.T, c *censusContext) *PreparedCensus {
 	t.Helper()
 	p, e := prepareManagerCensus(c)
 	if e != nil || p == nil {
+		var refusal *CensusRefusal
+		if errors.As(e, &refusal) {
+			t.Fatalf("valid control: %v; cause %v; envelope %d; commitment bytes %d; index sequence %d", e, refusal.Cause, refusal.HeldEnvelope, len(c.commit), c.baseline.Head.Sequence)
+		}
 		t.Fatal("valid control", e)
 	}
 	return p
@@ -92,6 +109,16 @@ func TestManagerCensusHistory(t *testing.T) {
 			censusRefuses(t, f.c)
 		})
 	}
+	t.Run("logical-effects-checkpoint", func(t *testing.T) {
+		f := newCensusFixture(t, censusOptions{history: true})
+		censusValid(t, f.c)
+		if len(f.proof.Effects[0].OSRecords) < 2 || !f.proof.Effects[0].Effects[0].Terminal {
+			t.Fatal("missing native history control")
+		}
+		f.proof.Effects = []State{}
+		f.bind(t)
+		censusRefuses(t, f.c)
+	})
 }
 
 // Claim: changes after C1 or unlocked validation refuse, even for individually
@@ -161,7 +188,11 @@ func TestManagerNativeIndexClosure(t *testing.T) {
 			path := filepath.Join(f.root, "effects", name)
 			censusWrite(t, path, []byte("{\"retained\":true}"), 0600)
 			before := censusTreeBytes(t, f.root)
-			censusRefuses(t, f.c)
+			err := censusRefuses(t, f.c)
+			var debt *CensusRefusal
+			if !errors.As(err, &debt) || debt.OrphanBytes != int64(len("{\"retained\":true}")) || debt.HeldEnvelope <= 0 {
+				t.Fatal("orphan debt lost", err, debt)
+			}
 			censusSameTree(t, before, censusTreeBytes(t, f.root))
 		})
 	}
@@ -206,6 +237,9 @@ func TestManagerCensusProspectiveBounds(t *testing.T) {
 	before := censusTreeBytes(t, bad.root)
 	censusRefuses(t, bad.c)
 	censusSameTree(t, before, censusTreeBytes(t, bad.root))
+	// The aggregate still fits, but metadata may not borrow recovery's reserve.
+	underfunded := newCensusFixture(t, censusOptions{underfunded: true})
+	censusRefuses(t, underfunded.c)
 	for _, n := range good.native {
 		if n.Role == "generation-journal" {
 			n.Bytes = 1048576
@@ -353,6 +387,13 @@ func TestManagerCensusCaptureLockScope(t *testing.T) {
 			t.Error(e)
 		}
 	}()
+	if e = unix.Flock(int(lock.Fd()), unix.LOCK_SH|unix.LOCK_NB); e != nil {
+		t.Fatal(e)
+	}
+	censusRefuses(t, f.c)
+	if e = unix.Flock(int(lock.Fd()), unix.LOCK_UN); e != nil {
+		t.Fatal(e)
+	}
 	if e = unix.Flock(int(lock.Fd()), unix.LOCK_EX|unix.LOCK_NB); e != nil {
 		t.Fatal(e)
 	}
@@ -369,6 +410,9 @@ func TestManagerPreparedCensusIsolation(t *testing.T) {
 	f := newCensusFixture(t, censusOptions{})
 	p := censusValid(t, f.c)
 	for _, kind := range censusClasses {
+		if decodePreparedClass(t, p, kind).Kind != kind {
+			t.Fatal("class selection", kind)
+		}
 		original := p.ClassBytes(kind)
 		returned := p.ClassBytes(kind)
 		returned[0] ^= 1
@@ -384,9 +428,18 @@ func TestManagerPreparedCensusIsolation(t *testing.T) {
 			t.Fatal("aliased evidence")
 		}
 	}
-	f.proof.Installation = "foreign"
-	f.bind(t)
-	censusRefuses(t, f.c)
+	var evidence censusEvidence
+	if e := json.Unmarshal(p.EvidenceBytes(), &evidence); e != nil || evidence.Commitment != f.c.commitDigest || evidence.Installation != f.proof.Installation {
+		t.Fatal("evidence binding", e)
+	}
+	occupied := newCensusFixture(t, censusOptions{occupied: true})
+	censusValid(t, occupied.c)
+	occupied.proof.Installation = strings.Repeat("f", 32)
+	occupied.bind(t)
+	censusRefuses(t, occupied.c)
+	if verdict, _ := new(PreparedCensus).Slot(); verdict != SlotUnavailable {
+		t.Fatal("zero preparation", verdict)
+	}
 	if p, e := prepareManagerCensus(nil); p != nil || !errors.Is(e, ErrCensusUnavailable) {
 		t.Fatal("zero context accepted", e)
 	}
@@ -395,25 +448,30 @@ func TestManagerPreparedCensusIsolation(t *testing.T) {
 // Claim: full native lengths include historical journal bytes/LF and envelopes,
 // while identical separately funded physical PC2 copies both remain counted.
 func TestManagerNativeWholeFiles(t *testing.T) {
-	f := newCensusFixture(t, censusOptions{copies: 2})
-	p, e := prepareManagerCensus(f.c)
-	if e != nil {
-		t.Fatal(e)
-	}
+	f := newCensusFixture(t, censusOptions{copies: 2, history: true})
+	p := censusValid(t, f.c)
 	var sum int64
-	for _, name := range []string{"generations/journal", "effects/effects.json", "effects/ledger.json"} {
+	wantObjects := 0
+	for name, raw := range censusTreeBytes(t, f.root) {
+		if filepath.Dir(name) == filepath.Join(f.root, "effects") && filepath.Base(name) != "effects.lock" {
+			sum += int64(len(raw))
+			wantObjects++
+		}
+	}
+	for _, name := range []string{"generations/journal"} {
 		b, e := os.ReadFile(filepath.Join(f.root, name))
 		if e != nil {
 			t.Fatal(e)
 		}
 		sum += int64(len(b))
+		wantObjects++
 	}
 	cl := decodePreparedClass(t, p, "recovery")
 	var got int64
 	for _, r := range cl.Objects {
 		got += r.Bytes
 	}
-	if got != sum || len(cl.Objects) != 3 {
+	if got != sum || len(cl.Objects) != wantObjects {
 		t.Fatal("whole-file oracle", got, sum, len(cl.Objects))
 	}
 	want := int64(len(f.payloads[0].raw))
