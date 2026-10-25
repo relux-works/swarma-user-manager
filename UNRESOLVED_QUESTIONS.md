@@ -353,6 +353,12 @@ These are specification obligations, not authenticated runtime providers or an
 implemented journal guard/coordinator. Production bump remains refused; the
 three joint PC2 gates above remain open.
 
+The [manager state codec contract](spec/pc2-manager-state.md) implements only
+representation and immutable identity checks. MC-Q2 still requires durable
+state, complete owner indexing/census and the cross-owner reservation API;
+MC-Q3 still requires journal-owned lifetime integration. Codec/vector success
+does not resolve these gates or the MC-Q4/5/6 authority and recovery decisions.
+
 | Open question | Owner / remaining artifact |
 |---|---|
 | MC-Q1 — Real F_pkg publication origin/currentness | Deployment/package and platform owners: admit actual native-writer database/mount/profile participation, protected publication/head custody, lock-conflict qualification and replacement exclusion; F_auth remains distinct |

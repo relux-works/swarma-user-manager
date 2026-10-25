@@ -209,6 +209,10 @@ owner input and map the key service's four prerequisites to our publications.
 These are specifications only; the [owned publication gates](UNRESOLVED_QUESTIONS.md#pc2-manager-contract-publication-gates)
 and all implementation/native qualification remain open.
 
+The [PC2 manager state codec contract](spec/pc2-manager-state.md) defines the
+pure `internal/pc2state` representations and immutable A2/hold identity checks.
+These codecs provide no production writer, store, census or admission.
+
 The [account-directory contract](spec/station-effect-receipts.md#64-qualified-local-account-directory-and-nss-configuration)
 selects `files` and bounded `systemd`. The implementation compares protected
 local databases with independent NSS observations for `files`. The
@@ -360,6 +364,10 @@ calls; prepared-host review remains necessary. Test budgets are unchanged.
 The optional race build exceeded the 20-minute test target and tripped existing journal deadline assertions (no data race reported); tracked separately.
 
 ### PC2 specification tools
+
+For the pure manager codecs, run `go test ./internal/pc2state` and
+`go vet ./internal/pc2state`. The tests use committed public fixtures and report
+to the terminal; task-local validation logs stay outside the tracked tree.
 
 | Tool | Purpose / exact entry point | Output |
 |---|---|---|
