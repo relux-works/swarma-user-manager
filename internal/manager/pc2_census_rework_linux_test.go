@@ -181,3 +181,73 @@ func TestManagerNativeStagedSuccessorRefusals(t *testing.T) {
 		})
 	}
 }
+
+// Claim: a prospective effects successor must extend the installed immutable
+// history, and cannot change bytes at the same revision or skip revisions.
+// Real staged bytes pass their native parser first; synthetic observations and
+// checkpoints isolate continuity, without claiming a published index transition.
+func TestManagerNativeStagedHistory(t *testing.T) {
+	for _, which := range []string{"records", "terminal", "same-revision", "revision-gap"} {
+		t.Run(which, func(t *testing.T) {
+			f := reviewNativeStageFixture(t, censusOptions{nativeStage: true, history: true}, true, "", 0)
+			snapshot, e := pc2store.ReadSnapshot(f.c.pc2, f.c.baseline)
+			if e != nil {
+				t.Fatal(e)
+			}
+			images := []nativeCensusImage{}
+			stage := -1
+			for _, n := range snapshot.Native() {
+				image, e := readCensusNative(f.c.native[n.Directory], n)
+				if e != nil {
+					t.Fatal(e)
+				}
+				if n.Role == "effects-temporary" {
+					stage = len(images)
+				}
+				images = append(images, image)
+			}
+			if stage < 0 {
+				t.Fatal("missing staged control")
+			}
+			if e := censusNativeHistory(images, snapshot.History(), f.proof.Effects); e != nil {
+				t.Fatal("valid forward continuity control", e)
+			}
+			state := clone(f.proof.Effects[1])
+			switch which {
+			case "records":
+				state.OSRecords, state.Effects = []OSRecord{}, []Effect{}
+			case "terminal":
+				state.Effects[0].Plan = "changed-terminal"
+			case "same-revision":
+				state.Revision--
+				state.Cursor++
+			case "revision-gap":
+				state.Revision++
+			}
+			raw, e := effectBytes(state)
+			if e != nil {
+				t.Fatal(e)
+			}
+			if _, e = decodeCensusEffects(raw); e != nil {
+				t.Fatal("individually valid envelope control", e)
+			}
+			n := images[stage].observation
+			censusWrite(t, filepath.Join(f.root, "effects", n.Name), raw, 0600)
+			n.Digest, n.Bytes, n.Revision = digestCensus(raw), int64(len(raw)), &state.Revision
+			images[stage], e = readCensusNative(f.c.native[n.Directory], n)
+			if e != nil {
+				t.Fatal("real native parser control", e)
+			}
+			history := snapshot.History()
+			for i := range history {
+				if history[i].CopyID == n.CopyID {
+					history[i] = n
+				}
+			}
+			proof := []State{clone(f.proof.Effects[0]), state}
+			if e = censusNativeHistory(images, history, proof); !errors.Is(e, errNativeCensus) {
+				t.Fatal("invalid prospective continuity accepted", which, e)
+			}
+		})
+	}
+}
