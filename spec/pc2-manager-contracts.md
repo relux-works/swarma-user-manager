@@ -253,8 +253,12 @@ It neither owns F_auth nor spans later verification/finish. Do not use it for
 PC2, take F_auth before calling it, or release F_auth in a caller defer after
 the journal has unlocked. Other existing journal callers/codecs are unaffected.
 
-The proposed replacement for this adapter is a journal-owned
-`AppendPreparedLifetime` operation. Its prepared append binds the exact tail,
+The [journal library implementation](../docs/design/prepared-append-lifetime.md)
+supplies a distinct journal-owned `AppendPreparedLifetime` operation without an
+accepting manager preparer or production wiring. It implements the lifetime
+mechanics; the following authority and integration obligations remain required.
+
+Its prepared append binds the exact tail,
 canonical active line/hash, target, immutable effect and caller-owned effects
 exclusion. Its prepared activation guard is an opaque process-local capability
 from the authenticated manager/key-service preparation, not `func() error`,

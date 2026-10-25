@@ -13,6 +13,10 @@ A consumer MUST pin a landed main commit of this repository and import this
 format's validator; it MUST NOT invent a competing schema or canonicalizer.
 Publication of a format does not qualify an adapter, platform or deployment.
 
+The separate [prepared append lifetime library](../docs/design/prepared-append-lifetime.md)
+provides journal-owned PC2 fence/append/finish mechanics without an accepting
+manager preparer. Legacy writers and this format's bytes remain unchanged.
+
 ## 1. Authority and scope
 
 A journal is one machine's append-only history of account incarnations. Each UID

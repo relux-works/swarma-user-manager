@@ -209,6 +209,11 @@ owner input and map the key service's four prerequisites to our publications.
 These are specifications only; the [owned publication gates](UNRESOLVED_QUESTIONS.md#pc2-manager-contract-publication-gates)
 and runtime integration/native qualification remain open.
 
+The [prepared append lifetime library](docs/design/prepared-append-lifetime.md)
+now owns gate/data/authority-fence acquisition, single-use consumption ordering,
+durable append proof and checked reverse cleanup. It ships without an accepting
+manager preparer or production wiring; activation remains closed.
+
 The [PC2 manager state codec contract](spec/pc2-manager-state.md) defines the
 pure `internal/pc2state` representations and immutable A2/hold identity checks.
 These codecs provide no production writer, store, census or admission.
@@ -247,6 +252,7 @@ describes protected deployment inputs and the stopped-admission pin/restart flow
 | Linux adapter tests | Exact lifetime/receipt mappings, split writes, source binding and closed production authority | `go test -p 1 ./internal/linuxbackend -count=1` | Named test verdicts; private seams |
 | Core/backend tests | Fake lifecycle, v2 receipts/flights, authority, operator admission and protected evidence | `go test -p 1 ./internal/manager -count=1` | Named test verdicts; isolated Go temporary fixtures |
 | Prepared journal tests | Exact-tail admission and native activation lock guard | `go test -p 1 ./tools/genjournal -run '^(TestNativeActivationGuard\|TestPreparedAppendRequiresExactTail)$' -count=1` | Named test verdicts |
+| Prepared append lifetime tests | Opaque capability, real lock lifetime, original budget and failure outcomes | `go test -p 1 ./tools/genjournal -run '^TestAppendPreparedLifetime' -count=1 -timeout=90s`; `go test -race -p 1 ./tools/genjournal -run '^TestAppendPreparedLifetime(Capability\|OrderAndUnwind\|ReleaseFailure\|Cancellation)$' -count=1 -timeout=90s` | Named verdicts; isolated Go temporary files and exact-PID child fixtures; no manager authority or root qualification |
 | Shared-host serialization | Run heavy suites serially on shared hosts | `env GORACE=atexit_sleep_ms=0 GOMAXPROCS=2 go test -p 1 ./internal/manager -count=1` | Task-local untracked logs |
 
 ## Linux station tools
