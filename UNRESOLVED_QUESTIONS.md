@@ -252,7 +252,14 @@ automatic pin protocol nor host qualification. Before deployment:
   success or fills missing after evidence from current state. Qualify native
   hook ordering, database profile and event-driven worker/boot delivery.
 - Wire the pinned public timeconf collector entry/policy into the service and
-  qualify durable time continuity. Unknown/untrusted time refuses. Release age
+  qualify durable time continuity. The [A3e qualified-time mapping](spec/requalification-executor-contracts.md#61-qualified-time)
+  now pins the published eleven-fact receipt/API, executor-derived scope binding
+  and provider-owned continuity; that publication question is resolved. The
+  independent rollback witness backend/restore boundary remains undecided,
+  authenticated one-shot handoff (QT-2c) design is pending, and installed
+  collector/subtree/reboot qualification and enrolled evidence authentication
+  remain open. Structural decoding and test-only fixtures close none of those
+  authority gates. Unknown/untrusted time refuses. Release age
   seven days, future-Date skew five minutes and P7 response five minutes are
   owner-confirmed and fixed by native profile validation.
 - Qualify the complete independently held verifier/decoder closure, pinned key

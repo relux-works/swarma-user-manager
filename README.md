@@ -308,6 +308,12 @@ the external owners' required baseline, fencing, time, interlock/P7 and receipt
 publications. This is a specification; the executor and its authority/deployment
 gates remain PENDING, with no accepting adapter or activation implied.
 
+The [qualified-time mapping](spec/requalification-executor-contracts.md#61-qualified-time)
+pins the published provider receipt/API, executor-derived scope digest and
+provider-held consumed-time continuity. Production witness selection,
+authenticated one-shot handoff and installed collector qualification remain open;
+structural receipt decoding and test-only fixtures supply no authority.
+
 The [maintenance target amendment](spec/requalification-executor-contracts.md#fixed-maintenance-target-and-ordinary-boot)
 selects a dedicated unit with no consumer lifecycle effects, preserves ordinary
 boot ordering, and requires retained subtree/delegated-job fencing. Its

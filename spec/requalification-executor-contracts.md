@@ -397,12 +397,79 @@ publication before implementation can accept them.
 
 `TimeFacts` has exactly
 `{authority,evidence,adapter,policy,scope,sample,clock,observed,uncertainty,authority_until,continuity}`.
-Adapter/policy are pinned identity/version/digest bindings to the actual
-`timeconf` collector entry, protected policy and transitive executable/provider
-closure; sample identifies the fresh observation, not a cached pass. Clock binds
-kernel boot and the owner's authoritative time/monotonic domains. Observed,
-uncertainty and authority-until retain the source codec's exact representation;
-continuity binds previous accepted floors and reboot/clock transitions.
+The owner publication is the broker's
+[qualified-time contract at `a1c69eb`](https://github.com/relux-works/swarma-credential-broker/blob/a1c69eb9ed6576d3b060dfb3e697de2fd2180f0d/docs/time-contract.md),
+with the [provider API and test-only fixture package at `8cdea82`](https://github.com/relux-works/swarma-credential-broker/blob/8cdea829b261e97908623376fe6857e9960fe877/docs/qualified-time-api.md)
+(QT-2a API introduced at `07f9e6bb0dd85baac19dd68d7f62fb4b9a9aabce`).
+These pins specify this adapter; they do not select a production authority.
+
+The provider envelope is exactly `{version,facts}`, version `qualified-time/1`.
+Its eleven facts map to our existing logical record as follows. Every row must
+come from the **same authenticated receipt**, independently matched to protected
+enrollment, current boot, expected operation and one-use challenge.
+
+| `TimeFacts` field | Provider fact and required mapping |
+|---|---|
+| `authority` | Validate provider `authority={id,version,trust_root_digest,qualification_digest}` against the independently installed owner/root/validator and qualification; construct our §2 logical `Authority`. Receipt values cannot select their own trust root. |
+| `evidence` | Validate provider `evidence={qualified,source,nts_config,nts_association,reference,digest}`: `qualified=true`, `nts_config=true`, source `chrony-nts-config` or `chrony-nts-authdata`, association `verified` or `unproven`; authdata source or an authdata-required policy requires `verified`. Reference is a UTC instant no later than `O`. Construct our §2 logical `Evidence` over protected retained exact receipt bytes and its authenticated original-evidence closure; the inline digest is not that `Ref`. |
+| `adapter` | Preserve validated `{revision,collector_entry,image_digest,chronyc_digest,closure_digest}`: full pinned revision, exact `timeconf.CollectorEntry`, embedding image, descriptor-pinned collector and transitive closure, all equal to the deployed qualified manifest. |
+| `policy` | Preserve `{shared_digest,service_digest,effective_digest}` over protected original shared/override bytes and canonical effective-policy manifest. Absent override uses literal `none`; validate the actual applied bounds, not only the hashes. |
+| `scope` | Construct our independently derived seven-member §2 `Scope`; match its operation digest to provider `scope={machine,consumer,purpose,continuity_scope,operation_digest}` and match the other four members to protected enrollment. Do not copy provider scope into our differently shaped logical scope. |
+| `sample` | Preserve `{id,challenge,generation,fresh}`: newly collected random observation ID and current one-use challenge, each exactly 32 lowercase hex characters, nonzero unsigned generation and `fresh=true`. Retries collect anew with a new challenge; a recent pass is not fresh. |
+| `clock` | Preserve `{boot,wall,monotonic,before_ns,observed_ns}`: current nonzero lowercase kernel boot UUID, literal `CLOCK_REALTIME/UTC`, literal `CLOCK_BOOTTIME`, and nonnegative elapsed nanoseconds bracketing collection with `observed_ns ≥ before_ns`. No cross-boot elapsed comparison. |
+| `observed` | Preserve UTC instant `O=Sample.Now` in exact signed 64-bit Unix nanoseconds. |
+| `uncertainty` | Preserve nonnegative signed 64-bit duration `δ` in nanoseconds, conservatively rounded upward and within effective policy; derive exact interval `[L,U]=[O−δ,O+δ]` with overflow refusal. Include the qualified remaining storage/return/pin allowance. |
+| `authority_until` | Preserve UTC instant `A=Sample.AuthorityUntil` in signed 64-bit Unix nanoseconds, **exclusive**: require `U < A` and publication before `A`. It is no later than `min(O + policy authority window, reference + policy max sync age)`; shared ceilings remain 300 and 2048 seconds. |
+| `continuity` | Preserve `{store,generation,record_digest,witness_digest,prior_high_water,high_water,journal_floor,prior_boot,transition,held}` after checkpoint/witness validation. Generation equals `sample.generation`; UTC bounds distinguish prior consumed `W`, newly consumed `U` and imported `J`; `prior_boot` is a canonical nonzero UUID, `same-boot` iff it equals `clock.boot`, otherwise `qualified-reboot`, and successful `held=false`. |
+
+Use the provider's closed canonical JSON codec: UTC/duration/elapsed values are
+decimal strings in signed 64-bit nanoseconds (durations/elapsed nonnegative),
+generations unsigned 64-bit decimal strings, never floats or coerced numbers.
+Reject noncanonical strings, overflow/wrap, unknown/missing/duplicate/null
+members or versions. Digests are `sha256:` plus 64 lowercase hex characters;
+enrolled IDs are 1–128 ASCII bytes `[A-Za-z0-9._:-]+`, owner versions 1–32;
+revisions are full lowercase Git object IDs and boot UUIDs canonical nonzero
+lowercase. Require byte-identical canonical re-encoding, at most 65536 receipt
+bytes and nesting 16. These provider representations do not change our integer
+or `Ref={sha256,size}` codecs. Retain exact receipt bytes without LF through a
+checked protected descriptor; our `Ref` uses their bare SHA-256 and byte count.
+Validate retained originals and checkpoint/witness proofs with the enrolled
+owner validator, within 64 objects/8 MiB total, 8 MiB per object, depth 16 and
+no cycles. Missing originals, unknown validator or unconfirmed authenticity
+refuses. `DecodeReceipt` is structural validation, **not authentication**;
+neither a digest nor a `qualified` flag supplies authority.
+
+The executor derives `Scope={deployment,boot,attempt,old_state,candidate_state,transactions,plan}`
+itself from the retained intent and protected deployment, including the reserved
+intent sequence and complete original frozen references (SHA-256 **and size**).
+Validate those objects in their owning codecs and encode with the pinned
+journal §2.1 CCJ-1 canonicalizer, closed types and bounds, without LF. The exact
+operation digest is `sha256:` plus lowercase SHA-256 of ASCII
+`qualified-time/executor-scope/1`, one zero byte, then `CCJ-1(Scope)`.
+The public `ExecutorOperationDigest` helper only hashes **already-verified
+bytes**; it neither validates Scope nor authenticates anything. Never hash
+caller-supplied scope bytes or copy a receipt digest into the expected binding.
+A changed attempt, boot, plan or reference size requires a new observation;
+a new digest cannot select an empty continuity history. Historical recorder
+boot tokens inside frozen objects remain unchanged.
+
+Provider continuity supplies what the unchanged frozen journal cannot. Import
+`J` exactly as §3.3 defines it, but rely on the provider's independently witnessed
+durable history for **every** later consumed upper bound, including failed
+attempts and lost replies. Before collection or bracketing clock observations,
+the provider durably records an in-flight begin. Require a clear hold and
+`L > max(prior_high_water,J)`; equality refuses. Final settlement persists
+`high_water=U`, the consumer/operation/challenge/sample association, clock pair
+and matching generation/checkpoint/witness before replying. A later executor
+refusal, crash or unchanged journal does not undo that consumption. An unfinished
+begin recovers held; detected steps latch a sticky hold. Uncertain writes,
+missing/stale/conflicting history or witness, incomplete incident bounds and
+unqualified reboot transitions refuse. A consistent failed collection may
+settle refused with unchanged high-water; failure cannot erase a hold. Restart,
+reboot, retry and migration never reset history to `J` or zero, discard a hold,
+or substitute a new store. Reboot requires fresh current-boot evidence while
+retaining high-water/holds; elapsed values from different boots are incomparable.
+No later pre-pin receipt is inserted into a frozen report or journal field.
 
 The validator MUST check authenticated provenance, qualified confidence and
 freshness, same intended current boot, bounded nonnegative uncertainty, complete
@@ -420,10 +487,85 @@ source high-water with the full uncertainty interval. Effective expiry remains
 the earlier of signed Valid-Until and the pinned maximum age; malformed present
 expiry refuses. Preserve already confirmed native profile values and source
 validation bounds; add no permissive defaults. If a deadline/authority lapses
-before publication, do not pin. The time owner must publish the lock-compatible
-bounded collector path; general network acquisition is outside maintenance
-locks. Network wait under exclusion, cached freshness or dropping F/B cannot
-bridge an incompatible collector graph.
+before publication, do not pin. Uncertainty only tightens margins: for exclusive
+release expiry `R` and exact nonnegative freshness margin `M`, require `U+M < R`;
+never subtract δ, extend expiry or reduce the margin. The entire interval must
+satisfy source Date/skew/validity bounds. Nil/unknown time, confidence, domains,
+allowance or continuity refuses; no wall fallback is permitted.
+
+The `ConsumeBeforePin` contract permits a collector child under exclusive
+deployment lock D while retaining F/B/W and root-writer exclusion. Release
+effects/core, gate, data, recorder R and journal append before the call. Require
+the exact fifteen-field §7.1 `CallContract` for the installed protected target,
+entry, argv, environment, inputs and one absolute deadline. `CollectorEntry()`
+must be first in the embedding main; descriptor-pin the exact collector image,
+loader/libraries/configuration and local daemon endpoint. Only the fixed argv
+`chronyc -c tracking`, `chronyc -c -N tracking`, `chronyc -c authdata -a` is
+allowed, with cwd `/`, only `LC_ALL=C`, `LANG=C`, `TZ=UTC`, no stdin and the
+protected policy's shared stdout/stderr per-command cap (256–65536 bytes).
+Overflow refuses. Bound drain and storage/witness/retention too; a byte cap or
+per-command timeout is not an aggregate completion bound.
+
+The full collector/daemon/store/witness/failure graph has **no back edge to
+F/B/W/D/R or root-writer exclusion**, including indirect waits. The provider
+takes no consumer lock and invokes no consumer callback/RPC; its private locks
+are leaves. General network acquisition, synchronization, enrollment and service
+startup/restart occur outside consumer exclusions; only a new bounded query of
+the already-running qualified local daemon is permitted here. Keep emergency
+stop independently reachable through all retained exclusions. Require retained
+whole-subtree identity, terminal evidence and bounded output drain, with
+no escape/reactivation and every delegated effect resolved or owner-fenced
+under §5.1; direct-child exit, `CommandContext` or a unit result is insufficient.
+Unresolved completion, teardown or fencing refuses, retains the fence and
+permits no overlapping retry. The long-lived daemon is a separately qualified
+dependency, not a child whose death can be assumed from collector cancellation.
+
+Preserve the **original absolute deadline across retries** and the same-boot
+monotonic cap. The stricter caller/context, policy and qualified aggregate budget
+(never over ten seconds) covers collection, all commands/waits, witness/store
+and receipt retention, drain, teardown and the reserved return/pin allowance.
+New challenges do not renew it. The executor must retain it: the provider cannot
+recover a discarded deadline if both request deadline and context are replaced.
+No cached pass, late success, hidden network wait or dropping F/B bridges an
+incompatible graph or expired budget.
+
+**Production gates remain closed.** The rollback witness backend/restore boundary
+is undecided; `NewConsumer` uses refusing `ClosedWitness` and supplies no qualified
+production collector path. Authenticated one-shot handoff is the next provider
+slice (QT-2c), design pending. Structural decode and fixture enrollment matching
+provide neither that handoff nor original-evidence authentication. Installed
+collector graph/subtree fencing, remaining-delay and reboot qualification, the
+enrolled owner validator and executor adapter review are also required before
+accepting integration. No dependency, executable or runtime behavior changes here.
+
+#### Later implementation tests
+
+Real-codec positive controls must use
+`github.com/relux-works/swarma-credential-broker/timeconftest`, imported **only in
+`_test.go` files** with `//go:build swarma_timeconf_fixture`. Use the real receipt
+and executor adapter; mirror the published codec-positive, replay, expired
+deadline and lost-reply tests. Keep approved application builds on default tags;
+fixture roots are synthetic and confer no production authority. Test changed
+attempt/boot/reference size/challenge, unknown originals/authority and exclusive
+`U=A` beside valid controls, including preservation of the original retry deadline.
+
+Mandatory continuity vector (UTC seconds, exact nanosecond arithmetic): leave journal floor **140**, consume **sample 200
+with uncertainty 1**, persist **W=201** before reply; after failure/restart or the
+fixture's qualified reboot, **[170,172] refuses with no receipt and W unchanged**;
+fresh **[210,212] passes** the time control with valid authority/releases. Assert
+the provider's settled high-water and unchanged journal, not only an error.
+Use `SetNextSample`, `HighWater` and `LoseNextReply` to exercise consumed-but-lost
+reply; the fixture's synthetic boot transitions do not qualify native reboot.
+
+An executable dependency test must run `go list -deps -compiled -f '{{.ImportPath}}' -tags= ./...`
+and again with `-tags=swarma_timeconf_fixture`, both **without `-test`**, rejecting
+`github.com/relux-works/swarma-credential-broker/timeconftest` in either application
+graph. A temporary non-test `.go` import must fail with the intended
+fixture-dependency violation; the identical import in `_test.go` must pass.
+An unrelated compile/setup error is not detection. The tag also exposes a bridge
+in `timeconf`, so import checking alone cannot approve tagged release builds.
+These are future implementation obligations; documentation checks below do not
+execute this vector or qualify continuity, authentication or native completion.
 
 ### 6.2 Continuous admission and maintenance interlock
 
@@ -545,7 +687,7 @@ identity or failure behavior is unknown, this operation stays refusing.
 | Latest maintenance terminal observation | `/usr/bin/systemctl show swarma-user-manager-qualify-maintenance.service --no-pager --property=LoadState,Type,ActiveState,SubState,Result,ExecMainCode,ExecMainStatus,ExecMainStartTimestampMonotonic,ExecMainExitTimestampMonotonic,InvocationID`; fixed maintenance-bound equivalent of `SystemdUnit.Successful` is required | Reviewed outside inner locks; under D only with qualified no-back-edge graph including GetAll. Require exact closed terminal oneshot success and fresh current-boot maintenance invocation equal to boot Q; observer never restarts/proves launch freshness by itself |
 | Capture / CheckAll | Concrete installed `ProductionEnvironment.Capture` / `CheckAll` through `qualification.Deployment`, bound to protected policy and deployment manifest; no substituted snapshot/provider | Issuer exclusive D or admission-preparation shared D. Keep complete generation-bound reservation snapshot; execute provider/unit calls only after releasing effects/gate/data/R/append |
 | Provider / native proof helpers | Each exact protected executable/IPC endpoint and closure from the approved fixed manifest/profile, including NSS/inventory probes, pinned dpkg audit, signature verifier and decoders | Individually enumerated bounded graph required; no general network proof acquisition under maintenance locks, no raw fd inheritance or package installation/scripts. A tool name or manifest digest alone is not a call qualification |
-| Qualified time sample | Pinned `TimeSource.StartSample` -> reviewed `timeconf` provider/CollectorEntry and exact protected tool/policy identity (§6.1) | Retained outer exclusion compatible, no hidden network or owned-lock wait; fresh authoritative sample before pin. Concrete collector call/argv/provenance remain unavailable until time owner publication |
+| Qualified time sample | Pinned §6.1 `ConsumeBeforePin` contract, protected `timeconf.CollectorEntry` and fixed local chronyc argv; existing `TimeSource.StartSample` alone is insufficient | Retain outer exclusions and exclusive D, release stated inner locks; one original deadline, no back edge F/B/W/D/R, whole-subtree completion/drain under §5.1. Receipt/API published; production witness, authenticated one-shot handoff and installed closure qualification remain open |
 
 This matrix selects our composition targets. It does **not** publish missing
 platform/provider mechanisms or certify the current helpers' transitive graphs.
@@ -711,7 +853,7 @@ cannot all be delegated back to an owner as an unspecified service.
 | Baseline authority and platform restore owner (Q2) | Explicit initial accepted baseline/import association, deployment identity, trusted checkpoint provisioning/restore procedure, evidence/source pins and independent custody if coherent rollback resistance is claimed | No genesis or lower floor from current state; empty/lost/incoherent custody refuses |
 | Platform/service-manager owner | Dedicated maintenance artifact with no reverse dependency/consumer lifecycle effects; separately fixed issuer/latest contexts; retained cgroup.kill/populated=0 fence with reactivation closed, PID1/delegated-work accounting and commit currency; full GetAll, queue/stop and native failure graphs | No ordinary-boot-unit substitution, dual-name fallback, timer/PID/exit-only takeover or accepting child launch |
 | Admission/P7 and root-writer owners jointly (Q3) | Versioned bounded authenticated interlock schema/validator, pre-package stopped starts/resumes, continuous root-writer ownership/epoch/invalidation; affected-set authority and original detection/clock/deadline/timely response; reboot continuity | Marker-only proof/unknown interval or P7 compliance refuses; owner retains immediate containment |
-| Timeconf/platform time owner | Qualified collector entry/tool/policy/provenance pins, confidence/uncertainty/freshness/authority/clock-high-water/reboot semantics, exact bounded lock-compatible graph | No wall time, cached pass or expiry extension; pin unavailable |
+| Timeconf/platform time owner | §6.1 pins broker `docs/time-contract.md` at `a1c69eb` and `docs/qualified-time-api.md` at `8cdea82` (QT-2a `07f9e6b`): eleven-fact receipt, exact scope digest, provider-owned consumed-time/hold continuity and bounded collector-under-D semantics. Still select/qualify independent rollback witness and restore boundary, publish authenticated one-shot handoff (QT-2c design pending), enrolled original-evidence validator and installed no-back-edge/subtree/reboot/remaining-delay qualification | Production consumption stays closed; decode is structural, not authentication. No reset to journal floor, wall time, cached pass or expiry extension; pin unavailable |
 | Incident authority | Authentic minimized incident issuance/validation, complete affected/response provenance, original event/deadline association and durable failure capacity | No fabricated failure terminal entry or dropped incident |
 | Owner recipient/transport authority | Versioned authenticated owner-role capability/receipt codec, incident binding, durable delivered acknowledgement and retry/capacity contract | Owner pending/unknown delivery holds acceptance/readiness |
 | Curator recipient/transport authority | Separate curator-role capability/receipt codec and authority with the same association/durability/retry guarantees | Curator pending/unknown delivery holds acceptance/readiness; one receipt never counts twice |
@@ -730,9 +872,13 @@ Open questions are requests for precise artifacts, not approval by implication:
 3. Can the joint Q3 schemas bind original pre-package P7 events and later attempt
    scopes to the same immutable interlock ref, with authoritative invalidation,
    affected-set completeness and no deadline reset?
-4. Which qualified time adapter supplies fresh-current-boot sampling for retained
-   historical transactions, including lock compatibility and durable high-water
-   continuity? Publish the exact graph instead of assuming a cached sample.
+4. Given the pinned §6.1 receipt/API and scope mapping, which independent
+   rollback witness/backend and restore boundary will be selected and qualified?
+   When will the provider publish the authenticated one-shot handoff (QT-2c,
+   design pending) and enrolled original-evidence validator? Which installed
+   collector/daemon/store graph proves no back edge under D, whole-subtree
+   completion and durable current-boot continuity within the original budget?
+   Published structure and synthetic fixtures leave these gates open.
 5. Which bounded incident/capability/receipt byte codecs and trust roots are
    published by each recipient owner, and where is durable failure capacity
    independently reserved and recovered?
