@@ -1,10 +1,11 @@
 # Qualification-maintenance journal: qual-maint/1
 
-Status: **A3c specification for review; no journal implementation, A3d automatic
-re-pin, admission guard or root qualification is supplied by this document.**
-MUST, MUST NOT, REQUIRED, SHOULD and MAY are normative requirements for that
-future implementation. Every executable qualification obligation below is
-**PENDING**. Publishing this document activates nothing.
+Status: **A3c contract with the A3d-1 local journal layer implemented. Automatic
+re-pin, reconciler orchestration, admission/boot integration and root
+qualification remain PENDING.** MUST, MUST NOT, REQUIRED, SHOULD and MAY state
+the full contract. The [implementation coverage map](../docs/qual-maint-journal.md#coverage-map-and-remaining-qualification)
+distinguishes passing local codec/store checks from remaining qualification.
+Publication and local test results activate nothing.
 
 This specifies the journal required by [A3 §4](upgrade-requalification.md#4-requalification-and-durable-outcome).
 It records only package-update qualification attempts and their evidence. It
@@ -20,8 +21,9 @@ missing evidence, partial tails, unknown durability, uncompleted attempts,
 pin/Q without matching acceptance, stale unit completion and saturation. It MUST
 retain admission/P7 fences and history, without frontier advance, old-pin
 restoration, lifecycle mutation or leaked account/credential data. Section 7
-pairs each obligation with a valid control and a narrowing mutant; none is an
-executed product test here.
+pairs each full obligation with a valid control and a narrowing mutant. The
+implementation coverage map records the narrower local tests actually run;
+unimplemented runtime/root obligations remain PENDING.
 
 An accepted entry proves that one complete A3 §4 attempt reached its commit
 boundary. It is neither permission to clear maintenance nor current readiness.
@@ -599,9 +601,11 @@ service-manager RPC in those short critical sections, acquire D from inside
 lifecycle locks, or rely on a cached clean verdict or timestamp-only lease. The
 integration must qualify this boundary; this specification does not implement it.
 
-## 7. Required future tests and narrowing controls — PENDING
+## 7. Qualification obligations and narrowing controls
 
-These are **future executable obligations, not test results**. Each negative
+These rows state the **full qualification obligations**, not blanket passing
+results. The [coverage map](../docs/qual-maint-journal.md#coverage-map-and-remaining-qualification)
+records A3d-1 local evidence and names every remaining PENDING requirement. Each negative
 asserts its named refusal/invariant, preserved original bytes/history and
 frontiers, no unauthorized pin or lifecycle effect, closed new starts/resumes,
 and the appropriate original P7 response and durable owner/curator incident.
@@ -666,15 +670,17 @@ files rather than copying a rendered Markdown line.
 Documentation validation uses the pinned Go CCJ-1 package to parse/re-encode
 these exact files, check byte counts/hashes and predecessor identities. Nearby
 malformed/modified controls check that the documentation validator actually
-rejects its claimed framing/hash failures. This limited check is not a product
-journal implementation or evidence that §7's pending runtime tests ran.
+rejects its claimed framing/hash failures. This framing check alone does not establish semantic journal acceptance or
+show that §7's pending runtime/root tests ran. The separate A3d-1 local tests
+and their limits are recorded in the implementation coverage map.
 
 ## 9. Open decisions and recommendations
 
 Q1 was decided by the curator on 2026-10-25; its per-operation qualification
 requirements remain mandatory. Q2–Q5 remain architect/owner or interface
-publication gates. Their recommendations are not approvals. Their resolution does not by itself
-implement or qualify A3d, its guard, hooks, P7 response or notification transport.
+publication gates. Their recommendations are not approvals. Their resolution
+does not by itself qualify A3d, its guard, hooks, P7 response or notification
+transport.
 
 | Question | Recommendation | Safe state until resolved |
 |---|---|---|
@@ -707,8 +713,8 @@ issuer `Capture`/`CheckAll`, and shared D through admission-preparation
 The snapshot edge is published in §4.2, not deferred to a replacement interface.
 No intrinsic runtime cycle has been demonstrated by this source inspection.
 The decision permits A3d implementation to start. Per-operation review and
-bounded transitive no-back-edge qualification remain required before integration; unknown dependencies refuse with admission
-fenced.
+bounded transitive no-back-edge qualification remain required before
+integration; unknown dependencies refuse with admission fenced.
 
 ## 10. Tools and current delivery limits
 
