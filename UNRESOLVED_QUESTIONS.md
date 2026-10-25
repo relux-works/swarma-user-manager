@@ -257,13 +257,15 @@ automatic pin protocol nor host qualification. Before deployment:
   and provider-owned continuity; that publication question is resolved. The
   independent rollback witness backend/restore boundary remains undecided,
   while the [executor window design](spec/requalification-time-windows.md) now
-  selects conditional keyless preparation, one in-window suspend-aware clock
-  read and the durable act/use deadline, with a proposed `qual-maint/2`
-  burn/completion transition. Review the new version/migration and qualify its
-  independent currentness, original reader/witness interfaces, enforced
-  read-to-durability bound, Linux/macOS deadline mappings and mandatory native
-  parity. Installed collector/subtree/reboot and evidence authentication also
-  remain open. Structural decoding and test-only fixtures close none of those
+  selects conditional keyless preparation, one suspend-aware clock read after
+  journal-use admission and the durable act/use deadline, with a proposed
+  `qual-maint/2` burn/completion transition. Review the new version/migration and
+  qualify its independent currentness, accepting original reader/witness implementations,
+  enforced read-to-durability bound, Linux/macOS deadline mappings and mandatory
+  native parity. Provider handoff requirements and the inactive OriginalReader interface
+  are published; handoff codec/preparer/verifier/consume remain pending.
+  Installed collector/subtree/reboot and evidence authentication also remain
+  open. Structural decoding and test-only fixtures close none of those
   authority gates. Unknown/untrusted time refuses. Release age
   seven days, future-Date skew five minutes and P7 response five minutes are
   owner-confirmed and fixed by native profile validation.

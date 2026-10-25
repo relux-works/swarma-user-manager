@@ -6,14 +6,18 @@ or activation is delivered.** This defines the pre-pin window and a proposed
 [`qual-maint/1`](qualification-maintenance-journal.md) bytes and transitions,
 Scope, TimeFacts, Q, recorder and generation/effect formats remain unchanged.
 
-The provider sources are the broker's
-[time contract at `a1c69eb`](https://github.com/relux-works/swarma-credential-broker/blob/a1c69eb9ed6576d3b060dfb3e697de2fd2180f0d/docs/time-contract.md)
-and [API at `8cdea82`](https://github.com/relux-works/swarma-credential-broker/blob/8cdea829b261e97908623376fe6857e9960fe877/docs/qualified-time-api.md).
-Those publications supply receipt/settlement semantics, not a shipped handoff
-codec or macOS provider. The [eleven-fact adapter](requalification-executor-contracts.md#61-qualified-time)
-continues to apply. The rules below specify our requirements for the next
-one-shot handoff integration; they do not attribute an unpublished API to the
-provider.
+Provider references are the broker's
+[amended time contract](https://github.com/relux-works/swarma-credential-broker/blob/1ae6cace28cbe3795b76a6ef728e00119071fa2e/docs/time-contract.md#final-issuance-enrollment-and-registration-windows),
+[handoff requirements](https://github.com/relux-works/swarma-credential-broker/blob/1ae6cace28cbe3795b76a6ef728e00119071fa2e/docs/time-handoff.md),
+[window-profile schema](https://github.com/relux-works/swarma-credential-broker/blob/1ae6cace28cbe3795b76a6ef728e00119071fa2e/docs/time-window-profile.md)
+and [macOS requirements](https://github.com/relux-works/swarma-credential-broker/blob/1ae6cace28cbe3795b76a6ef728e00119071fa2e/docs/time-handoff-macos.md)
+at `1ae6cac`, plus the unchanged
+[API at `8cdea82`](https://github.com/relux-works/swarma-credential-broker/blob/8cdea829b261e97908623376fe6857e9960fe877/docs/qualified-time-api.md).
+These publish the handoff design and an inactive original-reader interface;
+they supply no accepting handoff codec, verifier, reader or macOS provider.
+The [eleven-fact adapter](requalification-executor-contracts.md#61-qualified-time)
+continues to apply. This profile keeps its native operation/window identities
+and owning journal format; the shared schema is not a provider wire codec.
 
 ## 1. Trust and preparation
 
@@ -37,15 +41,18 @@ Preparation must establish the following before entering the local window:
   checked protected descriptor identities, validated associations, and authentic
   settlement acknowledgment. The witness interface must establish the current
   independent checkpoint and ancestry under the original operation deadline;
-  a digest of a witness head is not that authority. These are required contracts,
-  not available constructors. Their production implementations remain pending.
+  a digest of a witness head is not that authority. The published
+  [`OriginalReader` interface](https://github.com/relux-works/swarma-credential-broker/blob/1ae6cace28cbe3795b76a6ef728e00119071fa2e/timeconf/original_linux.go)
+  defines the original-loading boundary, but its only shipped implementation
+  refuses. An accepting reader and the independent witness remain pending.
 - Retain bounded immutable owned copies, a private authenticated anchor and
   commitment H over the exact handoff envelope. The intended commitment domain
   is `qualified-time/handoff-commitment/1`, followed by a zero byte and the
-  canonical envelope. Exact provider handoff codec/validator publication remains
-  a prerequisite; arbitrary bytes plus their SHA-256 cannot construct a prepared
-  value. Receipt, challenge, sample, boot, run, original deadline, qualification
-  and window bindings must all match independently retained inputs.
+  canonical envelope. The published handoff requirements do not implement its
+  codec/preparer/verifier; those remain prerequisites. Arbitrary bytes plus
+  their SHA-256 cannot construct a prepared value. Receipt, challenge, sample,
+  boot, run, original deadline, qualification and window bindings must all match
+  independently retained inputs.
 - Qualify retention and invalidation through the window. No deletion/replacement
   of admitted originals, unobserved revocation or competing authority transition
   may be silently assumed absent. A locally known hold/step invalidates use;
@@ -67,17 +74,21 @@ Any later time-dependent accepted-append window needs a distinct published
 profile and fresh handoff; this profile cannot be stretched over step 4.
 
 Retain package F, B, worker W, root-writer exclusion and **exclusive deployment
-D** continuously. At entry and the clock read, effects/core, gate, data,
-recorder R and journal append are released. Package F is unrelated to another
+D** continuously. Provider collection and preparation require journal append
+to be released. Before the clock read, acquire append without waiting and admit
+the durable use transition by selecting its protected exact head, live writer
+epoch and unused operation/window key. Keep append through verification and the
+acknowledged burn. Effects/core, gate, data and recorder R remain absent at
+admission, read and verification. Package F is unrelated to another
 consumer's final F; do not release package exclusion to obtain time. The real
 snapshot branch remains D -> effects -> gate -> data, with R/append absent,
 and finishes before provider preparation. The two qualifier handoffs still
 release parent D as [specified](requalification-executor-contracts.md#5-composed-fbwd-ownership-and-recovery).
 
-After acquiring all these final exclusions, take **one fixed qualified
-`CLOCK_BOOTTIME` read**, outside the pure `VerifyWindow`, and pass its value as
-data. The read is not an injected Clock callback, `time.Now()`, provider query,
-subprocess or new synchronization attempt. Boot identity and clock selection
+Only after the use transition is admitted under all these exclusions, take
+**one fixed qualified `CLOCK_BOOTTIME` read**, outside the pure `VerifyWindow`,
+and pass its value as data. The read is not an injected Clock callback,
+`time.Now()`, provider query, subprocess or new synchronization attempt. Boot identity and clock selection
 come from the qualified platform binding; an unavailable/changed binding
 refuses. No clock read or other I/O occurs inside `VerifyWindow`.
 
@@ -86,7 +97,7 @@ Use checked integer nanoseconds in one boot/domain:
 | Symbol | Meaning |
 |---|---|
 | `s` | The bound receipt's original post-collection `clock.observed_ns` |
-| `n` | The single in-window suspend-aware clock observation |
+| `n` | The single in-window suspend-aware clock observation after append/use-transition admission |
 | `D` | Original exclusive absolute monotonic deadline; here D denotes time, not the deployment lock |
 | `T` | Qualified maximum observation-to-durable-completion delay, including preparation/admission already spent |
 | `f` | Enforced remaining-work bound from `n` through the endpoint below |
@@ -108,10 +119,13 @@ still bind. Other consumers' 250/1000/2000 ms budgets are not executor defaults.
 Finite installed f/T/eps values and the deadline conversion must be published
 and qualified; no measured average or new permissive default selects them here.
 
-The bound f includes local verification, append admission/CAS, durable burn,
+Initial append admission and protected selection precede n; their elapsed cost
+is included in n-s and the original deadline. The bound f includes local
+verification, the serialized burn CAS, durable burn,
 policy staging/write/sync/rename, parent sync, exact protected readback, and
-the completion entry's append/sync/parent sync/readback. Reserve that whole
-observation-to-endpoint allowance in the provider interval **before** W is
+the completion entry's nonwaiting append re-entry/sync/parent sync/readback.
+No second capture or provider collection accompanies that re-entry. Reserve the
+whole observation-to-endpoint allowance in the provider interval **before** W is
 committed. Do not advance O using an unqualified rate, shrink uncertainty or
 credit the same reserved delay twice. Retain `L > max(prior_W,J)`, any stricter
 current consumer floor, `U < A`, `U+M < R` and all source Date/skew predicates
@@ -142,11 +156,11 @@ availability alone does not qualify the binding or the timing mechanism.
 
 | Dimension | macOS profile and required proof | Applicable parity rows |
 |---|---|---|
-| Clock | Candidate fixed `mach_continuous_time` read, converted from ticks by the pinned timebase with checked rational nanosecond arithmetic and conservative error/rounding. Apple [documents advancement during sleep](https://developer.apple.com/documentation/kernel/1646199-mach_continuous_time). One read after final exclusion entry, outside VerifyWindow; no `mach_absolute_time`/other sleep-excluding substitution. Exact target, conversion/rate/error and suspend/hibernate behavior remain PENDING-VERIFY. | [`qualification.revocation`, `update.authentic`](platform-parity.md#4-linuxmacos-parity-matrix) retain original clock/deadline and trusted-time obligations. |
-| Boot | Candidate protected native boot-session UUID; Apple's [BootSessionUUID definition](https://github.com/apple/darwin-xnu/blob/main/iokit/IOKit/pwr_mgt/IOPM.h) distinguishes a boot session from a sleep cycle. Enrolled native reader, canonical mapping, restart/suspend/reboot and restore behavior remain PENDING-VERIFY; a wall boot timestamp, PID or fabricated systemd identity is insufficient. | [`qualification.boot`, `process.identity`](platform-parity.md#4-linuxmacos-parity-matrix); [native issuer binding](stations-macos-v0.md#7-qualification-protocol-and-launchd-issuer). |
+| Clock | Candidate fixed `mach_continuous_time` read, converted from ticks by the pinned timebase with checked rational nanosecond arithmetic and conservative error/rounding. Apple [documents advancement during sleep](https://developer.apple.com/documentation/kernel/1646199-mach_continuous_time). One read after append/use-transition admission and all final exclusions, outside VerifyWindow; no `mach_absolute_time`/other sleep-excluding substitution. Exact target, conversion/rate/error and suspend/hibernate behavior remain PENDING-VERIFY. | [`qualification.revocation`, `update.authentic`](platform-parity.md#4-linuxmacos-parity-matrix) retain original clock/deadline and trusted-time obligations. |
+| Boot | Candidate protected native read of `kern.bootsessionuuid` before final locks, using the [pinned XNU read-only declaration](https://github.com/apple-oss-distributions/xnu/blob/xnu-11215.1.10/bsd/kern/kern_sysctl.c#L2869-L2871). Enrolled reader, canonical nonzero mapping, restart/suspend/reboot behavior and independent restore/currentness remain PENDING-VERIFY; a wall boot timestamp, PID or fabricated systemd identity is insufficient. | [`qualification.boot`, `process.identity`](platform-parity.md#4-linuxmacos-parity-matrix); [native issuer binding](stations-macos-v0.md#7-qualification-protocol-and-launchd-issuer). |
 | Deadline | Preserve original start/UTC deadline identity, continuous-clock absolute deadline and budget under an explicitly qualified mapping. Apply §2's same checked inequalities, uncertainty reserve and durable endpoint; no renewal on wake/restart. Proposed new-profile clock identifier is `MACH_CONTINUOUS_TIME/ns`, not an alias for `CLOCK_BOOTTIME`. The current Linux-only receipt/handoff clock domain cannot encode this by relabeling: a jointly reviewed provider platform profile/version is required first. | [`qualification.revocation`, `update.requalified`](platform-parity.md#4-linuxmacos-parity-matrix). |
-| Store and exclusion | Native protected descriptors and persistent writer/append exclusions must implement the shared versioned journal bytes, durable burn/completion ordering and independent restore authority. APFS or successful fsync alone supplies no proof. Native package/updater F/B, worker W, root-writer ownership and exclusive D equivalents must retain the same logical exclusions; effects/gate/data/R/append are absent during collection/read/verification. No presumed Linux flock/cgroup translation. All remain PENDING-VERIFY. | [`journal.format`, `journal.durable`, `journal.restore`, `process.fate`](platform-parity.md#4-linuxmacos-parity-matrix); [native lifecycle durability](stations-macos-v0.md#2-durable-lifecycle-and-authority). |
-| Act and endpoint | Exact authorized native input/policy P0-to-pin transition, only the planned two fields, followed by native write/flush/rename/parent durability, readback and committed use entry, all by the original deadline. Updater exclusion, approved target/seal/Cryptex evidence, launchd authority, full writer/descendant fencing and the enforced read-to-durability bound are PENDING-VERIFY; dpkg or systemd evidence cannot stand in for them. | [`update.authentic`, `update.requalified`, `process.stop`, `qualification.boot`](platform-parity.md#4-linuxmacos-parity-matrix); [native update qualification](stations-macos-v0.md#71-requalification-after-os-and-software-updates). |
+| Store and exclusion | Native protected descriptors and persistent writer/append exclusions must implement the shared versioned journal bytes, durable burn/completion ordering and independent restore authority. Require checked `F_FULLFSYNC` on written durable files, with no silent fsync fallback; Apple's [full-flush manual](https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man2/fcntl.2.html) is a semantic reference, not APFS/device qualification. Directory operations, create/rename/unlink and all relevant parent barriers require separate native qualification; file full-flush does not prove directory support. Unknown targets/guarantees or failed barriers refuse. Retain native package/updater F/B, W, root-writer and exclusive D equivalents. Collect with append absent; admit append and select protected head/epoch/unused before the sole read, then keep append through pure verification and burn. Effects/gate/data/R stay absent. All remain PENDING-VERIFY; no presumed Linux flock/cgroup translation. | [`journal.format`, `journal.durable`, `journal.restore`, `process.fate`](platform-parity.md#4-linuxmacos-parity-matrix); [native lifecycle durability](stations-macos-v0.md#2-durable-lifecycle-and-authority). |
+| Act and endpoint | Exact authorized native input/policy P0-to-pin transition, only the planned two fields, followed by checked file full-flush, same-filesystem rename, qualified parent durability/readback and committed use entry. The policy and journal retain their ordered non-atomic endpoint; completion append re-entry and every later barrier fit the same enforced f and original D, without another read. Updater exclusion, approved target/seal/Cryptex evidence, launchd authority, full writer/descendant fencing and the enforced read-to-durability bound are PENDING-VERIFY; dpkg or systemd evidence cannot stand in for them. | [`update.authentic`, `update.requalified`, `process.stop`, `qualification.boot`](platform-parity.md#4-linuxmacos-parity-matrix); [native update qualification](stations-macos-v0.md#71-requalification-after-os-and-software-updates). |
 
 Qualify the profile on the declared native build and filesystem, including a
 pause after capture, suspend/wake spanning the deadline, failed durability,
@@ -253,18 +267,23 @@ window; the live guard must permit bounded local currentness checks or refuse.
 
 The versioned transaction is:
 
-1. With the §2 exclusions retained, capture n and run pure VerifyWindow over
-   prepared originals, independently expected identity/deadline, current protected
-   intent/window_plan, floors, ownership and use revision. The proposed use's
-   operation/window/deadline must equal that frozen window_plan. Its output is a
-   transition. It neither burns permission nor dispatches the act.
-2. Acquire journal append nonblockingly under retained D, with effects/gate/data/R
-   absent; no lock upgrade or provider work. Compare the exact expected head,
-   current epoch and unused key again. Append the `time-use/burned` entry, sync
+1. Retain the §2 outer exclusions and acquire journal append nonblockingly,
+   with effects/gate/data/R absent. Admit this use transition against the
+   protected exact expected head, current writer epoch and unused key before
+   capturing n. With append still held, take the sole qualified clock read and
+   pass n into pure VerifyWindow over prepared originals, independently expected
+   identity/deadline, current protected intent/window_plan, floors, ownership
+   and selected use revision. The proposed operation/window/deadline must match
+   that frozen window_plan. Verification returns a candidate transition, not
+   a burn or permission to dispatch. No lock upgrade or provider work is allowed.
+2. Without releasing append, recheck the selected head/epoch/unused binding
+   locally and append the `time-use/burned` entry. Sync
    journal and parent, establish the independent acknowledged head and exact
    readback, then release append. This is one serialized durable compare-and-set;
    ambiguous persistence or acknowledgment gives no permission to act. All
-   admission/storage/authority costs belong to f, without an external callback.
+   post-read CAS/storage/authority costs belong to f, without an external
+   callback. Initial admission has already spent part of n-s; it cannot follow
+   the read or restart the original budget.
 3. Only the live call holding that successful burn may dispatch the one planned
    policy pin. A recovered burned record is not permission to resume dispatch.
    Keep all guard/epoch conditions live; perform exact write/sync/rename,
@@ -277,6 +296,9 @@ The versioned transaction is:
    not the accepted update frontier. No new dispatch accompanies completion.
    A replacement process may establish an already committed completion from
    authoritative history; it cannot create one for an abandoned window.
+   This nonblocking re-entry and all remaining durability work consume the same
+   enforced f and original D; no second clock read or provider recollection
+   is permitted inside append.
 
 Replay allows `intent -> burned -> committed -> accepted/refused/interrupted`,
 or `intent -> burned -> refused/interrupted`, and pre-burn failure directly
@@ -306,7 +328,7 @@ implementation tests. A visible line/file alone is not established durability.
 |---|---|
 | Provider acknowledgment not established | Do not prepare a usable H or dispatch. Recover the provider's in-flight/hold state independently. |
 | Provider settles, reply or preparation lost | Keep consumed W, challenge and association. Collect afresh for a permitted retry; the lost receipt cannot become a fresh handoff. |
-| H prepared, no burn yet | No policy act. Process replacement invalidates private run preparation; establish current history and old-writer fencing before any new attempt. |
+| H prepared, including admitted append/capture but no burn yet | No policy act. Process replacement invalidates private run preparation; establish current history and old-writer fencing before any new attempt. Admission or capture alone does not persist a burn. |
 | Burn bytes, sync, witness/currentness acknowledgment or readback uncertain | No act. Reconcile the exact original append; absent/ambiguous commit cannot be interpreted as unused. |
 | Burn acknowledged, dispatch not reached | Use stays burned even if the policy never changed. Recovery cannot dispatch from that record or refund the key. |
 | Policy act observed without a prior acknowledged burn | Forbidden ordering; retain evidence and contain the unknown effect. Never invent a burn to legitimize it. |
@@ -326,6 +348,7 @@ failure, a skipped plant or rejection of every valid control is insufficient.
 
 | Named control | Negative and expected invariant | Nearby valid control / narrowing plant |
 |---|---|---|
+| `ExecutorWindowAdmissionOrder` | A clock read before initial append admission and protected exact-head/current-epoch/unused-key selection must fail the order invariant, with no burn or pin. Provider collection inside append and any second read also fail. | Admit the use transition, capture once, verify locally, burn while append remains held, act and complete within f and original D. Move capture ahead of admission as the narrowing plant; require the named ordering failure. |
 | `ExecutorWindowStaleCapture` | Identical stale pre-entry data cannot distinguish timely entry from a pause. Require the actual in-window read; do not claim a pure checker detects elapsed time it never observed. | Same qualified inputs and original deadline, timely read admits the candidate; remove/move the fixed read and require the native pause control to fail. |
 | `ExecutorWindowTimelyAndLate` | With illustrative milliseconds s=0, f=20, eps=1, T=2000, D=250, n=1500 refuses the deadline predicate and performs no burn/act. | n=110 yields 131<=2000 and 131<250, a time-predicate pass only. A real timely/late native run must also prove the enforced remaining act/durability bound; substituted arithmetic inputs prove arithmetic only. Plant renewed D or reuse n=110 after an actual pause. |
 | `ExecutorWindowAfterReadPause` | Pause/suspend after n cannot permit dispatch/durability past original D; otherwise the profile stays unqualified. A late post-write check does not undo a violation. | Qualified deadline-aware act/fence or enforced bound completes the same act and use-state before D. Remove that mechanism and require the intended late-act assertion to fail. |
@@ -348,8 +371,11 @@ scheduling, suspend, power-loss, currentness or process-fence guarantees.
 
 ## 7. Open gates and document validation
 
-Before codec/adapters: review the exact provider handoff/original-reader/witness
-interfaces, this consumer version transition and custody, concrete finite
+The provider's handoff, profile schema, macOS requirements and inactive
+OriginalReader interface are published at the pinned `1ae6cac` references above.
+Before codec/adapters: implement and review the accepting original reader,
+handoff codec/preparer/verifier/consume and independently current witness;
+review this consumer version transition and custody, concrete finite
 Linux/macOS window budgets/deadline mappings, and the native enforceable timing
 mechanism. macOS additionally needs the provider platform version, native
 boot/issuer/updater, journal durability and old-writer/delegated-work fencing.
