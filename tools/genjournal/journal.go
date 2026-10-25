@@ -183,6 +183,23 @@ func Verify(src io.Reader, floor Floor) (View, error) {
 	return verifyUntil(src, floor, time.Time{})
 }
 func verifyUntil(src io.Reader, floor Floor, deadline time.Time) (View, error) {
+	var check func() error
+	if !deadline.IsZero() {
+		check = func() error {
+			if time.Now().After(deadline) {
+				return refuse("journal_reader_deadline")
+			}
+			return nil
+		}
+	}
+	return verifyChecked(src, floor, check)
+}
+
+// verifyChecked preserves the legacy record/check ordering. The lifetime writer
+// supplies direct original CLOCK_BOOTTIME checks, never a replacement timer.
+// A successful return proves full verification; following deadline checks belong
+// to its caller so durable progress cannot be lost in an error's partial View.
+func verifyChecked(src io.Reader, floor Floor, check func() error) (View, error) {
 	view := View{Tail: Floor{0, ZeroHash}, Rows: []Row{}}
 	if !validFloor(floor) {
 		return view, refuse("journal_floor")
@@ -209,8 +226,10 @@ func verifyUntil(src io.Reader, floor Floor, deadline time.Time) (View, error) {
 		}
 		line := rest[:n]
 		rest = rest[n:]
-		if !deadline.IsZero() && time.Now().After(deadline) {
-			return view, refuse("journal_reader_deadline")
+		if check != nil {
+			if e := check(); e != nil {
+				return view, e
+			}
 		}
 		if len(line) == 0 {
 			continue
