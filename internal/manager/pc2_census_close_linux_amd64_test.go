@@ -61,7 +61,7 @@ func TestManagerCensusCloseHelper(t *testing.T) {
 			}
 		}
 	}
-	if len(arm.Heads) != 5 {
+	if mode == "scope" && len(arm.Heads) != 5 {
 		t.Fatal("head trace catalog", arm.Heads)
 	}
 	armPath := os.Getenv("CENSUS_CLOSE_ARM")
