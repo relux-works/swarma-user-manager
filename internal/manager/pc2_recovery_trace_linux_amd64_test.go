@@ -21,8 +21,11 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+type recoveryReadBudget struct{ Bytes, Starts int64 }
+
 type recoveryTraceCatalog struct {
 	Root                           string
+	PublishReads                   map[string]recoveryReadBudget
 	Reads                          map[string]bool
 	Target, Ledger, PreparedLedger string
 }
@@ -52,6 +55,13 @@ func TestManagerRecoveryTraceHelper(t *testing.T) {
 		p, e := prepareRecovery(&f.c)
 		if e != nil {
 			t.Fatal(e)
+		}
+		if p.phase != -1 {
+			t.Fatal("publisher trace requires the fresh held endpoint")
+		}
+		catalog.PublishReads = recoveryPublisherReadBudget(t, f)
+		for path := range catalog.PublishReads {
+			catalog.Reads[path] = true
 		}
 		operation = func() error { _, e := executeRecovery(context.Background(), p); return e }
 	} else {
@@ -170,8 +180,11 @@ func traceRecoveryChild(t *testing.T, mode string, inject bool) {
 	type call struct {
 		nr, fd, flags uint64
 		path          string
+		offset        uint64
 	}
 	calls := map[int]call{}
+	offsets := map[uint64]uint64{}
+	readBudgetUsed := map[string]recoveryReadBudget{}
 	var catalog recoveryTraceCatalog
 	held := false
 	fences, events, reads, unlinks := 0, 0, 0, 0
@@ -230,22 +243,26 @@ func traceRecoveryChild(t *testing.T, mode string, inject bool) {
 							forbid("predecessor/index flock under F: %s", path)
 						}
 						if path == catalog.Root+"/fence/authority.lock" {
-							calls[tid] = call{nr, fd, arg2, path}
+							calls[tid] = call{nr, fd, arg2, path, 0}
 						}
 					} else if held && own && (nr == unix.SYS_READ || nr == unix.SYS_PREAD64 || nr == unix.SYS_GETDENTS64) {
-						if mode != "publish" && (!catalog.Reads[path] || nr == unix.SYS_GETDENTS64) {
+						if !catalog.Reads[path] || nr == unix.SYS_GETDENTS64 {
 							forbid("extra read/scan under F: %s syscall %d", path, nr)
 						}
 						if strings.Contains(path, "owner-index") {
 							forbid("index read under F: %s", path)
 						}
-						calls[tid] = call{nr, fd, 0, path}
+						offset := offsets[fd]
+						if nr == unix.SYS_PREAD64 {
+							offset = binary.LittleEndian.Uint64(info[56:])
+						}
+						calls[tid] = call{nr, fd, 0, path, offset}
 					} else if held && nr == unix.SYS_OPENAT {
-						calls[tid] = call{nr, fd, 0, path}
+						calls[tid] = call{nr, fd, 0, path, 0}
 					} else if held && own && nr == unix.SYS_FSYNC {
-						calls[tid] = call{nr, fd, 0, path}
+						calls[tid] = call{nr, fd, 0, path, 0}
 					} else if nr == unix.SYS_CLOSE && events == 0 && own && (mode == "close" || mode == "primary") && path == catalog.Target {
-						calls[tid] = call{nr, fd, 0, path}
+						calls[tid] = call{nr, fd, 0, path, 0}
 					}
 					if held && nr == unix.SYS_UNLINKAT && own {
 						var name [256]byte
@@ -284,6 +301,7 @@ func traceRecoveryChild(t *testing.T, mode string, inject bool) {
 						}
 					case unix.SYS_OPENAT:
 						if result >= 0 {
+							offsets[uint64(result)] = 0
 							path, _ := os.Readlink(fmt.Sprintf("/proc/%d/fd/%d", tid, result))
 							st, e := os.Stat(fmt.Sprintf("/proc/%d/fd/%d", tid, result))
 							if e == nil && !st.IsDir() && mode != "publish" {
@@ -294,6 +312,23 @@ func traceRecoveryChild(t *testing.T, mode string, inject bool) {
 							}
 						}
 					case unix.SYS_READ, unix.SYS_PREAD64:
+						if result >= 0 {
+							if c.nr == unix.SYS_READ {
+								offsets[c.fd] = c.offset + uint64(result)
+							}
+							if mode == "publish" {
+								used := readBudgetUsed[c.path]
+								used.Bytes += result
+								if c.offset == 0 {
+									used.Starts++
+								}
+								readBudgetUsed[c.path] = used
+								limit := catalog.PublishReads[c.path]
+								if used.Bytes > limit.Bytes || used.Starts > limit.Starts {
+									forbid("extra publisher read budget under F: %s got=%+v limit=%+v", c.path, used, limit)
+								}
+							}
+						}
 						if result > 0 {
 							bytesRead += result
 							reads++
@@ -347,6 +382,13 @@ func traceRecoveryChild(t *testing.T, mode string, inject bool) {
 			}
 		}
 	}
+	if mode == "publish" {
+		for path, want := range catalog.PublishReads {
+			if got := readBudgetUsed[path]; got != want {
+				forbid("publisher read budget mismatch under F: %s got=%+v want=%+v", path, got, want)
+			}
+		}
+	}
 	expectedEvents := 0
 	if mode == "close" || mode == "sync" || mode == "primary" {
 		expectedEvents = 1
@@ -366,4 +408,50 @@ func recoveryTraceEIO(t *testing.T, tid int) {
 	if e := unix.PtraceSetRegs(tid, &regs); e != nil {
 		t.Fatal(e)
 	}
+}
+
+// Claim: publication admits only the existing per-file read starts and bytes,
+// including reads reached through helpers. The owned child still executes the
+// real full publication/barrier sequence; this is not native qualification.
+func TestManagerRecoveryPublisherReadBudget(t *testing.T) {
+	traceRecoveryChild(t, "publish", false)
+}
+
+// The fresh held fixture has four publications. Each checks the three heads
+// before and after; initial, post-repair and cleanup checks add three. Each
+// replacement reads its predecessor twice and its successor once. Journal and
+// marker Compare each read once. Derive lengths from the independent fixture
+// transcript, never from the syscalls or the production call graph under test.
+func recoveryPublisherReadBudget(t *testing.T, f *recoveryFixture) map[string]recoveryReadBudget {
+	t.Helper()
+	budgets := map[string]recoveryReadBudget{}
+	add := func(rel string, bytes, starts int64) {
+		path := filepath.Join(f.root, rel)
+		old := budgets[path]
+		old.Bytes += bytes
+		old.Starts += starts
+		budgets[path] = old
+	}
+	headChecks := int64(2*len(f.c.closure.guards) + 3)
+	for _, name := range []string{"root.json", "floor.json", "intent.json"} {
+		raw, e := os.ReadFile(filepath.Join(f.root, "auth", name))
+		if e != nil {
+			t.Fatal(e)
+		}
+		add("auth/"+name, int64(len(raw))*headChecks, headChecks)
+	}
+	add("generations/journal", int64(len(f.c.closure.accepted.journal)), 1)
+	marker, e := os.ReadFile(filepath.Join(f.root, "generations/writer.pending"))
+	if e != nil {
+		t.Fatal(e)
+	}
+	add("generations/writer.pending", int64(len(marker)), 1)
+	previous := f.c.guard.Length()
+	add("auth/guard.json", previous, 1)
+	for _, guard := range f.c.closure.guards {
+		next := int64(len(guard.Bytes()))
+		add("auth/guard.json", 2*previous+next, 3)
+		previous = next
+	}
+	return budgets
 }
