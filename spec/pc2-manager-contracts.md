@@ -112,8 +112,10 @@ the exact installation/boot/profile and publication ancestry, opens the actual
 fixed package entries through authenticated directory anchors, and compares
 fstat/name/device/inode/owner/mode/link identities. Checked native device
 conversion supplies the key service's device/inode pin; caller structs do not
-select it. Retain the descriptor identities and exclusion against replacement
-through use, rechecking bounded local identities at the terminal fence. A head
+select it. Retain authenticated identities and exclusion against replacement
+through use. Terminal checks compare F_auth's current identity to those retained
+native pins and their protected epoch; no extra package-file open/read is allowed
+in G4's final read set. A head
 rolled back alongside the file is not independently current (§6).
 
 The future manager-owned prepare/check capability must be process-local,
@@ -133,6 +135,21 @@ attempt/hold/recovery histories and the five manager class inventories in G4
 classes. A pure capacity calculator accepting maps supplies no census authority.
 One aggregate limit is **268435456 bytes**; the single manager slot is part of
 that same limit, not an additional manager allowance.
+
+The root manager/coordinator is the sole publisher of this head and its
+immutable objects, using the protected custody and durable replacement rules
+in §5.1. Manager inventory is G4's exact <=65536-byte object, with every member
+required:
+
+```text
+{version:"pc2-manager-inventory/1",revision:N,previous_digest:D|null,
+ attempts_digest:D,holds_digest:D,recovery_digest:D,materialized_bytes:Z,
+ objects:Z,slot_reservation:D}
+```
+
+The five per-class objects use the unchanged G4
+`keymaker-capacity-inventory/1` codec. No new census wrapper or optional owner
+field broadens these formats.
 
 | Manager class | Complete charged population |
 |---|---|
@@ -414,3 +431,108 @@ remaining write/fsync and a qualified filesystem recovery barrier, not PID or
 timer evidence. Root recovery may block indefinitely on storage/authority loss;
 affected issuance stays suppressed and withdrawal completion cannot be promised
 within a finite crash-recovery deadline.
+
+## 6. C0 and independently current floor custody (G5-E)
+
+The manager publishes a **consumer** boundary, not a genesis authority. Its
+bootstrap consumer accepts only exact retained G4 C0/Q0 bytes plus original
+authorization from the independently admitted deployment/bootstrap authority.
+Validate their closed codecs, protected custody, installation/incarnation,
+epoch, Q0 digest and permission for this first initialization, and prove that
+authorization is independently current with old/restored writers excluded.
+An owner-supplied boolean, signature without a qualified authority binding,
+local root ownership or a matching checksum is not that proof. The authority's
+authorization/continuity codec, trust root and privilege/durability API remain
+**Q2/G2 owner decisions**; absent publication keeps this consumer refusing.
+
+Enforce the existing acyclic sequence without a new phase or serving format:
+
+`actual old inventories + bounded future tickets -> Q0 -> independent C0 commit
+-> M0(slot_reservation=D(Q0)) -> full participants/class inventories -> Q1 -> R0`.
+
+Before M0, verify durable protected Q0/C0 and the independent commit/currentness
+receipt through that owner's admitted API. Q0 includes its own/C0/M0/R0 and
+migration/guard/recovery/staging/integrity growth under the same 256 MiB peak.
+M0's empty history digests require authentic first-state evidence; they are not
+inferred from missing files. Q1 counts materialized Q0/C0/M0 and the remaining
+single credit, with once-only conversion. Retain C0 as capacity_genesis history,
+Q0 as reservation metadata and the original authorization. Validate these fully
+outside F_auth using G4 participants; add no final-window C0/provider read.
+C0 alone neither serves nor permits consuming the slot: final R0/floor/guard
+and cleanup must be eligible first. No future M0 hash in Q0 or uncommitted Q1
+reference in M0 is allowed.
+
+Unknown C0 outcome is a separate unresolved bootstrap incident. Preserve exact
+evidence and exclusion, refuse M0/R0/slot use and ask the owning admitted
+bootstrap recovery API to establish that **same** commit's outcome. Do not
+reinitialize, fabricate its receipt or clear a PC2 guard to resolve it. C0 is
+**not** an authority transaction or a `pc2-hold/1` origin. Only the exact
+`keymaker-authority-tx/1` transaction ID may originate an authority hold,
+including R0 with an independently authorized zero journal checkpoint; an
+activation hold still uses the immutable A2 attempt ID. No new origin domain,
+bootstrap ledger codec or C0 recovery authority is invented here.
+
+The manager owns full journal/attempt/effect ancestry checks, durable local
+high-waters and exact admitted continuity comparisons. Each consumer retains
+its own journal floor; another consumer's saved floor does not prove ours was
+stored. Seq=0 requires the exact zero hash and independently authorized unused
+genesis; positive history/floors never reset during combined migration or boot.
+The owner must provide independently current **per-transaction** custody of
+root/link/guard, incarnation/revision/counter, journal floor and all unresolved
+obligations outside the restored failure domain, plus old-instance exclusion.
+That includes C0/Q0 and transitions to protected reader/authority floor 3.
+Local floor files, fs-verity, process randomness, TTL or a startup-only backup
+cannot prove latestness after coherent restore. No silent floor-2-to-3 upgrade,
+lost-state bootstrap, larger bound or automatic option-C witness activation is
+authorized. [K5](activation-order.md#65-k5--process-instance-durable-incarnation-and-restore)
+and [journal restore rules](generation-journal.md#8-crashes-restore-and-explicit-reconciliation)
+remain mandatory, with honest-mode-A limitations unchanged.
+
+## 7. Publication ownership and remaining decisions
+
+The four missing inputs named by the key service map as follows. Publishing
+this spec supplies their manager-side requirements; implementations and owner
+acceptance/qualification still have to supply authentic runtime inputs.
+
+| Key-service prerequisite | Our published sections / ownership | Remaining gate |
+|---|---|---|
+| P1 — Authenticated package-fence identity | §2: root package/deployment publication, fixed native origin, protected refresh/prepare/check and alias rejection | Package/platform owners admit namespace/filesystem/profile participation and replacement custody; key service consumes the authentic provider, not explicit fixture pins |
+| P2 — Complete cross-owner capacity/credit | §3: five-class manager census, complete retained histories, final-head currency and one pre-funded conversion | Both owners implement/accept census and common reservation lifecycle, exact native-copy/integrity sizing and pending ownership; no second 256 MiB allowance |
+| P3 — Protected participants/common writer and recovery ownership | §4 journal lifetime/S4 and §5 root coordinator, direct manager release consumption and root-owned participant installation | G5-A/C plus platform/root-policy/participant owners publish privileges, all-writer exclusion, old/restored-writer termination and qualified sync/call graph; no hidden locks or RPC |
+| P4 — Independent C0/floor transition | §6 manager's exact C0/Q0/M0/Q1/R0 consumer, floor checks and preserved origins | Q2/G2 and G5-E owner publishes independent authorization/latestness/commit and C0 recovery; manager cannot create that authority |
+
+Open decisions are owned, not implicit permission:
+
+| ID | Owner | Artifact/decision required; state while absent |
+|---|---|---|
+| MC-Q1 / P1 | Deployment/package and platform owners | Admit the package publication's profile, mount/namespace provenance and protected head/currentness/replacement protocol; qualify actual native-writer lock conflict. No authenticated F_pkg provider until then |
+| MC-Q2 / G5-B / P2 | Manager and key-service capacity owners | Accept complete class/object ownership, pending-slot interpretation, exact prospective inventory/metadata/native-copy bounds and once-only materialization under every crash cut. Pre-funded credit is never permission for an unspecified census |
+| MC-Q3 / G5-A / P3 | Generation-journal and manager owners | Implement and review AppendPreparedLifetime with guard entry/unwind, all-exit reverse release and unchanged outcome/budget tests. Existing AppendPrepared remains insufficient |
+| MC-Q4 / G5-C / P3 | Platform, root-policy and each participant owner | Publish who may install root policy/ten participant roles, offline coordinator authentication and writer termination, service stop/start authority, direct read-only sync privileges and latency. No new root privilege for a participant by assumption |
+| MC-Q5 / Q2 / G2 / G5-E / P4 | Deployment/bootstrap and independent restore-custody owners | Select original authorization and independent per-transaction latestness/old-writer exclusion, C0 commit/unknown recovery and protected floor transition APIs. No genesis or floor authority inferred locally |
+| MC-Q6 / joint PC2 | Manager and key-service protocol owners | Resolve observation absorption versus RPC correlation and independently current custody; accept potentially indefinite withdrawal-completion blocking on failed recovery. This spec does not close any of the three joint gates |
+| MC-Q7 / G5-D | Message-authority/provider owners | Publish original cumulative/restore/time/scope/WC1 evidence and continuity/privilege interfaces. Manager neither fabricates provider evidence nor persists runtime receipt authority |
+
+The [central open questions](../UNRESOLVED_QUESTIONS.md#pc2-manager-contract-publication-gates)
+track these publications. Ordinary operator/observer authentication, metadata-only
+creating-target checks, independent admission/boot guards, filesystem/verity G6
+qualification and actual latency/crash tests remain separate. Neither this
+document nor G4 golden vectors close G5-D, Q2/G2 or the three joint PC2 gates.
+
+## 8. Documentation validation and limits
+
+Check local and pinned source links, the twelve complete negative/control rows,
+P1–P4 mapping and MC-Q1–MC-Q7 owners, package publication grammar/bounds,
+unchanged A2 origin/codec rules, fixed final read set and original deadlines.
+Bounded malformed document controls must detect omitted package provenance,
+capacity class, lifetime/reverse-release requirement, release sync, C0 authority
+boundary and broken links, alongside the valid complete document. These checks
+prove document coverage only; they cannot qualify a native provider, filesystem,
+census, all-exit guard, crash walk or recovery authority. No runtime code changes
+or full suite are called for by this specification-only delta.
+
+| Tool | Exact entry / purpose | Output |
+|---|---|---|
+| Git | `git diff --check`; `git verify-commit <sha>` | Whitespace, bounded scope and signed-object evidence |
+| Python 3 | `python3 <task-local-doc-checker.py>` | Local link/section/contract coverage and malformed-document control logs in task-local untracked scratch |
+| GitHub CLI / Git | `gh pr view 35 --repo relux-works/swarma-keymaker`; read-only clone of the pinned G4 source | Original public prerequisite/format context, retained outside versioned product files; no publication or runtime qualification |
