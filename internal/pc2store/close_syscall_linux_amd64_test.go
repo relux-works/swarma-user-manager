@@ -24,7 +24,7 @@ import (
 // public result; controls execute the same syscalls without changing the return.
 // Only owned test children are traced. This does not simulate power loss.
 func TestPC2StoreCloseErrors(t *testing.T) {
-	for _, mode := range []string{"publish", "inspect", "reconcile", "parent", "primary"} {
+	for _, mode := range []string{"publish", "inspect", "reconcile", "parent", "acquire-parent", "primary"} {
 		for _, inject := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/inject=%v", mode, inject), func(t *testing.T) {
 				traceCloseChild(t, mode, inject)
@@ -59,6 +59,7 @@ func TestPC2StoreCloseHelper(t *testing.T) {
 		}
 	}
 	before := closeSnapshot(t, root)
+	beforeFDs := closeFDCount(t, root)
 	armed := false
 	arm := func() {
 		if e := os.WriteFile(os.Getenv("PC2_CLOSE_ARM"), []byte("ready"), 0600); e != nil {
@@ -80,7 +81,7 @@ func TestPC2StoreCloseHelper(t *testing.T) {
 	switch mode {
 	case "publish", "parent":
 		got, e = s.Publish(h, f.Allocations[0].Ticket, o)
-	case "inspect":
+	case "inspect", "acquire-parent":
 		_, e = s.Inspect()
 	case "reconcile":
 		got, e = s.Reconcile(prior.Head)
@@ -100,7 +101,7 @@ func TestPC2StoreCloseHelper(t *testing.T) {
 		}
 	} else if injected {
 		want := ErrIndeterminate
-		if mode == "inspect" {
+		if mode == "inspect" || mode == "acquire-parent" {
 			want = ErrUnavailable
 		}
 		if !errors.Is(e, want) || got != (Receipt{}) {
@@ -112,18 +113,28 @@ func TestPC2StoreCloseHelper(t *testing.T) {
 	if injected && !errors.Is(e, unix.EIO) {
 		t.Fatal("close EIO was discarded", e)
 	}
+	if gotFDs := closeFDCount(t, root); gotFDs != beforeFDs {
+		t.Fatalf("cleanup leaked a store descriptor: before=%d after=%d", beforeFDs, gotFDs)
+	}
 	after := closeSnapshot(t, root)
 	for name, raw := range before {
 		if name == filepath.Join(indexDir, "head.json") {
 			continue
 		}
-		if !bytes.Equal(after[name], raw) {
+		if got, ok := after[name]; !ok || !bytes.Equal(got, raw) {
 			t.Fatal("lost retained bytes", name)
 		}
 	}
-	if mode == "inspect" || mode == "reconcile" || mode == "primary" {
+	if mode == "inspect" || mode == "reconcile" || mode == "acquire-parent" || mode == "primary" {
 		if len(before) != len(after) {
 			t.Fatal("read/recovery/refusal changed retained namespace")
+		}
+	}
+	if mode == "acquire-parent" && injected {
+		// Closing the acquisition directory failed after flock succeeded. The
+		// lock description must be released before the opener refuses transfer.
+		if _, err := s.Inspect(); err != nil {
+			t.Fatal("failed acquisition retained writer exclusion", err)
 		}
 	}
 	if mode == "publish" && injected {
@@ -134,6 +145,25 @@ func TestPC2StoreCloseHelper(t *testing.T) {
 			t.Fatal("retained publication cannot replay", r, err)
 		}
 	}
+}
+
+func closeFDCount(t *testing.T, root string) int {
+	t.Helper()
+	entries, e := os.ReadDir("/proc/self/fd")
+	if e != nil {
+		t.Fatal(e)
+	}
+	count := 0
+	for _, entry := range entries {
+		path, e := os.Readlink("/proc/self/fd/" + entry.Name())
+		if e != nil && !errors.Is(e, os.ErrNotExist) {
+			t.Fatal(e)
+		}
+		if path == root || strings.HasPrefix(path, root+"/") {
+			count++
+		}
+	}
+	return count
 }
 
 func closeSnapshot(t *testing.T, root string) map[string][]byte {
@@ -185,12 +215,15 @@ func traceCloseChild(t *testing.T, mode string, inject bool) {
 	// Kill only our recorded child PID on a stuck trace; never attach elsewhere.
 	timer := time.AfterFunc(50*time.Second, func() { _ = cmd.Process.Kill() })
 	defer timer.Stop()
+	reaped := false
 	defer func() {
-		_ = cmd.Process.Kill()
-		for {
-			var status unix.WaitStatus
-			if _, e := unix.Wait4(-1, &status, unix.WALL, nil); errors.Is(e, unix.ECHILD) {
-				break
+		if !reaped {
+			_ = cmd.Process.Kill()
+			for {
+				var status unix.WaitStatus
+				if _, e := unix.Wait4(-1, &status, unix.WALL, nil); errors.Is(e, unix.ECHILD) {
+					break
+				}
 			}
 		}
 		_ = cmd.Process.Release()
@@ -211,13 +244,15 @@ func traceCloseChild(t *testing.T, mode string, inject bool) {
 	}
 	pending := map[int]target{}
 	released := map[[2]uint64]bool{}
-	events, exit := 0, -1
+	events, matches, exit := 0, 0, -1
 	for {
 		tid, e := unix.Wait4(-1, &status, unix.WALL, nil)
 		if errors.Is(e, unix.EINTR) {
 			continue
 		}
 		if errors.Is(e, unix.ECHILD) {
+			reaped = true
+			timer.Stop()
 			break
 		}
 		if e != nil {
@@ -252,8 +287,16 @@ func traceCloseChild(t *testing.T, mode string, inject bool) {
 					if mode == "parent" {
 						suffix, eligible = "/"+indexDir+"/pending", true
 					}
+					if mode == "acquire-parent" {
+						suffix, eligible = "/"+indexDir, true
+					}
 					if eligible && strings.HasPrefix(path, work+"/") && strings.HasSuffix(path, suffix) {
-						pending[tid] = target{fd, path}
+						matches++
+						// stillDir closes its independent descriptor first; the
+						// second is lock's owning acquisition-directory descriptor.
+						if mode != "acquire-parent" || matches == 2 {
+							pending[tid] = target{fd, path}
+						}
 					}
 				}
 			} else if info[0] == 2 { // syscall exit: kernel already closed it
