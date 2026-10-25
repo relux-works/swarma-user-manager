@@ -282,7 +282,7 @@ func TestQualificationClosedCodec(t *testing.T) {
 	}
 	delete(omitted, "station_names")
 	missing, _ := Canonical(omitted)
-	for _, b := range [][]byte{append(append([]byte{}, valid...), '\n'), bytes.Replace(valid, []byte(`"format":"station-qualification/2"`), []byte(`"format":"station-qualification/1"`), 1), append([]byte(`{"extra":0,`), valid[1:]...), append([]byte(`{"boot_id":"`+bootOne+`",`), valid[1:]...), missing, bytes.Replace(valid, []byte(`"reason":"","result":"ok"`), []byte(`"result":"ok"`), 1), bytes.Replace(valid, []byte(`"issued_at_unix_ms":1000`), []byte(`"issued_at_unix_ms":9223372036854775808`), 1)} {
+	for _, b := range [][]byte{append(append([]byte{}, valid...), '\n'), bytes.Replace(valid, []byte(`"format":"station-qualification/3"`), []byte(`"format":"station-qualification/1"`), 1), append([]byte(`{"extra":0,`), valid[1:]...), append([]byte(`{"boot_id":"`+bootOne+`",`), valid[1:]...), missing, bytes.Replace(valid, []byte(`"reason":"","result":"ok"`), []byte(`"result":"ok"`), 1), bytes.Replace(valid, []byte(`"issued_at_unix_ms":1000`), []byte(`"issued_at_unix_ms":9223372036854775808`), 1)} {
 		if _, e := Decode(b, p); e != ErrRequired {
 			t.Fatalf("bad record accepted: %s", b)
 		}

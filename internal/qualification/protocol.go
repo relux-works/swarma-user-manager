@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/relux-works/swarma-user-manager/internal/linuxos"
 	"github.com/relux-works/swarma-user-manager/internal/manager"
 )
 
@@ -47,6 +48,12 @@ type Protocol struct {
 // Issue withdraws the prior record before any checks. A failed retry cannot
 // preserve an earlier success. It never mutates policy or repairs deployment.
 func (s Protocol) Issue(ctx context.Context, p manager.Policy, bootMode bool) (Record, error) {
+	return s.issue(ctx, p, bootMode, linuxos.EffectiveCapabilities)
+}
+
+// The sampler argument is private for fault tests; the public issuer always
+// samples the kernel. Neither deployment inputs nor callers supply CapEff.
+func (s Protocol) issue(ctx context.Context, p manager.Policy, bootMode bool, readCaps func() (string, error)) (Record, error) {
 	fail := func(stage, check string) (Record, error) { return Record{}, refuse(ctx, stage, check) }
 	if s.Deployment == nil || s.Storage == nil || s.Boot == nil || s.Now == nil || manager.ValidatePolicy(p) != nil || !p.NoLauncher {
 		return fail("policy", "protocol_configuration")
@@ -85,6 +92,10 @@ func (s Protocol) Issue(ctx context.Context, p manager.Policy, bootMode bool) (R
 	}
 	if s.Storage.Withdraw(ctx) != nil {
 		return fail("withdraw", "prior_record")
+	}
+	caps, e := readCaps()
+	if e != nil || !validEffectiveCapabilities(caps) {
+		return fail("issuer", "effective_capabilities")
 	}
 	boot, e := s.Boot()
 	if e != nil || !bootID.MatchString(boot) {
@@ -134,7 +145,11 @@ func (s Protocol) Issue(ctx context.Context, p manager.Policy, bootMode bool) (R
 	if e != nil || current != boot {
 		return fail("recapture", "boot_changed")
 	}
-	q := Record{Issuer: issuer, Format: "station-qualification/2", Inputs: i, InputsDigest: digest, StationNames: names, Checks: checks, BootID: boot, IssuedAtUnixMS: s.Now().UnixMilli()}
+	finalCaps, e := readCaps()
+	if e != nil || finalCaps != caps || !validEffectiveCapabilities(finalCaps) {
+		return fail("recapture", "effective_capabilities")
+	}
+	q := Record{EffectiveCapabilities: caps, Issuer: issuer, Format: RecordFormat, Inputs: i, InputsDigest: digest, StationNames: names, Checks: checks, BootID: boot, IssuedAtUnixMS: s.Now().UnixMilli()}
 	raw, e := Canonical(q)
 	if e != nil {
 		return fail("record", "encoding")

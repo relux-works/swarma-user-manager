@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/relux-works/swarma-registrar/ccj"
@@ -17,6 +18,8 @@ import (
 )
 
 var ErrRequired = errors.New("qualification_required")
+
+const RecordFormat = "station-qualification/3"
 
 const ZeroDigest = "0000000000000000000000000000000000000000000000000000000000000000"
 
@@ -98,14 +101,15 @@ func ValidInvocationID(s string) bool {
 }
 
 type Record struct {
-	Issuer         Issuer   `json:"issuer"`
-	Format         string   `json:"format"`
-	Inputs         Inputs   `json:"inputs"`
-	InputsDigest   string   `json:"inputs_digest"`
-	StationNames   []string `json:"station_names"`
-	Checks         Checks   `json:"checks"`
-	BootID         string   `json:"boot_id"`
-	IssuedAtUnixMS int64    `json:"issued_at_unix_ms"`
+	EffectiveCapabilities string   `json:"effective_capabilities"`
+	Issuer                Issuer   `json:"issuer"`
+	Format                string   `json:"format"`
+	Inputs                Inputs   `json:"inputs"`
+	InputsDigest          string   `json:"inputs_digest"`
+	StationNames          []string `json:"station_names"`
+	Checks                Checks   `json:"checks"`
+	BootID                string   `json:"boot_id"`
+	IssuedAtUnixMS        int64    `json:"issued_at_unix_ms"`
 }
 
 func Hash(b []byte) string { h := sha256.Sum256(b); return hex.EncodeToString(h[:]) }
@@ -205,6 +209,17 @@ func validNames(names []string, p manager.Policy) bool {
 	}
 	return true
 }
+
+// The version-3 field is exactly the 64-bit kernel CapEff mask, lowercase hex.
+// A retained CAP_NET_ADMIN or absent/malformed evidence cannot qualify D1.
+func validEffectiveCapabilities(s string) bool {
+	if len(s) != 16 || strings.ToLower(s) != s {
+		return false
+	}
+	v, err := strconv.ParseUint(s, 16, 64)
+	return err == nil && strings.IndexFunc(s, func(r rune) bool { return !(r >= '0' && r <= '9' || r >= 'a' && r <= 'f') }) < 0 && v&(1<<12) == 0
+}
+
 func (q Record) Validate(p manager.Policy) error {
 	if q.Issuer.Mode == "initial" {
 		if q.Issuer.InvocationID != "" {
@@ -213,7 +228,7 @@ func (q Record) Validate(p manager.Policy) error {
 	} else if q.Issuer.Mode != "boot" || !ValidInvocationID(q.Issuer.InvocationID) {
 		return ErrRequired
 	}
-	if q.Format != "station-qualification/2" || q.Inputs.Validate(p) != nil || !validNames(q.StationNames, p) || !q.Checks.valid() || !bootID.MatchString(q.BootID) || q.IssuedAtUnixMS <= 0 {
+	if q.Format != RecordFormat || !validEffectiveCapabilities(q.EffectiveCapabilities) || q.Inputs.Validate(p) != nil || !validNames(q.StationNames, p) || !q.Checks.valid() || !bootID.MatchString(q.BootID) || q.IssuedAtUnixMS <= 0 {
 		return ErrRequired
 	}
 	h, e := q.Inputs.Digest()

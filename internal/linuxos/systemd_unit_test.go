@@ -48,7 +48,7 @@ func validateQualificationUnit(text, consumer string) error {
 		"Service/StandardInput": "null", "Service/StandardOutput": "journal", "Service/StandardError": "journal",
 		"Service/Environment":             "PATH=/usr/sbin:/usr/bin LANG=C LC_ALL=C",
 		"Service/UnsetEnvironment":        "LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT GLIBC_TUNABLES GCONV_PATH LOCPATH",
-		"Service/RestrictAddressFamilies": "AF_UNIX", "Service/IPAddressDeny": "any",
+		"Service/RestrictAddressFamilies": "AF_UNIX AF_NETLINK", "Service/CapabilityBoundingSet": "~CAP_NET_ADMIN", "Service/IPAddressDeny": "any",
 		"Service/SystemCallFilter":        "~io_uring_setup io_uring_enter io_uring_register",
 		"Service/SystemCallArchitectures": "native", "Service/NoNewPrivileges": "yes",
 		"Service/RestrictSUIDSGID": "no", "Service/RestrictRealtime": "yes", "Service/LockPersonality": "yes", "Service/RestrictNamespaces": "yes",
@@ -105,11 +105,14 @@ func TestSystemdQualificationUnit(t *testing.T) {
 	})
 	// Negative controls require rejection of the intended contract violation.
 	for name, text := range map[string]string{
-		"network":       strings.Replace(string(b), "RestrictAddressFamilies=AF_UNIX", "RestrictAddressFamilies=AF_UNIX AF_INET", 1),
-		"argv":          strings.Replace(string(b), "qualify --boot", "qualify", 1),
-		"hidden-host":   "[Service]\nPrivateTmp=yes\n" + string(b),
-		"extra-command": string(b) + "\n[Service]\nExecStartPre=/usr/bin/true\n",
-		"duplicate":     string(b) + "\n[Service]\nUser=station\n",
+		"d1-old-family":  strings.Replace(string(b), "RestrictAddressFamilies=AF_UNIX AF_NETLINK", "RestrictAddressFamilies=AF_UNIX", 1),
+		"d1-cap-admin":   strings.Replace(string(b), "CapabilityBoundingSet=~CAP_NET_ADMIN", "CapabilityBoundingSet=CAP_NET_ADMIN", 1),
+		"d1-cap-missing": strings.Replace(string(b), "CapabilityBoundingSet=~CAP_NET_ADMIN\n", "", 1),
+		"network":        strings.Replace(string(b), "RestrictAddressFamilies=AF_UNIX", "RestrictAddressFamilies=AF_UNIX AF_INET", 1),
+		"argv":           strings.Replace(string(b), "qualify --boot", "qualify", 1),
+		"hidden-host":    "[Service]\nPrivateTmp=yes\n" + string(b),
+		"extra-command":  string(b) + "\n[Service]\nExecStartPre=/usr/bin/true\n",
+		"duplicate":      string(b) + "\n[Service]\nUser=station\n",
 	} {
 		t.Run(name, func(t *testing.T) {
 			if e := validateQualificationUnit(text, string(c)); e == nil {

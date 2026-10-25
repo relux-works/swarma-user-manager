@@ -156,6 +156,9 @@ func TestQualificationUnitProfile(t *testing.T) {
 	raw := string(b)
 	bin := "/opt/swarma/libexec/swarma-user-manager"
 	for name, bad := range map[string]string{
+		"d1-old-family":     strings.Replace(raw, "RestrictAddressFamilies=AF_UNIX AF_NETLINK", "RestrictAddressFamilies=AF_UNIX", 1),
+		"d1-cap-admin":      strings.Replace(raw, "CapabilityBoundingSet=~CAP_NET_ADMIN", "CapabilityBoundingSet=CAP_NET_ADMIN", 1),
+		"d1-cap-missing":    strings.Replace(raw, "CapabilityBoundingSet=~CAP_NET_ADMIN\n", "", 1),
 		"openat2-blocked":   strings.Replace(raw, "RestrictSUIDSGID=no", "RestrictSUIDSGID=yes", 1),
 		"argv":              strings.Replace(raw, " --boot", "", 1),
 		"root":              strings.Replace(raw, "User=root", "User=daemon", 1),
@@ -171,6 +174,9 @@ func TestQualificationUnitProfile(t *testing.T) {
 		"duplicate-command": strings.Replace(raw, "[Service]", "[Service]\nExecStart=/bin/true", 1),
 	} {
 		t.Run(name, func(t *testing.T) {
+			if bad == raw {
+				t.Fatal("unit plant not applied")
+			}
 			if e := validateQualificationUnit(bad, bin); e != qualification.ErrRequired {
 				t.Fatal("bad unit admitted or wrong refusal", e)
 			}

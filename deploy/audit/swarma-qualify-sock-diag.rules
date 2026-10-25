@@ -1,0 +1,1 @@
+-a always,exit -F arch=b64 -S socket -F a0=16 -F a1=524291 -F a2=4 -F exe=/opt/swarma/libexec/swarma-user-manager -k swarma-qualify-sock-diag

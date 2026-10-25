@@ -49,7 +49,7 @@ func validateQualificationUnit(raw, binary string) error {
 		"StandardInput": "null", "StandardOutput": "journal", "StandardError": "journal",
 		"Environment":             "PATH=/usr/sbin:/usr/bin LANG=C LC_ALL=C",
 		"UnsetEnvironment":        "LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT GLIBC_TUNABLES GCONV_PATH LOCPATH",
-		"RestrictAddressFamilies": "AF_UNIX", "IPAddressDeny": "any",
+		"RestrictAddressFamilies": "AF_UNIX AF_NETLINK", "CapabilityBoundingSet": "~CAP_NET_ADMIN", "IPAddressDeny": "any",
 		"SystemCallFilter":        "~io_uring_setup io_uring_enter io_uring_register",
 		"SystemCallArchitectures": "native", "NoNewPrivileges": "yes",
 		"RestrictSUIDSGID": "no", "RestrictRealtime": "yes",
