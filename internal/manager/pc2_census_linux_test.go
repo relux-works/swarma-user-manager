@@ -428,7 +428,7 @@ func TestManagerPreparedCensusIsolation(t *testing.T) {
 		if decodePreparedClass(t, p, kind).Kind != kind {
 			t.Fatal("class selection", kind)
 		}
-		original := p.ClassBytes(kind)
+		original := bytes.Clone(p.ClassBytes(kind))
 		returned := p.ClassBytes(kind)
 		returned[0] ^= 1
 		if !bytes.Equal(original, p.ClassBytes(kind)) {
@@ -436,7 +436,7 @@ func TestManagerPreparedCensusIsolation(t *testing.T) {
 		}
 	}
 	for _, access := range []func() []byte{p.HeadBytes, p.EvidenceBytes} {
-		before := access()
+		before := bytes.Clone(access())
 		after := access()
 		after[0] ^= 1
 		if !bytes.Equal(before, access()) {
