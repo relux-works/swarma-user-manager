@@ -21,7 +21,7 @@ import (
 // Claim: real complete fixtures yield all five exact G4 inventories and no
 // writes; missing retained class population or physical evidence refuses.
 func TestManagerCensusCompleteness(t *testing.T) {
-	f := newCensusFixture(t, censusOptions{staging: true})
+	f := newCensusFixture(t, censusOptions{staging: true, nativeStage: true})
 	before := censusTreeBytes(t, f.root)
 	p, e := prepareManagerCensus(f.c)
 	if e != nil {
@@ -32,7 +32,7 @@ func TestManagerCensusCompleteness(t *testing.T) {
 			t.Fatal(kind, e)
 		}
 	}
-	if len(decodePreparedClass(t, p, "staging").Objects) != 1 {
+	if len(decodePreparedClass(t, p, "staging").Objects) != 2 {
 		t.Fatal("retained staging copy omitted")
 	}
 	if v, _ := p.Slot(); v != SlotUnspent {
@@ -184,6 +184,61 @@ func TestManagerCensusCurrency(t *testing.T) {
 // Claim: native namespace reconciliation refuses unindexed evidence/partials,
 // including otherwise readable bytes, and never deletes or repairs them.
 func TestManagerNativeIndexClosure(t *testing.T) {
+	t.Run("registered-rename", func(t *testing.T) {
+		f := newCensusFixture(t, censusOptions{nativeRename: true})
+		p := censusValid(t, f.c)
+		if len(decodePreparedClass(t, p, "staging").Objects) != 0 || len(decodePreparedClass(t, p, "recovery").Objects) != 4 {
+			t.Fatal("rename counted twice or in wrong class")
+		}
+		if _, e := os.Stat(filepath.Join(f.root, "effects/.write-"+strings.Repeat("e", 32))); !errors.Is(e, os.ErrNotExist) {
+			t.Fatal("old raw temporary unexpectedly retained", e)
+		}
+	})
+	t.Run("registered-replacement", func(t *testing.T) {
+		f := newCensusFixture(t, censusOptions{nativeReplace: true})
+		p := censusValid(t, f.c)
+		if len(decodePreparedClass(t, p, "recovery").Objects) != 3 {
+			t.Fatal("replaced raw image required twice")
+		}
+		var evidence censusEvidence
+		if e := json.Unmarshal(p.EvidenceBytes(), &evidence); e != nil || evidence.Held < 8388608+128 {
+			t.Fatal("replacement released old funding", e)
+		}
+		// Sum the original manifest independently, including the replaced lineage.
+		raw, e := os.ReadFile(filepath.Join(f.root, "pc2/inventory/owner-index/funding.json"))
+		if e != nil {
+			t.Fatal(e)
+		}
+		funding, e := treeCensus(raw)
+		if e != nil {
+			t.Fatal(e)
+		}
+		original := funding["metadata_bytes"].(int64) + funding["metadata_integrity"].(int64)
+		for _, key := range []string{"allocations", "native_allocations", "census_outputs"} {
+			for _, row := range funding[key].([]any) {
+				bound := row.(map[string]any)
+				original += bound["max_bytes"].(int64) + bound["integrity_bytes"].(int64)
+			}
+		}
+		if evidence.Envelope != original {
+			t.Fatal("replacement changed the original envelope", evidence.Envelope, original)
+		}
+	})
+	t.Run("unregistered-rename", func(t *testing.T) {
+		f := newCensusFixture(t, censusOptions{nativeStage: true})
+		censusValid(t, f.c)
+		for _, n := range f.native {
+			if n.Role == "effects-temporary" {
+				if e := os.Rename(filepath.Join(f.root, "effects", n.Name), filepath.Join(f.root, "effects", "evidence-"+n.Digest[7:]+".json")); e != nil {
+					t.Fatal(e)
+				}
+				censusSyncDir(t, filepath.Join(f.root, "effects"))
+			}
+		}
+		if e := censusRefuses(t, f.c); !errors.Is(e, errNativeCensus) {
+			t.Fatal("missing transition did not reach native bridge", e)
+		}
+	})
 	for _, name := range []string{".write-" + strings.Repeat("e", 32), "evidence-" + strings.Repeat("e", 64) + ".json"} {
 		t.Run(name, func(t *testing.T) {
 			f := newCensusFixture(t, censusOptions{})

@@ -41,6 +41,13 @@ func readCensusNative(d *pc2store.ReadDirectory, n pc2store.NativeObservation) (
 	if !ok {
 		return nativeCensusImage{}, errNativeCensus
 	}
+	if n.Destination != nil {
+		destination, ok := pc2store.NativeRoleCatalog(*n.Destination)
+		if !ok {
+			return nativeCensusImage{}, errNativeCensus
+		}
+		r.Cap = destination.Cap
+	}
 	mode := uint32(0600)
 	if n.Directory == "native-generations" {
 		mode = 0644

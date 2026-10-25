@@ -28,13 +28,14 @@ type censusFixture struct {
 	payloads []censusPayload
 }
 type censusOptions struct {
-	occupied, authority, marker bool
-	copies                      int
-	outputBound                 int64
-	spare                       bool
-	history, underfunded        bool
-	staging                     bool
-	allocated                   int
+	occupied, authority, marker              bool
+	copies                                   int
+	outputBound                              int64
+	spare                                    bool
+	history, underfunded                     bool
+	staging                                  bool
+	allocated                                int
+	nativeStage, nativeRename, nativeReplace bool
 }
 type censusPayload struct {
 	role, codec, copyID, ticket string
@@ -105,6 +106,22 @@ func censusDir(t *testing.T, path string, mode os.FileMode) {
 		t.Fatal(e)
 	}
 	if e := os.Chmod(path, mode); e != nil {
+		t.Fatal(e)
+	}
+}
+
+func censusSyncDir(t *testing.T, path string) {
+	t.Helper()
+	dir, e := os.Open(path)
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer func() {
+		if e := dir.Close(); e != nil {
+			t.Error(e)
+		}
+	}()
+	if e := dir.Sync(); e != nil {
 		t.Fatal(e)
 	}
 }
@@ -228,6 +245,10 @@ func newCensusFixture(t *testing.T, opt censusOptions) *censusFixture {
 		state.Floor, state.Revision = view.Tail, 1
 		nativeEvidence = h.s.evidence
 	}
+	priorState := clone(state)
+	if opt.nativeReplace {
+		state.Revision++
+	}
 	effects, e := effectBytes(state)
 	if e != nil {
 		t.Fatal(e)
@@ -238,6 +259,12 @@ func newCensusFixture(t *testing.T, opt censusOptions) *censusFixture {
 	}
 	seeds := []nativeSeed{{"generation-journal", "journal", f.journal}, {"effects-store", "effects.json", effects}, {"effects-ledger", "ledger.json", censusWire(t, view)}}
 	f.proof = censusFixtureCommit{Version: "pc2-census-fixture-commit/1", Installation: strings.Repeat("1", 32), Reservation: qRaw, OriginalIntents: []string{}, Origins: []string{}, Heads: []string{}, Effects: []State{clone(state)}}
+	if opt.nativeReplace {
+		f.proof.Effects = []State{priorState, clone(state)}
+	}
+	if opt.nativeStage || opt.nativeRename {
+		seeds = append(seeds, nativeSeed{"effects-temporary", ".write-" + strings.Repeat("e", 32), censusWire(t, map[string]any{"fixture": "registered-native-copy"})})
+	}
 	keys := make([]string, 0, len(nativeEvidence))
 	for key := range nativeEvidence {
 		keys = append(keys, key)
@@ -346,6 +373,7 @@ func newCensusFixture(t *testing.T, opt censusOptions) *censusFixture {
 	}
 	nativeAlloc := []pc2store.NativeAllocation{}
 	observations := []pc2store.NativeObservation{}
+	nativePrior := map[string]pc2store.NativeObservation{}
 	for i, s := range seeds {
 		r, _ := pc2store.NativeRoleCatalog(s.role)
 		dir := "effects"
@@ -354,17 +382,40 @@ func newCensusFixture(t *testing.T, opt censusOptions) *censusFixture {
 			dir = "generations"
 			mode = 0644
 		}
-		censusWrite(t, filepath.Join(root, dir, s.name), s.raw, mode)
+		var replaced pc2store.FileImage
+		if opt.nativeReplace && s.role == "effects-store" {
+			oldBytes, e := effectBytes(priorState)
+			if e != nil {
+				t.Fatal(e)
+			}
+			censusWrite(t, filepath.Join(root, dir, s.name), oldBytes, mode)
+			replaced, e = c.native[r.Directory].Read(s.name, uint32(mode), r.Cap)
+			if e != nil {
+				t.Fatal(e)
+			}
+			censusWrite(t, filepath.Join(root, dir, ".fixture-replacement"), s.raw, mode)
+			if e := os.Rename(filepath.Join(root, dir, ".fixture-replacement"), filepath.Join(root, dir, s.name)); e != nil {
+				t.Fatal(e)
+			}
+			censusSyncDir(t, filepath.Join(root, dir))
+		} else {
+			censusWrite(t, filepath.Join(root, dir, s.name), s.raw, mode)
+		}
 		image, e := c.native[r.Directory].Read(s.name, uint32(mode), r.Cap)
 		if e != nil {
 			t.Fatal(e)
 		}
 		id := fmt.Sprintf("%032x", 100+i)
-		ticket, e := pc2store.TicketID(q, "manager", r.Class, s.role, int64(i+1))
+		allocationRole := s.role
+		if s.role == "effects-temporary" {
+			allocationRole = "recovery-evidence"
+		}
+		allocationProfile, _ := pc2store.NativeRoleCatalog(allocationRole)
+		ticket, e := pc2store.TicketID(q, "manager", allocationProfile.Class, allocationRole, int64(i+1))
 		if e != nil {
 			t.Fatal(e)
 		}
-		nativeAlloc = append(nativeAlloc, pc2store.NativeAllocation{Ticket: ticket, CopyID: id, Role: s.role, Ordinal: int64(i + 1), MaxBytes: r.Cap, Integrity: 128, SourceOwner: "manager", SourceKind: r.Class})
+		nativeAlloc = append(nativeAlloc, pc2store.NativeAllocation{Ticket: ticket, CopyID: id, Role: allocationRole, Ordinal: int64(i + 1), MaxBytes: allocationProfile.Cap, Integrity: 128, SourceOwner: "manager", SourceKind: allocationProfile.Class})
 		n := pc2store.NativeObservation{Version: "pc2-native-observation/1", Deployment: strings.Repeat("1", 32), Incarnation: strings.Repeat("2", 32), NativeTicket: ticket, Role: s.role, Directory: r.Directory, Name: s.name, CopyID: id, DispositionVersion: 1, Digest: image.Digest, Bytes: image.Length(), Integrity: 128, Identity: pc2store.NativeIdentity{Device: image.Identity.Device, Inode: image.Identity.Inode, Mount: image.Identity.Mount}, Encoding: r.Encoding}
 		switch r.Encoding {
 		case "journal":
@@ -372,11 +423,46 @@ func newCensusFixture(t *testing.T, opt censusOptions) *censusFixture {
 			n.Floor = &pc2store.JournalCheckpoint{Seq: 0, Hash: genjournal.ZeroHash}
 			n.Tail = &pc2store.JournalCheckpoint{Seq: 2, Hash: view.Tail.Hash}
 		case "effects":
-			rev := int64(1)
+			rev := state.Revision
 			n.Revision = &rev
 			n.Floor = &pc2store.JournalCheckpoint{Seq: 2, Hash: view.Tail.Hash}
 		case "ledger":
 			n.Tail = &pc2store.JournalCheckpoint{Seq: 2, Hash: view.Tail.Hash}
+		}
+		if s.role == "effects-temporary" {
+			destination := "recovery-evidence"
+			n.Destination, n.Encoding = &destination, "evidence"
+			if opt.nativeRename {
+				old := n
+				old.StorageID, e = pc2store.StorageID(pc2store.CopyIdentity{Deployment: n.Deployment, Incarnation: n.Incarnation, Owner: "manager", Role: "staging", DirectoryRole: n.Directory, RelativeName: n.Name, CopyID: n.CopyID, DispositionVersion: 1, ContentDigest: n.Digest})
+				if e != nil {
+					t.Fatal(e)
+				}
+				nativePrior[id] = old
+				n.Role, n.Name, n.Destination, n.DispositionVersion = destination, "evidence-"+digestBytes(s.raw)+".json", nil, 2
+				if e := os.Rename(filepath.Join(root, dir, s.name), filepath.Join(root, dir, n.Name)); e != nil {
+					t.Fatal(e)
+				}
+				censusSyncDir(t, filepath.Join(root, dir))
+				r = allocationProfile
+			}
+		}
+		if opt.nativeReplace && s.role == "effects-store" {
+			old := n
+			old.CopyID = fmt.Sprintf("%032x", 8000+i)
+			old.NativeTicket, e = pc2store.TicketID(q, "manager", r.Class, s.role, int64(8000+i))
+			if e != nil {
+				t.Fatal(e)
+			}
+			old.Bytes, old.Digest, old.Identity = replaced.Length(), replaced.Digest, pc2store.NativeIdentity{Device: replaced.Identity.Device, Inode: replaced.Identity.Inode, Mount: replaced.Identity.Mount}
+			revision := priorState.Revision
+			old.Revision = &revision
+			old.StorageID, e = pc2store.StorageID(pc2store.CopyIdentity{Deployment: old.Deployment, Incarnation: old.Incarnation, Owner: "manager", Role: r.Class, DirectoryRole: old.Directory, RelativeName: old.Name, CopyID: old.CopyID, DispositionVersion: 1, ContentDigest: old.Digest})
+			if e != nil {
+				t.Fatal(e)
+			}
+			nativeAlloc = append(nativeAlloc, pc2store.NativeAllocation{Ticket: old.NativeTicket, CopyID: old.CopyID, Role: s.role, Ordinal: int64(8000 + i), MaxBytes: r.Cap, Integrity: 128, SourceOwner: "manager", SourceKind: r.Class})
+			nativePrior[id] = old
 		}
 		n.StorageID, e = pc2store.StorageID(pc2store.CopyIdentity{Deployment: n.Deployment, Incarnation: n.Incarnation, Owner: "manager", Role: r.Class, DirectoryRole: n.Directory, RelativeName: n.Name, CopyID: id, DispositionVersion: n.DispositionVersion, ContentDigest: n.Digest})
 		if e != nil {
@@ -497,6 +583,22 @@ func newCensusFixture(t *testing.T, opt censusOptions) *censusFixture {
 		}
 	}
 	for _, n := range observations {
+		if old, ok := nativePrior[n.CopyID]; ok {
+			old.FundingDigest, old.Sequence, old.Previous = fundingD, head.Sequence+1, head.Digest
+			raw := censusWire(t, old)
+			if _, e := pc2store.DecodeNativeObservation(raw); e != nil {
+				t.Fatal("prior native observation", e)
+			}
+			head = pc2store.Head{Sequence: old.Sequence, Digest: digestCensus(raw)}
+			appendRecord(raw)
+			f.native = append(f.native, old)
+			prior := head.Digest
+			if old.CopyID == n.CopyID {
+				n.Prior = &prior
+			} else {
+				n.Replaces = &prior
+			}
+		}
 		if n.Role == "generation-journal" {
 			old := n
 			old.DispositionVersion = 1
