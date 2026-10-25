@@ -442,6 +442,6 @@ go vet ./internal/manager ./internal/pc2store ./internal/pc2state
 Linux/amd64 syscall probes use only owned child PIDs and real file operations.
 They require parent-child ptrace access; absence is an unverified check, never a
 passing qualification. Traces and child logs use task-local temporary directories
-under `TMPDIR`. Shared hosts must use their existing heavy-slot wrapper for all
+under `TMPDIR`. Shared hosts should serialize heavy test runs, including
 Go tests/builds, race, syscall probes and mutants. No CLI is installed by these
 fixtures, and no repository-wide test run is required for this scope.
