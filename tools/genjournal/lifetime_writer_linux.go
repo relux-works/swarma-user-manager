@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"os"
+	"strings"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -81,7 +82,9 @@ func lifetimePreflight(ctx context.Context, b AppendBinding, p policy) error {
 	})
 }
 func (r *lifetimeRun) hit(event string) error {
-	r.result.phase = event
+	if !strings.HasPrefix(event, "before:unlock:") && !strings.HasPrefix(event, "after:unlock:") && !strings.HasPrefix(event, "after:close:") {
+		r.result.phase = event
+	}
 	h := r.pair.issuer.hooks
 	if h != nil && h.at != nil {
 		return h.at(event)
@@ -338,7 +341,14 @@ func (r *lifetimeRun) publish() (err error) {
 			}
 		}
 	}()
-	if e = r.step("marker-create", func() error { var e error; staging, e = d.create(name); return e }); e != nil {
+	if e = r.step("marker-create", func() error {
+		var e error
+		staging, e = d.create(name)
+		if e == nil {
+			r.result.staging = true
+		}
+		return e
+	}); e != nil {
 		return e
 	}
 	if e = r.step("marker-write", func() error {
@@ -362,6 +372,9 @@ func (r *lifetimeRun) publish() (err error) {
 	staging = nil
 	if e != nil {
 		return refuse("journal_io")
+	}
+	if e = r.hit("after:marker-close"); e != nil {
+		return e
 	}
 	if e = r.step("marker-publish", func() error {
 		if unix.Renameat2(int(d.file.Fd()), name, int(d.file.Fd()), "writer.pending", unix.RENAME_NOREPLACE) != nil {

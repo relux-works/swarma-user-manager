@@ -251,6 +251,42 @@ func TestAppendPreparedLifetimePreMarker(t *testing.T) {
 			}
 		})
 	}
+	// Publication failures retain exact incident progress, including unpublished
+	// staging; reverse cleanup must not overwrite the last normal phase.
+	for _, event := range []string{"before:marker-create", "after:marker-create", "before:marker-write", "after:marker-write", "before:marker-sync", "after:marker-sync", "after:marker-close", "before:marker-publish", "after:marker-publish", "before:marker-parent-sync", "after:marker-parent-sync"} {
+		t.Run(event, func(t *testing.T) {
+			f := newLifetimeFixture(t)
+			f.hooks.at = func(got string) error {
+				if got == event {
+					return refuse("journal_io")
+				}
+				return nil
+			}
+			r, e := f.run()
+			wantCode(t, e, "journal_io")
+			if r.Outcome() != NoWrite || r.ConsumptionAttempted() || f.ops.consumes != 0 {
+				t.Fatal("marker failure reached consumption/write")
+			}
+			if r.StagingCreated() != (event != "before:marker-create") {
+				t.Fatal("lost staging creation evidence")
+			}
+			published := event == "after:marker-publish" || event == "before:marker-parent-sync" || event == "after:marker-parent-sync"
+			if r.MarkerPublished() != published {
+				t.Fatal("lost marker publication evidence")
+			}
+			if r.Phase() != event {
+				t.Fatalf("cleanup hid incident phase: %s", r.Phase())
+			}
+			if published {
+				if _, e := os.Stat(filepath.Join(f.path, "writer.pending")); e != nil {
+					t.Fatal("published incident lost")
+				}
+			}
+			f.unchanged()
+			f.locksFree()
+		})
+	}
+
 }
 
 // Protected 0750/0640 F identities are distinct and retained; replacement,

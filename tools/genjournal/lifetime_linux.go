@@ -103,13 +103,13 @@ const (
 
 // LifetimeResult is in-process recovery evidence, never admission or a wire codec.
 type LifetimeResult struct {
-	outcome                  AppendOutcome
-	durable                  bool
-	checkpoint               Floor
-	view                     View
-	cleanup                  []error
-	marker, consumeAttempted bool
-	phase                    string
+	outcome                           AppendOutcome
+	durable                           bool
+	checkpoint                        Floor
+	view                              View
+	cleanup                           []error
+	staging, marker, consumeAttempted bool
+	phase                             string
 }
 
 func (r LifetimeResult) Outcome() AppendOutcome           { return r.outcome }
@@ -121,6 +121,7 @@ func (r LifetimeResult) View() (View, bool) {
 	return cloneLifetimeView(r.view), true
 }
 func (r LifetimeResult) CleanupErrors() []error     { return append([]error(nil), r.cleanup...) }
+func (r LifetimeResult) StagingCreated() bool       { return r.staging }
 func (r LifetimeResult) MarkerPublished() bool      { return r.marker }
 func (r LifetimeResult) ConsumptionAttempted() bool { return r.consumeAttempted }
 func (r LifetimeResult) Phase() string              { return r.phase }
