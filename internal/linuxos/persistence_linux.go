@@ -226,13 +226,17 @@ func adminQuery(ctx context.Context, path string, args ...string) ([]byte, error
 	return out.Bytes(), nil
 }
 
-type cappedBuffer struct{ bytes.Buffer }
+// Keep the buffer named so io.Copy cannot bypass Write through ReadFrom.
+type cappedBuffer struct{ buffer bytes.Buffer }
+
+func (b *cappedBuffer) Len() int      { return b.buffer.Len() }
+func (b *cappedBuffer) Bytes() []byte { return b.buffer.Bytes() }
 
 func (b *cappedBuffer) Write(p []byte) (int, error) {
 	if b.Len()+len(p) > 1<<20 {
 		return 0, refusal("inventory_limit", "admin_output", nil)
 	}
-	return b.Buffer.Write(p)
+	return b.buffer.Write(p)
 }
 func systemd(ctx context.Context, uid uint32, s SystemdSources, l Limits, query func(context.Context, string, ...string) ([]byte, error)) Result {
 	objects := []Object{}

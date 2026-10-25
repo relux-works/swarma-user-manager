@@ -129,11 +129,15 @@ func enumerateNSS(ctx context.Context, collector ProtectedArtifact, libraries []
 	return out, nil
 }
 
-type directoryOutput struct{ bytes.Buffer }
+// Keep the buffer named so io.Copy cannot bypass Write through ReadFrom.
+type directoryOutput struct{ buffer bytes.Buffer }
+
+func (b *directoryOutput) Len() int      { return b.buffer.Len() }
+func (b *directoryOutput) Bytes() []byte { return b.buffer.Bytes() }
 
 func (b *directoryOutput) Write(p []byte) (int, error) {
 	if b.Len()+len(p) > 8<<20 {
 		return 0, refusal("directory_unknown", "collector_output_limit", nil)
 	}
-	return b.Buffer.Write(p)
+	return b.buffer.Write(p)
 }

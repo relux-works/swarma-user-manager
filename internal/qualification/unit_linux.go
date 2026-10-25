@@ -39,13 +39,17 @@ func (SystemdUnit) Successful(ctx context.Context, boot string) (string, error) 
 	return completedInvocation(out.String())
 }
 
-type unitOutput struct{ strings.Builder }
+// Keep the builder named so promoted string/byte writes cannot bypass Write.
+type unitOutput struct{ builder strings.Builder }
+
+func (b *unitOutput) Len() int       { return b.builder.Len() }
+func (b *unitOutput) String() string { return b.builder.String() }
 
 func (b *unitOutput) Write(p []byte) (int, error) {
 	if b.Len()+len(p) > 8192 {
 		return 0, ErrRequired
 	}
-	return b.Builder.Write(p)
+	return b.builder.Write(p)
 }
 
 // ValidateUnitCompletion accepts only complete, terminal, successful oneshot
