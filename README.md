@@ -303,7 +303,7 @@ gates remain PENDING, with no accepting adapter or activation implied.
 | Pinned registrar CCJ-1 / coreutils | Validate example bytes with `ccj.Parse` / `ccj.Marshal` from the `go.mod` pin; `sha256sum vectors/qual-maint/*.jsonl`; `wc -c vectors/qual-maint/*.jsonl` | Canonical-byte verdict, SHA-256 and byte counts including LF; expected identities in the vector README; framing only; semantic journal/host qualification is separate |
 | Go (serialized on shared hosts) | `env GOMAXPROCS=2 go test -p 1 ./internal/updateproof ./cmd/swarma-user-manager -count=1` | Narrow verdicts and owned fixtures; task-local untracked logs |
 | Go journal layer | `env GOMAXPROCS=2 go test -p 1 ./internal/qualmaint -count=1 -timeout=60s`; `env GOMAXPROCS=2 go build -p 1 ./internal/qualmaint` | Local codec/replay/store verdicts and Go-owned temporary fault fixtures; task-local untracked logs/coverage; no root qualification |
-| [Linux Go CI](.github/workflows/linux-ci.yml) | Pull requests and pushes to `main`; hosted Ubuntu 24.04, pinned Go 1.26.10. Use the workflow’s `PRIVILEGED_TEST_SKIP` value; reproduce with `go mod verify`, `go build ./...`, `go vet ./...`, `test -z "$(gofmt -l .)"`, then `env -u LINUXOS_ROOT_QUALIFICATION CGO_ENABLED=1 GOMAXPROCS=2 go test -v -p 1 -count=1 -timeout=20m -skip "$PRIVILEGED_TEST_SKIP" ./...` | GitHub step logs or task-local untracked logs; Go-owned temporary fixtures; unprivileged check scope; seven peer exclusions audited and printed; runtime skips visible |
+| [Linux Go CI](.github/workflows/linux-ci.yml) | Pull requests and pushes to `main`; hosted Ubuntu 26.04, pinned Go 1.26.10. Use the workflow’s `PRIVILEGED_TEST_SKIP` value; reproduce with `go mod verify`, `go build ./...`, `go vet ./...`, `test -z "$(gofmt -l .)"`, then `env -u LINUXOS_ROOT_QUALIFICATION CGO_ENABLED=1 GOMAXPROCS=2 go test -v -p 1 -count=1 -timeout=20m -skip "$PRIVILEGED_TEST_SKIP" ./...` | GitHub step logs or task-local untracked logs; Go-owned temporary fixtures; unprivileged check scope; seven peer exclusions audited and printed; runtime skips visible |
 | [Go privileged-test inventory](.github/scripts/privileged-tests/main.go) | `go test -count=1 ./.github/scripts/privileged-tests`; `go run ./.github/scripts/privileged-tests "$PRIVILEGED_TEST_SKIP"` (shared anchored expression from the workflow) | Validated exclusion names or a named unlisted/stale error; checker verdicts; the audit reads sources without executing product tests or sudo |
 | Go retained sessions / refusing coordinator | `env -u LINUXOS_ROOT_QUALIFICATION CGO_ENABLED=1 GORACE=atexit_sleep_ms=0 GOMAXPROCS=2 go test -p 1 ./internal/updateproof ./internal/qualmaint ./internal/qualreconcile -count=1 -timeout=90s`; race/build variants in the [narrow checks](docs/requalification-coordinator.md#tools-and-narrow-checks) | Owned native-lock, child, error-cut and preflight verdicts; task-local untracked logs/overlays; no integration qualification |
 | `dpkg` | Native held pinned descriptor with fixed `--audit`; owned lock/audit fixture: `go test ./internal/updateproof -run '^TestReconcileOwnedDpkgAuditExclusion$' -count=1` | Clean means exit zero and empty stdout/stderr; fixture uses only an owned empty database |
@@ -317,7 +317,8 @@ entry points and their retained artifacts. `TestReviewNativeXZDecoder` uses
 
 The Linux workflow has read-only repository permissions and no privileged setup
 or credentials retained by checkout. Its header marks the repository-specific
-Go version, test flags/packages, qualification variable and peer exclusions for
+runner/bootstrap and loader diagnostics, Go version, test flags/packages,
+qualification variable and peer exclusions for
 reuse as a public module template. The four reviewer fixtures previously found
 by the formatting gate now have formatting-only changes.
 
@@ -332,7 +333,8 @@ and sudo-to-peer Python access described in the
 [primitive tools contract](internal/linuxos/README.md#tools-and-evidence).
 Root qualification remains opt-in and is explicitly unset by the CI command;
 native root/open-inode/namespace qualification remains outside this check.
-Local results do not establish success on the unverified hosted Ubuntu 24.04 runner.
+The workflow selects `ubuntu-26.04` for the bootstrap’s pinned `/usr/bin/python3.14`; Ubuntu 24.04 lacks that required layout and refuses by design.
+Local results do not establish success or platform qualification on the hosted runner.
 The inventory includes `TestPeerReceiptObservation` and
 `TestReviewMqueueOwnedObject`. Source auditing does not resolve aliases,
 reflection, generated executable paths or dynamic dispatch; prepared-host review

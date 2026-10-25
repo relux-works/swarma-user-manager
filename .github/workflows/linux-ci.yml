@@ -1,7 +1,8 @@
 # Template for public module repositories.
 # Copy .github/scripts/privileged-tests with this workflow when reusing the audit.
-# Repository-specific: Go version; test flags/packages and qualification variable;
-# shared peer-test exclusion expression and the peerRun/sudo source audit below.
+# Repository-specific: runner/bootstrap and loader diagnostics; Go version;
+# test flags/packages and qualification variable; shared peer-test exclusion
+# expression and the peerRun/sudo source audit below.
 name: Linux Go CI
 
 on:
@@ -14,7 +15,8 @@ permissions:
 
 jobs:
   go:
-    runs-on: ubuntu-24.04
+    # Repository-specific: bootstrap pins python3.14; Ubuntu 24.04 refuses by design.
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     env:
       GOTOOLCHAIN: local
@@ -45,6 +47,15 @@ jobs:
           git grep -n -E 'peerRun[[:space:]]*\(|/usr/bin/sudo' -- '*_test.go'
           go test -count=1 ./.github/scripts/privileged-tests
           go run ./.github/scripts/privileged-tests "$PRIVILEGED_TEST_SKIP"
+      # Repository-specific, read-only diagnostics; unavailable probes are nonfatal.
+      - name: Report bootstrap and loader prerequisites
+        continue-on-error: true
+        run: |
+          cat /etc/os-release || printf '%s\n' 'os-release unavailable'
+          ldd --version | head -1 || printf '%s\n' 'glibc version unavailable'
+          ls -l /usr/bin/python3.14 || printf '%s\n' '/usr/bin/python3.14 absent or unreadable'
+          sha256sum /etc/ld.so.cache || printf '%s\n' 'loader cache digest unavailable'
+          ldconfig -p | awk '$1 == "libc.so.6" || $1 == "libm.so.6" || $1 == "libnss_systemd.so.2"' || printf '%s\n' 'loader cache rows unavailable'
       # Repository-specific flags/packages and exact peer exclusions below.
       # Verbose output keeps existing runtime skips (including root opt-in) visible.
       - name: Test without privileged qualification
