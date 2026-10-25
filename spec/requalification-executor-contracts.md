@@ -102,6 +102,19 @@ as listed in §8. Merely publishing this spec does not close those gates.
 
 ## 3. Accepted-state derivation and trusted checkpoints
 
+The executor owns these semantic validators, separate from codec/store checks:
+
+| Validator | Required inputs and deterministic result |
+|---|---|
+| `ValidateImported` | Owner-authenticated deployment/profile/import and checkpoint custody, exact state/payload refs and whole retained history; returns the unique trusted old state/floors or no state |
+| `ValidateCandidate` | That validated old state, complete protected recorder range/current endpoint, fixed eligible profile, all owning/transitive proofs and qualified time; derives exactly one candidate state, ordered complete transaction/evidence set and byte-digest plan, all provisional |
+| `ValidateAcceptedTransition` | Frozen intent and exact derived candidate, live composed ownership/interlock, both full-Q validation observations/latest unit binding, final snapshot, fresh time/expiry checks and prior delivery state; prepares only the existing accepted5 entry when every predicate holds |
+
+None returns an acceptance receipt or changes a frontier. Only the subsequent
+durable step-5 append/readback can do so. Missing/ambiguous inputs return no
+partial state or entry; interfaces cannot take an unvalidated caller candidate
+or an `accepted` enum as their authority.
+
 ### 3.1 Import and whole-history validation
 
 Q2's initial baseline, deployment identity and trusted checkpoint/restore
@@ -220,9 +233,12 @@ qualifiers and final snapshot; no inherited cached checks or old Q.
 A complete visible accepted line after uncertain write/sync/acknowledgement is
 not a receipt. Verify/resync journal and parent. If original commit cannot be
 established, use journal §3/§5.3's exact-set retry: bind the identical original
-old/candidate states, transaction set/order/manifests and prior attempt, repeat
-the full fresh qualification sequence, then durably record the retry without a
-second frontier effect. A changed endpoint or subset cannot resolve that
+old/candidate states and inputs, transaction set/order and transaction manifest,
+and prior attempt. Fresh evidence manifests may reflect renewed verification/
+time as journal §3 permits; freeze them in the new intent without changing that
+exact transaction/state set. Repeat the full fresh qualification sequence, then
+durably record the retry without a second frontier effect. A changed endpoint
+or subset cannot resolve that
 uncertain frontier; explicit maintenance must decide it. A known durable
 duplicate returns its established checkpoint after fresh guards, without a new
 transaction effect. Ordinary unchanged later-boot renewal preserves historical
@@ -277,10 +293,10 @@ The local state branch is D -> effects -> gate -> data with R/append absent.
 Hooks already owning F/B may record under short R and enqueue, but never wait
 for W/D or a qualifier. Never acquire maintenance locks from lifecycle locks.
 
-Use the landed acquire-only `Recorder.AcquirePackageSession`, then held proof
+Use the landed acquire-only [`Recorder.AcquirePackageSession`](../internal/updateproof/session_linux.go), then held proof
 execution only after the remaining ownership is established. `ReconcileHeld`
 preserves the proof algorithm but does not establish those other authorities.
-Use `Writer.Deployment` for Writer-owned D and its shared checked local
+Use [`Writer.Deployment`](../internal/qualmaint/session_linux.go) for Writer-owned D and its shared checked local
 operations; do not independently lock D then invoke a legacy per-call Writer
 operation. Bound each deadline by its owner and the qualified overall operation
 deadline. Zero/copy/foreign/released/replaced/expired capabilities refuse. Do not
@@ -350,7 +366,7 @@ authority interval and no rollback against accepted and in-attempt high-waters.
 Do not rewrite original recorder boot tokens to the sampling boot. Any API
 mismatch between historical transaction identity and fresh-current-boot sampling
 needs an explicit reviewed binding; it cannot be hidden by substituting an ID.
-The existing `TimeSource.StartSample`/`timeconf.Sample` checks are necessary but
+The existing [`TimeSource.StartSample`](../internal/updateproof/time.go)/`timeconf.Sample` checks are necessary but
 do not themselves establish production collector provenance or durable reboot
 continuity. Nil/unknown time refuses, with no wall-time or historical-clock fallback.
 
@@ -510,11 +526,16 @@ in journal §7; a trace-only mock, unlocked substitute or removing reservation
 checks does not establish the required property. The graph is a requirement,
 not evidence that a runtime cycle or its absence has been demonstrated.
 
+Source boundaries are [Issue and Pin](../internal/qualification/protocol.go),
+[production Capture/CheckAll](../internal/linuxbackend/environment_linux.go),
+[effects locking](../internal/manager/store_linux.go) and
+[generation checkpoint locking](../tools/genjournal/native_linux.go).
+
 ### 7.3 Protected full Q and latest invocation
 
 Use the existing protected storage at the fixed installation's qualification
 directory and its owning `qualification` codec/limits. Validate full exact
-`station-qualification/2` bytes with `Decode`/`Record.Validate`, protected
+`station-qualification/2` bytes with the owning [Decode/Record.Validate codec](../internal/qualification/record.go), protected
 retained descriptor identity and current policy/manifest/normalized inputs.
 Validate station-name coverage internally without copying account data into
 the maintenance store. Initial issuer is exactly `{mode:initial,invocation_id:""}`;
