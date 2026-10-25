@@ -255,14 +255,20 @@ After **all** changed leaves pass §3 and all other pins remain unchanged:
    automatic re-pin exception: it cannot widen policy or certify unknown inputs.
    Record old/candidate inputs digests; keep admission stopped and marker intact.
 4. Release the reconciler's deployment lock again before restarting or waiting
-   for the installed qualification unit; boot mode likewise acquires/releases
-   that lock itself. Retain the same maintenance/admission and package/root-writer
+   for the dedicated `swarma-user-manager-qualify-maintenance.service`, fixed by
+   the [A3e maintenance target contract](requalification-executor-contracts.md#fixed-maintenance-target-and-ordinary-boot);
+   boot mode likewise acquires/releases that lock itself. Retain the same
+   maintenance/admission and package/root-writer
    exclusion throughout. Require a fresh complete networkless boot-mode run,
    latest current-boot terminal success, exact matching invocation ID, all checks
    `ok` and matching installed inputs/pin. After its lease is released, reacquire
    and revalidate deployment exclusion, maintenance/admission continuity and the
    final stable package/closure snapshot before accepting the outcome. Neither
    an initial record nor an older same-boot success is sufficient.
+   Bind issuer/latest checks to that exact maintenance unit, with no consumer
+   state/invocation changes; ordinary-boot consumer Requires=/After= ordering on
+   `swarma-user-manager-qualify.service` stays unchanged. The dedicated artifact
+   and separate fixed validation contexts remain unimplemented.
 5. Durably record the accepted outcome and advance the reconciled transaction,
    package-version and release high-water frontiers. Only then report evidence
    to the admission owner. The reconciler MUST NOT clear the maintenance fence,
@@ -305,6 +311,10 @@ qualification protocol; it does not
 infer success, automatically restore an old pin over changed files, or use
 partially written receipts. Unknown journal/floor or root-writer continuity
 requires explicit maintenance. Recovery never rewrites generation history.
+Cancellation, timeout, main-process exit, unit success or released locks do not
+prove tree completion. The [A3e native fence](requalification-executor-contracts.md#51-retained-subtree-and-delegated-work-fence)
+requires retained subtree identity, cgroup.kill, populated=0 with reactivation
+closed and all work handed to PID1 resolved or fenced before overlapping retry.
 
 ## 5. Threat model and limits
 

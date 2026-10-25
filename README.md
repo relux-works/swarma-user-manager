@@ -304,10 +304,19 @@ the external owners' required baseline, fencing, time, interlock/P7 and receipt
 publications. This is a specification; the executor and its authority/deployment
 gates remain PENDING, with no accepting adapter or activation implied.
 
+The [maintenance target amendment](spec/requalification-executor-contracts.md#fixed-maintenance-target-and-ordinary-boot)
+selects a dedicated unit with no consumer lifecycle effects, preserves ordinary
+boot ordering, and requires retained subtree/delegated-job fencing. Its
+[owned open publications](UNRESOLVED_QUESTIONS.md#a3e-maintenance-target-and-call-completion-publications)
+include decoder descendants, blocking output/journal transport, GetAll graphs,
+RPC/job completion and Q4 userdb provider compatibility. No runtime unit or
+identity helper is changed by this specification.
+
 ### A3 evidence tools
 
 | Tool | Purpose / exact entry point | Output |
 |---|---|---|
+| Git / Python 3 (specification review) | `git diff --check`; `git verify-commit <sha>`; `python3 <task-local-checker.py>` as described in the [A3e documentation checks](spec/requalification-executor-contracts.md#9-documentation-validation-and-tools) | Whitespace/signature and local link/contract-fixture logs in task-local untracked scratch; document controls prove no runtime qualification |
 | Pinned registrar CCJ-1 / coreutils | Validate example bytes with `ccj.Parse` / `ccj.Marshal` from the `go.mod` pin; `sha256sum vectors/qual-maint/*.jsonl`; `wc -c vectors/qual-maint/*.jsonl` | Canonical-byte verdict, SHA-256 and byte counts including LF; expected identities in the vector README; framing only; semantic journal/host qualification is separate |
 | Go (serialized on shared hosts) | `env GOMAXPROCS=2 go test -p 1 ./internal/updateproof ./cmd/swarma-user-manager -count=1` | Narrow verdicts and owned fixtures; task-local untracked logs |
 | Go journal layer | `env GOMAXPROCS=2 go test -p 1 ./internal/qualmaint -count=1 -timeout=60s`; `env GOMAXPROCS=2 go build -p 1 ./internal/qualmaint` | Local codec/replay/store verdicts and Go-owned temporary fault fixtures; task-local untracked logs/coverage; no root qualification |

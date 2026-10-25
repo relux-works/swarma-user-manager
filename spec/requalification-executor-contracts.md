@@ -709,14 +709,15 @@ cannot all be delegated back to an owner as an unspecified service.
 | External owner | Required publication / decision | Safe state while absent |
 |---|---|---|
 | Baseline authority and platform restore owner (Q2) | Explicit initial accepted baseline/import association, deployment identity, trusted checkpoint provisioning/restore procedure, evidence/source pins and independent custody if coherent rollback resistance is claimed | No genesis or lower floor from current state; empty/lost/incoherent custody refuses |
-| Platform/service-manager owner | Real worker/qualifier/descendant mutation-authority revocation and proven quiescence; bounded authenticated unit control, new/latest invocation association and retained currency at commit; native process/timeout/failure graph | No timer/PID/exit-only takeover or accepting child launch |
+| Platform/service-manager owner | Dedicated maintenance artifact with no reverse dependency/consumer lifecycle effects; separately fixed issuer/latest contexts; retained cgroup.kill/populated=0 fence with reactivation closed, PID1/delegated-work accounting and commit currency; full GetAll, queue/stop and native failure graphs | No ordinary-boot-unit substitution, dual-name fallback, timer/PID/exit-only takeover or accepting child launch |
 | Admission/P7 and root-writer owners jointly (Q3) | Versioned bounded authenticated interlock schema/validator, pre-package stopped starts/resumes, continuous root-writer ownership/epoch/invalidation; affected-set authority and original detection/clock/deadline/timely response; reboot continuity | Marker-only proof/unknown interval or P7 compliance refuses; owner retains immediate containment |
 | Timeconf/platform time owner | Qualified collector entry/tool/policy/provenance pins, confidence/uncertainty/freshness/authority/clock-high-water/reboot semantics, exact bounded lock-compatible graph | No wall time, cached pass or expiry extension; pin unavailable |
 | Incident authority | Authentic minimized incident issuance/validation, complete affected/response provenance, original event/deadline association and durable failure capacity | No fabricated failure terminal entry or dropped incident |
 | Owner recipient/transport authority | Versioned authenticated owner-role capability/receipt codec, incident binding, durable delivered acknowledgement and retry/capacity contract | Owner pending/unknown delivery holds acceptance/readiness |
 | Curator recipient/transport authority | Separate curator-role capability/receipt codec and authority with the same association/durability/retry guarantees | Curator pending/unknown delivery holds acceptance/readiness; one receipt never counts twice |
-| Qualification/provider owners | Actual Capture/CheckAll/provider/IPC/executable identities, complete lock/wait/failure graphs, reservation/generation snapshot guarantees and full-Q publication/currency contracts | Unreviewed call stays refusing, no accepting replacement adapter |
-| Profile/capacity and deployment owners (Q4/Q5) | Confirm existing encodings/source pins/hard limits against supported profile, concrete finite operation/freshness values and reserves; evidence-preserving migration, disposable-root crash/package/unit qualification and independent admission/boot guards | Unsupported profile/saturation refuses; no increased bound, migration, root/deployment activation or codec change implied |
+| Qualification/provider and verifier/decoder owners | Actual Capture/CheckAll/provider/IPC/executable identities, complete lock/wait/failure and descendant/drain graphs, reservation/generation snapshot guarantees and full-Q publication/currency contracts | Unreviewed call stays refusing, no accepting replacement adapter or direct-child-only bound |
+| CLI/output-transport and platform supervision owners | Per-stage stdout/stderr/journal sink and lease mapping, independent bounded backpressure failure and containment, without mistaking drained output for durable acceptance | Blocked output grants no success, fence receipt or overlapping retry |
+| Profile/capacity and deployment owners (Q4/Q5) | Confirm existing encodings/source pins/hard limits and userdb provider-class compatibility against supported profile, concrete finite operation/freshness values and reserves; evidence-preserving migration, disposable-root crash/package/unit qualification and independent admission/boot guards | Unsupported provider/projection or saturation refuses; no empty-inventory substitute, increased bound, migration, activation or codec change implied |
 
 Open questions are requests for precise artifacts, not approval by implication:
 
@@ -737,10 +738,21 @@ Open questions are requests for precise artifacts, not approval by implication:
    independently reserved and recovered?
 6. Which concrete unit/controller/provider contracts prove latest invocation
    currency through the local commit boundary and no transitive back edge?
-   A `Successful` observation or `CommandContext` alone does not answer this.
+   Publish the dedicated maintenance artifact and separate fixed issuer/latest
+   contexts, with unchanged consumer state/invocation controls and full GetAll
+   graph. A `Successful` observation or `CommandContext` alone does not answer
+   this; shared-Q ordinary-boot guard integration remains a separate gate.
 7. Which supported profile/budgets and owner-approved disposable qualification
-   procedure close Q4/Q5? Existing owner-confirmed native age/skew/P7 values are
-   preserved; this document chooses no new timeout, larger limit or topology.
+   procedure close Q4/Q5, including userdb provider classes unable to supply a
+   complete closed projection? Existing owner-confirmed native age/skew/P7
+   values are preserved; this document chooses no new timeout, larger limit
+   or topology.
+
+The [owned A3e publication questions](../UNRESOLVED_QUESTIONS.md#a3e-maintenance-target-and-call-completion-publications)
+also track direct-child/decoder and drain bounds, blocking journal/output
+transport, GetAll server work and acknowledgement/timeout versus PID1 job
+completion. Each needs a concrete owner artifact and nearby valid/negative
+controls; none is discharged by this amendment.
 
 Admission and ordinary-boot guards, hooks/services, transports/P7 integration,
 migration and deployment activation remain separately implemented/reviewed gates.

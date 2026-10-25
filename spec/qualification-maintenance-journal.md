@@ -448,8 +448,10 @@ until this worker starts to fence changed controls or running work.
    policy/manifest/inputs must still match. Fsync the policy and parent and
    re-read it. Keep the marker; no readiness signal or accepted frontier yet.
 4. **Boot-mode qualification and final snapshot.** Release D before restart or
-   wait for the installed qualification unit. Never retain an inherited locked
-   D. The unit takes/releases its own D and runs every check without network.
+   wait for the dedicated `swarma-user-manager-qualify-maintenance.service` under
+   the [A3e fixed-target contract](requalification-executor-contracts.md#fixed-maintenance-target-and-ordinary-boot).
+   Never retain an inherited locked D. The unit takes/releases its own D and
+   runs every check without network.
    Require a newly started current-boot invocation, terminal success of the
    **latest** invocation, all-ok boot Q, exact input pin and exact invocation
    equality. Reacquire D after the issuer releases it. Recheck marker,
@@ -457,6 +459,10 @@ until this worker starts to fence changed controls or running work.
    recorder tail, complete stable dpkg/package/closure snapshot and both Q
    identities. Any newer package event or unknown/running/failed unit result
    refuses; a previous same-boot success cannot complete this step.
+   Authenticate issuer/latest identity against that exact maintenance name;
+   ordinary-boot consumer ordering on `swarma-user-manager-qualify.service`
+   stays unchanged, and maintenance must change no consumer state/invocation.
+   The new artifact and separate validation contexts remain unimplemented.
 5. **Outcome commit and frontier.** Required prior incident deliveries must
    have both authenticated receipts before acceptance; pending/unknown delivery
    refuses without advancing any frontier. Delivery itself runs outside all
@@ -482,8 +488,13 @@ step 5, and it is not a substitute for the admission owner's own checks.
 
 At every row, admission remains fenced. Qualifier processes must be fenced and
 proved quiescent before retry; PID absence alone or expiry of a worker timer is
-not permission to overlap an unknown writer. The two file replacements in step
-1 and their fsync boundaries are distinct failure points.
+not permission to overlap an unknown writer. Follow the
+[retained subtree and delegated-work contract](requalification-executor-contracts.md#51-retained-subtree-and-delegated-work-fence):
+cgroup.kill then populated=0, reactivation/escape authority closed through
+recovery commit and every submitted PID1 job resolved or owner-fenced. Unit
+success, cancellation or released locks do not establish that fence.
+The two file replacements in step 1 and their fsync boundaries are distinct
+failure points.
 
 | Crash point | Possible retained disk state | Required recovery; forbidden inference |
 |---|---|---|
@@ -687,7 +698,7 @@ transport.
 | Q1 — Decided by the curator, 2026-10-25: external calls under continuous exclusion and the local snapshot edge | Apply the [decided rule below](#91-q1-curator-decision--2026-10-25), covering exclusive issuer D, shared admission-preparation D and D -> effects -> gate -> data | Each permitted operation still needs authenticated targets, bounded behavior and a reviewed no-back-edge call graph; no orchestration, admission integration or root qualification follows from this decision alone |
 | Q2 — Initial baseline import and checkpoint/restore custody | Use a separate explicit owner-qualified install/import of the existing A3b accepted baseline and retain a trusted journal checkpoint with its deployment identity. Never seed from current state. If coherent rollback resistance is required, select independent custody outside the restored failure domain; otherwise disclose A3's existing limitation | Empty/unknown/lost baseline or fork refuses; no invented restore floor or bootstrap acceptance |
 | Q3 — Concrete interlock, recovery fencing and notification receipt interfaces | Publish closed bounded authenticated schemas and validators for worker/qualifier quiescence, admission/P7 version continuity, affected-set/response evidence and both transport receipts. Preserve original clock/deadline across retries/boots and reserve durable incident capacity. Missing delivery capability blocks deployment; pending delivery blocks readiness but not immediate P7 response | No marker-only interlock, timer-only worker takeover, unverified delivery or unimplemented guard claim |
-| Q4 — Capacity, serialization pins and deployment budgets | Review these exact hard limits and source-pinned A3b byte mappings against the supported Ubuntu/profile archive sizes before implementation. Retain the profile's separately confirmed freshness/P7 values and finite operation deadlines. A larger encoding/store limit or revised payload serialization requires explicit versioned review, not a fallback | Saturation/unsupported payload refuses; these bounds never authorize a destructive capacity fix or permissive timeout |
+| Q4 — Capacity, serialization pins, provider profile and deployment budgets | Profile/capacity and userdb provider owners review these exact hard limits, source-pinned A3b byte mappings and supported provider classes/closed record projections against the supported Ubuntu/profile archive sizes and topology. Non-enumerating providers or unrepresentable records (including Machine/nonempty Home classes) require an explicit supported-profile decision; see [A3e-U7](../UNRESOLVED_QUESTIONS.md#a3e-maintenance-target-and-call-completion-publications). Retain separately confirmed freshness/P7 values and finite operation deadlines. A larger encoding/store limit or revised payload serialization requires explicit versioned review, not a fallback | Saturation, unsupported payload/provider or incomplete projection refuses; never skip an endpoint, substitute an empty inventory or silently widen the codec. These bounds authorize no destructive capacity fix or permissive timeout |
 | Q5 — Migration and privileged qualification | Publish an evidence-preserving migration/recovery procedure and run §7 on an owner-approved disposable root fixture, including actual fsync/failure, package exclusion and unit invocation cuts, plus independent guard review | No compaction/tail repair, automatic journal upgrade, production re-pin or admission claim |
 
 ### 9.1 Q1 curator decision — 2026-10-25

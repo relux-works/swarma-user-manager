@@ -64,8 +64,9 @@ continuous package/worker exclusion, exclusive issuer D and shared admission-pre
 D follow the accepted rule. Q2 selects
 explicit initial baseline import/checkpoint custody; Q3 publishes authenticated
 interlock, recovery-fencing and both notification receipt interfaces; Q4 reviews
-hard budgets and source-pinned byte encodings; Q5 owns migration and disposable
-root qualification. The [decided Q1 rule](spec/qualification-maintenance-journal.md#91-q1-curator-decision--2026-10-25)
+hard budgets, source-pinned byte encodings and supported userdb provider classes;
+Q5 owns migration and disposable root qualification. The
+[decided Q1 rule](spec/qualification-maintenance-journal.md#91-q1-curator-decision--2026-10-25)
 forbids external/provider/service-manager calls inside effects/core, generation,
 R and journal-append critical sections. Continuous exclusion leases are a
 separately enumerated boundary: review only fixed unit-control operations under
@@ -266,6 +267,33 @@ automatic pin protocol nor host qualification. Before deployment:
 - Integrate authenticated admission/containment and owner/curator pending-delivery
   receipts before any admission claim. A maintenance assertion alone is not P7
   containment evidence.
+
+### A3e maintenance target and call-completion publications
+
+The executor now fixes step 4 to the dedicated
+`swarma-user-manager-qualify-maintenance.service`; ordinary boot and its consumer
+Requires=/After= still use `swarma-user-manager-qualify.service`. The
+[target and issuer/latest binding](spec/requalification-executor-contracts.md#fixed-maintenance-target-and-ordinary-boot),
+[retained subtree fence](spec/requalification-executor-contracts.md#51-retained-subtree-and-delegated-work-fence)
+and [completion budgets](spec/requalification-executor-contracts.md#74-process-output-and-rpc-completion-budgets)
+are requirements, not a deployed unit, controller or qualified fence. These
+questions remain open with the following owners and refusal boundaries:
+
+| Question | Owner and required publication | Safe state until resolved |
+|---|---|---|
+| A3e-U1 — Dedicated maintenance unit and context binding | Platform/service-manager and qualification owners: publish protected effective unit/drop-ins, no reverse Requires/Wants/BindsTo/PartOf/Upholds or transitive consumer lifecycle path, separate fixed issuer/latest validators and shared-Q guard currency. Qualify unchanged consumer state/invocation across success/failure/timeout, with active, active-exited and inactive controls; preserve ordinary-boot qualification ordering | Current artifact/helpers still name the ordinary boot unit; no maintenance launch or permissive dual-name fallback |
+| A3e-U2 — Whole-tree and delegated-work completion | Platform supervisor and service-manager owners: retained cgroup identity outside the tree; boot/epoch/unit/job/invocation binding, effective kill/stop policy, cgroup.kill then populated=0 with escapes/reactivation closed through recovery commit; resolve or fence every submitted PID1 job and delegated effect | Cancellation, timeout, main PID absence, unit success or released lock cannot grant quiescence; unknown work forbids overlap and keeps admission fenced |
+| A3e-U3 — Direct-child timeout and decoder descendants | Verifier/decoder and platform supervision owners: enumerate actual dpkg-deb copy/decompression descendants, per-entry containment, absolute execution/drain/stop/fence budgets and a stalled-descendant control beside an authentic archive control | CommandContext/WaitDelay or a direct-child deadline does not prove bounded tree completion; no success/fence receipt from a surviving decoder |
+| A3e-U4 — Blocking output, including journal transport | CLI/output-transport and platform supervision owners: identify each stdout/stderr/journal sink and lease stage; independently supervise bounded failure under backpressure. Initial success digest is after Issue releases issuer D; boot mode prints no success digest, and refusal journal output is a separate sink; hooks/reconcile have their own contexts | A byte cap is insufficient; blocked output cannot delay admission containment or authorize acceptance, a fence receipt or retry |
+| A3e-U5 — systemctl show GetAll graph | Service-manager and qualification/provider owners: review full server-side Properties.GetAll evaluation and failure graph for the exact installed build, including work absent from the printed --property list | Closed projected stdout does not close the RPC graph; unknown dependency/back edge keeps the call unavailable |
+| A3e-U6 — RPC/job association and combined deadline | Executor and service-manager owners: authenticate every possibly submitted job and invocation; publish resolution/fencing of lost acknowledgements, queueing, merged/deferred work and one absolute connect/reply/queue/execute/drain/stop/fence deadline | RPC acknowledgement is not completion; RPC/client timeout does not cancel PID1 work. No overlapping retry from a bus/start/job timeout alone |
+| A3e-U7 / Q4 — Supported userdb provider profile | Profile and userdb provider owners: enumerate supported provider classes/builds and complete record projections under the current closed codec; decide the supported topology for non-enumerating providers and records containing unsupported keys, including Machine and nonempty Home classes | Enumeration refusal or an unrepresentable record is an explicit unsupported-profile refusal, never an empty complete inventory, skipped endpoint or silent codec widening |
+
+The [negative obligations](spec/requalification-executor-contracts.md#1-negative-obligations-first)
+pair each forbidden case with a valid control and planned narrowing mutation.
+All native/integration controls remain PENDING. U7 is part of the maintenance
+journal's [Q4 profile/budget question](spec/qualification-maintenance-journal.md#9-open-decisions-and-recommendations),
+not permission to alter the closed projection or increase an encoding limit.
 
 ## PC2: admission currency through activation
 
