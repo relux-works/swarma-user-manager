@@ -208,6 +208,31 @@ func TestAppendPreparedLifetimeReleaseFailure(t *testing.T) {
 			f.locksFree()
 		})
 	}
+	// Release telemetry must not replace the original progress-appropriate refusal.
+	for _, tc := range []struct {
+		event   string
+		outcome AppendOutcome
+	}{{"before:write", NoWrite}, {"after:write", UnknownWrite}, {"after:verify-post", DurableCleanupUncertain}} {
+		t.Run("primary-preserved-"+tc.event, func(t *testing.T) {
+			f := newLifetimeFixture(t)
+			f.hooks.at = func(event string) error {
+				if event == tc.event {
+					return lifetimeDenied()
+				}
+				if event == "before:unlock:F_auth" {
+					return refuse("journal_io")
+				}
+				return nil
+			}
+			r, e := f.run()
+			wantCode(t, e, "bump_key_admission_unconfirmed")
+			if r.Outcome() != tc.outcome || len(r.CleanupErrors()) != 1 {
+				t.Fatal("primary/progress lost to cleanup")
+			}
+			f.locksFree()
+		})
+	}
+
 }
 
 // The same original BOOTTIME budget covers staging through reverse cleanup;
