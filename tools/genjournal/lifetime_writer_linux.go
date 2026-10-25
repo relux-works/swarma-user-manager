@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"io"
 	"os"
 	"strings"
 	"sync/atomic"
@@ -421,6 +422,46 @@ func (r *lifetimeRun) syncDirectory() error {
 	}
 	return nil
 }
+
+// The final-window marker descriptor belongs to this lifetime, including when
+// metadata/read/decode fails. Do not use the legacy marker/open helpers here:
+// both have unchecked error-path closes. Complete this close before unlinking.
+func (r *lifetimeRun) readFinalMarker() (marker pendingRecord, err error) {
+	d := r.pair.resources.directory
+	fd, e := syscall.Openat(int(d.file.Fd()), "writer.pending", syscall.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_CLOEXEC|syscall.O_NONBLOCK, 0)
+	if e != nil {
+		if e == syscall.ENOENT {
+			return marker, refuse("journal_intent_required")
+		}
+		return marker, refuse("journal_path_io")
+	}
+	f := os.NewFile(uintptr(fd), "writer.pending")
+	defer func() {
+		// Close exactly once, including after a real close reports an error.
+		if e := f.Close(); e != nil {
+			closeErr := refuse("journal_io")
+			r.addCleanup(closeErr)
+			if err == nil {
+				err = closeErr
+			}
+		}
+		if e := r.hit("after:close:writer.pending"); e != nil {
+			r.addCleanup(e)
+			if err == nil {
+				err = e
+			}
+		}
+	}()
+	if err = statOK(f, d.policy.owner, 0644, false); err != nil {
+		return marker, err
+	}
+	b, e := io.ReadAll(io.LimitReader(f, MaxPending+1))
+	if e != nil {
+		return marker, refuse("journal_io")
+	}
+	return decodePending(b)
+}
+
 func (r *lifetimeRun) appendAndFinish() error {
 	b := r.pair.binding
 	files := r.pair.resources
@@ -536,12 +577,15 @@ func (r *lifetimeRun) appendAndFinish() error {
 		return e
 	}
 	if e = r.step("marker-unlink", func() error {
-		m, e := requireMarker(files.directory)
+		m, e := r.readFinalMarker()
 		if e != nil {
 			return e
 		}
 		if m != r.marker {
 			return refuse("journal_pending_malformed")
+		}
+		if e = r.check(); e != nil {
+			return e
 		}
 		if syscall.Unlinkat(int(files.directory.file.Fd()), "writer.pending") != nil {
 			return refuse("journal_io")

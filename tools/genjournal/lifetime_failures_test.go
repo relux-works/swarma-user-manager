@@ -168,10 +168,14 @@ func TestAppendPreparedLifetimeDurableCleanup(t *testing.T) {
 // Failed unlock still performs a real close before the next lock release.
 // Every release/close failure denies clean; errors are bounded and all retained.
 func TestAppendPreparedLifetimeReleaseFailure(t *testing.T) {
-	for _, event := range []string{"before:unlock:F_auth", "before:unlock:data.lock", "before:unlock:gate.lock", "after:close:F_auth", "after:close:data.lock", "after:close:gate.lock", "after:close:journal", "after:close:directory0", "all-unlocks", "valid"} {
+	t.Run("marker-descriptor", testLifetimeMarkerDescriptor)
+	for _, event := range []string{"before:unlock:F_auth", "before:unlock:data.lock", "before:unlock:gate.lock", "after:close:F_auth", "after:close:data.lock", "after:close:gate.lock", "after:close:journal", "after:close:directory0", "after:close:writer.pending", "all-unlocks", "valid"} {
 		t.Run(event, func(t *testing.T) {
 			f := newLifetimeFixture(t)
 			f.hooks.at = func(got string) error {
+				if got == "after:close:writer.pending" {
+					lifetimeAssertHeld(t, f.fencePath, true)
+				}
 				if got == "before:unlock:data.lock" {
 					lifetimeAssertHeld(t, f.fencePath, false)
 				}
@@ -252,6 +256,7 @@ func TestAppendPreparedLifetimeBudget(t *testing.T) {
 		{"after-write", "after:write", 1000, UnknownWrite, "journal_writer_deadline"},
 		{"after-sync", "after:journal-sync", 1000, UnknownWrite, "journal_writer_deadline"},
 		{"after-proof", "after:verify-post", 1000, DurableCleanupUncertain, "journal_writer_deadline"},
+		{"after-marker-read-close", "after:close:writer.pending", 1000, DurableCleanupUncertain, "journal_writer_deadline"},
 		{"after-unlink", "after:marker-unlink", 1000, DurableCleanupUncertain, "journal_writer_deadline"},
 		{"after-release", "after:close:F_auth", 1000, DurableCleanupUncertain, "journal_writer_deadline"},
 		{"original-observation", "before:write", 2000, NoWrite, "bump_key_admission_unconfirmed"},
@@ -267,15 +272,37 @@ func TestAppendPreparedLifetimeBudget(t *testing.T) {
 				if event == tc.event {
 					now = base + tc.delta
 				}
+				// A reset timer must fail at the prewrite boundary, rather than
+				// accidentally failing later against the on-disk marker's start.
+				if tc.event == "acquired:F_auth" && tc.delta >= 1000 && event == "before:write" {
+					t.Fatal("expired original writer budget reached active prewrite boundary")
+				}
 				return nil
+			}
+			if tc.event == "acquired:F_auth" && tc.delta >= 1000 {
+				f.ops.check = func(*GuardWindow) error {
+					t.Fatal("expired original writer budget reached authority Check before active write")
+					return nil
+				}
 			}
 			if tc.event == "consume" {
 				f.ops.consume = func(*GuardWindow) error { now = base + tc.delta; return f.ops.retain("occupied") }
 			}
 			r, e := f.run()
+			if tc.event == "acquired:F_auth" && tc.delta >= 1000 {
+				if r.ConsumptionAttempted() || f.ops.consumes != 0 {
+					t.Fatal("expired original writer budget reached Consume")
+				}
+				f.unchanged()
+			}
 			wantCode(t, e, tc.code)
 			if r.Outcome() != tc.outcome {
 				t.Fatalf("outcome %v want %v", r.Outcome(), tc.outcome)
+			}
+			if tc.event == "after:close:writer.pending" {
+				if _, e := os.Stat(filepath.Join(f.path, "writer.pending")); e != nil || f.ops.finishes != 0 {
+					t.Fatal("expired marker close continued unlink/Finish")
+				}
 			}
 			if tc.outcome == CleanAppend {
 				f.clean(r, e)
