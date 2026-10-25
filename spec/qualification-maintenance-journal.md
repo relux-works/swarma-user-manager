@@ -389,15 +389,15 @@ a real required local dependency; it does not by itself prove every transitive
 callee has no back edge or establish a runtime deadlock.
 
 Continuous exclusion leases and their permitted calls require the explicit
-Q1 recommendation and curator decision (§9.1). The literal blanket "no RPC under
+Q1 curator decision (§9.1), accepted on 2026-10-25. The literal blanket "no RPC under
 locks" wording conflicts with A3's required fixed unit-control handoff under
 F/B/W and with existing issuer observations under exclusive D and admission
 preparation under shared D. The landed state/generation critical-section rules
 are narrower; they do not independently prohibit every exclusion-lease call.
 General network proof acquisition and notification delivery remain outside all
 maintenance locks. A relay does not remove a wait, and dropping exclusion does
-not preserve the contract. Until Q1 and its bounded no-back-edge call graph are
-accepted, the unit-control/issuer/admission-call integration is an A3d
+not preserve the contract. Until each permitted operation's bounded no-back-edge call graph is
+qualified, the unit-control/issuer/admission-call integration is an A3d
 activation blocker. This document does not approve those calls or implement
 the integration.
 
@@ -433,7 +433,7 @@ until this worker starts to fence changed controls or running work.
    exclusion and worker ownership; launch only the already authenticated
    installed initial command, without a held inherited D. It takes/releases
    its own D and repeats every check. Wait for its terminal result under the
-   qualified bounded control interface (Q1 remains a gate). Reacquire D and
+   qualified bounded control interface (Q1 requires per-operation qualification). Reacquire D and
    revalidate marker/ownership continuity, exact candidate policy/manifest,
    current complete package snapshot, P0-derived inputs and the all-ok initial
    record. Capture its minimized Q proof as `initial_q` only after validating the full
@@ -589,8 +589,8 @@ Get unit/provider/external facts during preparation outside lifecycle state,
 generation, R and journal-append critical sections; bind them to current boot,
 invocation, inputs and journal checkpoint. Existing admission preparation retains
 shared D across `Capture` and the latest-unit observation; issuer observations
-retain exclusive D. These exclusion-lease calls require Q1's explicit review
-and decision, not an assumed absolute D prohibition or an implicit waiver.
+retain exclusive D. These exclusion-lease calls require the per-operation review
+and qualification in the decided Q1 rule, not an absolute D prohibition.
 At final admission commit under the existing lifecycle lock order, use only
 bounded local guard revalidation with retained version/lease evidence. Changed
 inputs, recorder frontier, journal tail, unit result or interlock version
@@ -671,21 +671,22 @@ journal implementation or evidence that §7's pending runtime tests ran.
 
 ## 9. Open decisions and recommendations
 
-All choices below remain explicit architect/owner or interface publication
-gates. Recommendations are not approvals. Their resolution does not by itself
+Q1 was decided by the curator on 2026-10-25; its per-operation qualification
+requirements remain mandatory. Q2–Q5 remain architect/owner or interface
+publication gates. Their recommendations are not approvals. Their resolution does not by itself
 implement or qualify A3d, its guard, hooks, P7 response or notification transport.
 
 | Question | Recommendation | Safe state until resolved |
 |---|---|---|
-| Q1 — External calls under continuous exclusion and the local snapshot edge | Adopt the [proposed exact rule below](#91-q1-recommendation--pending-curator-decision), covering exclusive issuer D, shared admission-preparation D and the actual D -> effects -> gate -> data branch; pending curator decision | No unit-control/issuer/admission-call integration or A3d activation from this document; continuous exclusion, complete reservation checks and the no-back-edge rule remain required |
+| Q1 — Decided by the curator, 2026-10-25: external calls under continuous exclusion and the local snapshot edge | Apply the [decided rule below](#91-q1-curator-decision--2026-10-25), covering exclusive issuer D, shared admission-preparation D and D -> effects -> gate -> data | Each permitted operation still needs authenticated targets, bounded behavior and a reviewed no-back-edge call graph; no orchestration, admission integration or root qualification follows from this decision alone |
 | Q2 — Initial baseline import and checkpoint/restore custody | Use a separate explicit owner-qualified install/import of the existing A3b accepted baseline and retain a trusted journal checkpoint with its deployment identity. Never seed from current state. If coherent rollback resistance is required, select independent custody outside the restored failure domain; otherwise disclose A3's existing limitation | Empty/unknown/lost baseline or fork refuses; no invented restore floor or bootstrap acceptance |
 | Q3 — Concrete interlock, recovery fencing and notification receipt interfaces | Publish closed bounded authenticated schemas and validators for worker/qualifier quiescence, admission/P7 version continuity, affected-set/response evidence and both transport receipts. Preserve original clock/deadline across retries/boots and reserve durable incident capacity. Missing delivery capability blocks deployment; pending delivery blocks readiness but not immediate P7 response | No marker-only interlock, timer-only worker takeover, unverified delivery or unimplemented guard claim |
 | Q4 — Capacity, serialization pins and deployment budgets | Review these exact hard limits and source-pinned A3b byte mappings against the supported Ubuntu/profile archive sizes before implementation. Retain the profile's separately confirmed freshness/P7 values and finite operation deadlines. A larger encoding/store limit or revised payload serialization requires explicit versioned review, not a fallback | Saturation/unsupported payload refuses; these bounds never authorize a destructive capacity fix or permissive timeout |
 | Q5 — Migration and privileged qualification | Publish an evidence-preserving migration/recovery procedure and run §7 on an owner-approved disposable root fixture, including actual fsync/failure, package exclusion and unit invocation cuts, plus independent guard review | No compaction/tail repair, automatic journal upgrade, production re-pin or admission claim |
 
-### 9.1 Q1 recommendation — pending curator decision
+### 9.1 Q1 curator decision — 2026-10-25
 
-Proposed exact rule for curator review, **not an approved waiver**:
+The curator accepted the following rule on **2026-10-25**:
 
 External/provider/service-manager calls MUST run outside manager effects/core locks, generation gate/data locks, the short recorder lock R, and the journal-append critical section. Inside those critical sections only bounded local checks and local durable operations are allowed.
 
@@ -705,8 +706,8 @@ issuer `Capture`/`CheckAll`, and shared D through admission-preparation
 [unit reader](../internal/qualification/unit_linux.go) invokes `systemctl show`.
 The snapshot edge is published in §4.2, not deferred to a replacement interface.
 No intrinsic runtime cycle has been demonstrated by this source inspection.
-Curator acceptance and a bounded transitive no-back-edge qualification remain
-required before A3d integration; unknown dependencies refuse with admission
+The decision permits A3d implementation to start. Per-operation review and
+bounded transitive no-back-edge qualification remain required before integration; unknown dependencies refuse with admission
 fenced.
 
 ## 10. Tools and current delivery limits

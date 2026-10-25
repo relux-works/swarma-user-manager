@@ -270,6 +270,18 @@ After **all** changed leaves pass §3 and all other pins remain unchanged:
    separate action by the admission controller under its existing authority and
    all remaining lifecycle gates; this introduces no new human approval flow.
 
+The curator decided the handoff/call boundary on **2026-10-25**, as recorded in
+[qual-maint Q1](qualification-maintenance-journal.md#91-q1-curator-decision--2026-10-25).
+This scopes the call prohibition to short critical sections and enumerates the
+continuous exclusion leases separately; every permitted callee still requires
+review and bounded no-back-edge qualification:
+
+External/provider/service-manager calls MUST run outside manager effects/core locks, generation gate/data locks, the short recorder lock R, and the journal-append critical section. Inside those critical sections only bounded local checks and local durable operations are allowed.
+
+Continuous exclusion leases are a separately enumerated boundary. Retain native F/B, W, root-writer exclusion and closed admission across both qualifier runs. The parent MUST release D before launching/waiting for the qualifier; the child acquires its own exclusive D, with no inherited held descriptor. Permit only the reviewed fixed local unit-control operations under F/B/W, and the explicitly reviewed Capture/CheckAll/provider and latest-unit observations under the issuer's exclusive D or the admission-preparation shared D. Each permitted operation requires a fixed authenticated target, bounded completion/failure behavior, and a transitive call/dependency graph showing no acquisition or wait for any caller-owned exclusion lock. General network proof acquisition and notification delivery remain outside all maintenance locks. A relay does not make a wait unlocked; dropping exclusion is not a workaround.
+
+The existing reservation snapshot requires the additional local edge D -> effects -> gate -> data. Publish that edge explicitly (with R and journal append excluded from this branch), or replace it with a separately reviewed equivalent snapshot handoff. Release the inner state/generation locks before every provider or unit call; never acquire F/B/W/D/R from inside lifecycle locks. Preserve final bounded local revalidation of retained boot, invocation, input, journal and interlock identities. Unknown continuity/callee dependency or exceeded deadline refuses with admission fenced.
+
 The intent/outcome MUST be in a protected append-only qualification-maintenance
 journal, separate from `gen-journal/1` and the existing closed OS-effect store.
 Do not add an invented lifecycle event or silently extend either codec. Before
