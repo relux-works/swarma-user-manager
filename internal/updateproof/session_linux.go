@@ -27,13 +27,13 @@ type PackageSession struct {
 }
 
 func (r *Recorder) AcquirePackageSession(ctx context.Context) (*PackageSession, error) {
-	if r == nil || r.owner != 0 {
+	if r == nil || r.dir == nil || r.owner != 0 {
 		return nil, ErrGap
 	}
 	return acquirePackageSession(ctx, r, "/var/lib/dpkg", "/")
 }
 func acquirePackageSession(ctx context.Context, r *Recorder, path, anchor string) (*PackageSession, error) {
-	if ctx == nil || ctx.Err() != nil || r == nil {
+	if ctx == nil || ctx.Err() != nil || r == nil || r.dir == nil {
 		return nil, ErrGap
 	}
 	if _, ok := ctx.Deadline(); !ok {

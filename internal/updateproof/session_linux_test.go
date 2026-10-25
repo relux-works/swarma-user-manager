@@ -1,9 +1,12 @@
 package updateproof
 
 import (
+	"bufio"
 	"context"
 	"errors"
+	"fmt"
 	"golang.org/x/sys/unix"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -109,7 +112,9 @@ func TestPackageSessionIdentity(t *testing.T) {
 				cancel()
 			case "lock-replaced":
 				path := filepath.Join(root, "lock")
-				os.Remove(path)
+				if err := os.Rename(path, path+".retained"); err != nil {
+					t.Fatal(err)
+				}
 				if e := os.WriteFile(path, nil, 0600); e != nil {
 					t.Fatal(e)
 				}
@@ -153,21 +158,43 @@ func TestPackageSessionIdentity(t *testing.T) {
 // not retain native exclusion after the parent closes its session.
 func TestPackageSessionChildInheritance(t *testing.T) {
 	if os.Getenv("QUAL_PACKAGE_CHILD") == "1" {
-		time.Sleep(100 * time.Millisecond)
+		fmt.Fprintln(os.Stdout, "ready")
+		io.Copy(io.Discard, os.Stdin)
 		return
 	}
 	r := recorderFixture(t)
 	s, root := sessionFixture(t, r)
-	child := exec.Command(os.Args[0], "-test.run=^TestPackageSessionChildInheritance$")
+	for _, f := range s.files {
+		flags, err := unix.FcntlInt(f.Fd(), unix.F_GETFD, 0)
+		if err != nil || flags&unix.FD_CLOEXEC == 0 {
+			t.Fatal("package descriptor inheritable", err)
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	child := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestPackageSessionChildInheritance$")
 	child.Env = append(os.Environ(), "QUAL_PACKAGE_CHILD=1")
-	if err := child.Start(); err != nil {
+	input, err := child.StdinPipe()
+	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { child.Wait() })
-	if err := s.Close(); err != nil {
+	defer input.Close()
+	output, err := child.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = child.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer child.Wait()
+	if line, err := bufio.NewReader(output).ReadString('\n'); err != nil || line != "ready\n" {
+		t.Fatal(line, err)
+	}
+	if err = s.Close(); err != nil {
 		t.Fatal(err)
 	}
 	probePackageSession(t, root, false)
+	input.Close()
 }
 
 // The new held route preserves authentic failed-dpkg acceptance as provisional
@@ -232,5 +259,54 @@ func TestPackageSessionInheritedProof(t *testing.T) {
 			}
 			probePackageSession(t, root, true)
 		})
+	}
+}
+
+// A competing native owner cannot take F/B during the retained lease; bounded
+// contention refuses and then succeeds after explicit reverse release.
+func TestPackageSessionContention(t *testing.T) {
+	r := recorderFixture(t)
+	s, root := sessionFixture(t, r)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	if next, err := acquirePackageSession(ctx, r, root, root); err != ErrGap || next != nil {
+		if next != nil {
+			next.Close()
+		}
+		t.Fatal(next, err)
+	}
+	probePackageSession(t, root, true)
+	s.Close()
+	live, stop := context.WithTimeout(context.Background(), time.Second)
+	defer stop()
+	next, err := acquirePackageSession(live, r, root, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer next.Close()
+	probePackageSession(t, root, true)
+}
+
+// Invalid lifetime/zero owners are rejected before any fixed native path opens;
+// the existing owned-session control exercises successful acquisition.
+func TestPackageSessionInvalidAcquisition(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	var zero Recorder
+	if got, err := zero.AcquirePackageSession(ctx); got != nil || err != ErrGap {
+		if got != nil {
+			got.Close()
+		}
+		t.Fatal(got, err)
+	}
+	r := recorderFixture(t)
+	_, root := sessionFixture(t, r)
+	expired, stop := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer stop()
+	if got, err := acquirePackageSession(expired, r, root, root); got != nil || err != ErrGap {
+		if got != nil {
+			got.Close()
+		}
+		t.Fatal(got, err)
 	}
 }

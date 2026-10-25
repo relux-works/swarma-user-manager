@@ -106,6 +106,9 @@ func TestDeploymentSessionIdentity(t *testing.T) {
 			w := writer(t, s)
 			if name == "unbounded" {
 				if got, err := w.Deployment(context.Background()); got != nil || err != ErrLease {
+					if got != nil {
+						got.Close()
+					}
 					t.Fatal(got, err)
 				}
 				return
@@ -114,6 +117,9 @@ func TestDeploymentSessionIdentity(t *testing.T) {
 				ctx, cancel := context.WithTimeout(context.Background(), time.Hour)
 				defer cancel()
 				if got, err := w.Deployment(ctx); got != nil || err != ErrLease {
+					if got != nil {
+						got.Close()
+					}
 					t.Fatal(got, err)
 				}
 				return
