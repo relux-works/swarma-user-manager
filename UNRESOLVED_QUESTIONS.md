@@ -256,8 +256,13 @@ automatic pin protocol nor host qualification. Before deployment:
   now pins the published eleven-fact receipt/API, executor-derived scope binding
   and provider-owned continuity; that publication question is resolved. The
   independent rollback witness backend/restore boundary remains undecided,
-  authenticated one-shot handoff (QT-2c) design is pending, and installed
-  collector/subtree/reboot qualification and enrolled evidence authentication
+  while the [executor window design](spec/requalification-time-windows.md) now
+  selects conditional keyless preparation, one in-window suspend-aware clock
+  read and the durable act/use deadline, with a proposed `qual-maint/2`
+  burn/completion transition. Review the new version/migration and qualify its
+  independent currentness, original reader/witness interfaces, enforced
+  read-to-durability bound, Linux/macOS deadline mappings and mandatory native
+  parity. Installed collector/subtree/reboot and evidence authentication also
   remain open. Structural decoding and test-only fixtures close none of those
   authority gates. Unknown/untrusted time refuses. Release age
   seven days, future-Date skew five minutes and P7 response five minutes are

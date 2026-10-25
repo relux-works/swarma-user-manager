@@ -320,6 +320,13 @@ provider-held consumed-time continuity. Production witness selection,
 authenticated one-shot handoff and installed collector qualification remain open;
 structural receipt decoding and test-only fixtures supply no authority.
 
+The [executor window design](spec/requalification-time-windows.md) defines the
+Linux pre-pin and mandatory pending macOS profiles, a single suspend-aware read
+outside the pure verifier, and the durable act/use deadline. Proposed
+`qual-maint/2` burn/completion records provide at-most-once authorization;
+current codecs remain unchanged. Timing enforcement, custody and native parity
+qualification remain closed gates.
+
 The [maintenance target amendment](spec/requalification-executor-contracts.md#fixed-maintenance-target-and-ordinary-boot)
 selects a dedicated unit with no consumer lifecycle effects, preserves ordinary
 boot ordering, and requires retained subtree/delegated-job fencing. Its

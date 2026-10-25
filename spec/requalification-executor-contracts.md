@@ -11,7 +11,10 @@ This specializes [A3 §4](upgrade-requalification.md#4-requalification-and-durab
 and [qual-maint/1](qualification-maintenance-journal.md), including its decided
 Q1 boundary. Existing codecs, source pins, hard bounds and failure reasons are
 unchanged. No fields are added to Q, journal entries, generation/effect journals
-or A3b recorder objects. The manual owner procedure remains separate.
+or A3b recorder objects by this contract. The linked
+[time-window design](requalification-time-windows.md) separately proposes a
+future `qual-maint/2` use transition; it changes no current codec. The manual
+owner procedure remains separate.
 
 ## 1. Negative obligations first
 
@@ -281,7 +284,10 @@ evidence/uncertainty and the fence, never a success receipt or automatic rollbac
 | 4 | Release parent D before boot-unit launch/wait; require newly started latest terminal successful current-boot boot Q; reacquire fresh D, validate both Q identities and all frozen bindings, then complete final stable recorder/database/package/closure snapshot |
 | 5 | With continuous outer ownership and D, no pending required prior delivery, persist final evidence, append accepted5 with frozen bindings and both proofs, fsync journal/parent and exact readback; only this commit advances derived floors |
 
-Steps 1–4 add no invented progress journal entries. The pin/Q/step number never
+For current `qual-maint/1`, steps 1–4 add no invented progress journal entries.
+The [proposed v2 window transition](requalification-time-windows.md#4-proposed-qual-maint2-use-transition)
+requires separate codec/migration review before its burn/completion entries exist.
+The pin/Q/step number never
 substitutes for accepted durability. Any final state, recorder tail, full-Q
 identity, latest invocation or continuity mismatch refuses. Bounded local guard
 checks immediately surround publication/append; no external provider/unit call
@@ -531,8 +537,11 @@ incompatible graph or expired budget.
 
 **Production gates remain closed.** The rollback witness backend/restore boundary
 is undecided; `NewConsumer` uses refusing `ClosedWitness` and supplies no qualified
-production collector path. Authenticated one-shot handoff is the next provider
-slice (QT-2c), design pending. Structural decode and fixture enrollment matching
+production collector path. The [consumer window profile and versioned-use design](requalification-time-windows.md)
+select a conditional same-process keyless handoff, one fixed suspend-aware
+in-window clock read outside the pure verifier, and a durable act/use endpoint.
+Provider handoff publication, original-reader/witness interfaces and native
+qualification remain pending. Structural decode and fixture enrollment matching
 provide neither that handoff nor original-evidence authentication. Installed
 collector graph/subtree fencing, remaining-delay and reboot qualification, the
 enrolled owner validator and executor adapter review are also required before
@@ -853,7 +862,7 @@ cannot all be delegated back to an owner as an unspecified service.
 | Baseline authority and platform restore owner (Q2) | Explicit initial accepted baseline/import association, deployment identity, trusted checkpoint provisioning/restore procedure, evidence/source pins and independent custody if coherent rollback resistance is claimed | No genesis or lower floor from current state; empty/lost/incoherent custody refuses |
 | Platform/service-manager owner | Dedicated maintenance artifact with no reverse dependency/consumer lifecycle effects; separately fixed issuer/latest contexts; retained cgroup.kill/populated=0 fence with reactivation closed, PID1/delegated-work accounting and commit currency; full GetAll, queue/stop and native failure graphs | No ordinary-boot-unit substitution, dual-name fallback, timer/PID/exit-only takeover or accepting child launch |
 | Admission/P7 and root-writer owners jointly (Q3) | Versioned bounded authenticated interlock schema/validator, pre-package stopped starts/resumes, continuous root-writer ownership/epoch/invalidation; affected-set authority and original detection/clock/deadline/timely response; reboot continuity | Marker-only proof/unknown interval or P7 compliance refuses; owner retains immediate containment |
-| Timeconf/platform time owner | §6.1 pins broker `docs/time-contract.md` at `a1c69eb` and `docs/qualified-time-api.md` at `8cdea82` (QT-2a `07f9e6b`): eleven-fact receipt, exact scope digest, provider-owned consumed-time/hold continuity and bounded collector-under-D semantics. Still select/qualify independent rollback witness and restore boundary, publish authenticated one-shot handoff (QT-2c design pending), enrolled original-evidence validator and installed no-back-edge/subtree/reboot/remaining-delay qualification | Production consumption stays closed; decode is structural, not authentication. No reset to journal floor, wall time, cached pass or expiry extension; pin unavailable |
+| Timeconf/platform time owner | §6.1 pins broker `docs/time-contract.md` at `a1c69eb` and `docs/qualified-time-api.md` at `8cdea82` (QT-2a `07f9e6b`). The [consumer window profile](requalification-time-windows.md) selects one in-window suspend-aware read, original durable endpoint and proposed v2 burn. Still publish/qualify provider handoff/original-reader/witness interfaces, independent rollback custody, Linux/macOS clock/deadline mappings and installed no-back-edge/subtree/reboot/remaining-delay enforcement | Keyless use is conditional on the trusted process/machine boundary; production remains closed. Decode is structural, not authentication; no reset, wall fallback, cached pass or expiry extension |
 | Incident authority | Authentic minimized incident issuance/validation, complete affected/response provenance, original event/deadline association and durable failure capacity | No fabricated failure terminal entry or dropped incident |
 | Owner recipient/transport authority | Versioned authenticated owner-role capability/receipt codec, incident binding, durable delivered acknowledgement and retry/capacity contract | Owner pending/unknown delivery holds acceptance/readiness |
 | Curator recipient/transport authority | Separate curator-role capability/receipt codec and authority with the same association/durability/retry guarantees | Curator pending/unknown delivery holds acceptance/readiness; one receipt never counts twice |
@@ -874,11 +883,14 @@ Open questions are requests for precise artifacts, not approval by implication:
    affected-set completeness and no deadline reset?
 4. Given the pinned §6.1 receipt/API and scope mapping, which independent
    rollback witness/backend and restore boundary will be selected and qualified?
-   When will the provider publish the authenticated one-shot handoff (QT-2c,
-   design pending) and enrolled original-evidence validator? Which installed
+   When will the provider publish the selected handoff and enrolled
+   original-evidence reader/validator/witness interfaces? Which installed
    collector/daemon/store graph proves no back edge under D, whole-subtree
    completion and durable current-boot continuity within the original budget?
-   Published structure and synthetic fixtures leave these gates open.
+   Qualify the [Linux/macOS window profiles and v2 use transition](requalification-time-windows.md),
+   including the original durable endpoint, enforced post-read bound and
+   consumer restore/currentness. Published structure and synthetic fixtures
+   leave these gates open.
 5. Which bounded incident/capability/receipt byte codecs and trust roots are
    published by each recipient owner, and where is durable failure capacity
    independently reserved and recovered?
