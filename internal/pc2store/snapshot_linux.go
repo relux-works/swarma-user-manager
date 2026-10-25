@@ -41,12 +41,21 @@ type nativeFunding struct {
 	MetadataIntegrity int64              `json:"metadata_integrity"`
 	Allocations       []allocation       `json:"allocations"`
 	Native            []NativeAllocation `json:"native_allocations"`
+	Outputs           []CensusOutput     `json:"census_outputs"`
+}
+
+type CensusOutput struct {
+	Kind      string `json:"kind"`
+	Ordinal   int64  `json:"ordinal"`
+	MaxBytes  int64  `json:"max_bytes"`
+	Integrity int64  `json:"integrity_bytes"`
 }
 
 type SnapshotEntry struct {
 	ID, Class, Location, Codec string
 	Image                      FileImage
 	Integrity                  int64
+	Order                      int64
 }
 type ReadSnapshotResult struct {
 	head            Head
@@ -54,6 +63,11 @@ type ReadSnapshotResult struct {
 	native, history []NativeObservation
 	held, envelope  int64
 	q               string
+	outputs         []CensusOutput
+}
+
+func (s ReadSnapshotResult) OutputBounds() []CensusOutput {
+	return append([]CensusOutput(nil), s.outputs...)
 }
 
 func (s ReadSnapshotResult) Entries() []SnapshotEntry {
@@ -103,16 +117,16 @@ func readPath(root *ReadDirectory, rel string, cap int64) (out FileImage, err er
 	return d.Read(parts[len(parts)-1], 0640, cap)
 }
 
-func walkSnapshot(d *ReadDirectory, prefix string, depth int, files map[string]FileImage) (err error) {
+func walkSnapshot(d *ReadDirectory, prefix string, depth int, files map[string]FileImage, dirs map[string]bool, remaining *int64) (err error) {
 	if depth > 5 {
 		return ErrUnavailable
 	}
-	names, e := d.Names(4096 - len(files))
+	names, e := d.Names(4096 - len(files) - len(dirs))
 	if e != nil {
 		return e
 	}
 	for _, name := range names {
-		if len(files) >= 4096 {
+		if len(files)+len(dirs) >= 4096 {
 			return ErrUnavailable
 		}
 		rel := prefix + name
@@ -138,17 +152,29 @@ func walkSnapshot(d *ReadDirectory, prefix string, depth int, files map[string]F
 			if e != nil {
 				return e
 			}
-			e = walkSnapshot(child, rel+"/", depth+1, files)
+			dirs[rel] = true
+			e = walkSnapshot(child, rel+"/", depth+1, files, dirs, remaining)
 			e = errors.Join(e, child.Close())
 			if e != nil {
 				return e
 			}
 		} else {
-			image, e := d.Read(name, 0640, 268435456)
+			cap := *remaining
+			if strings.HasPrefix(rel, indexDir+"/") && cap > 65536 {
+				cap = 65536
+			}
+			if (strings.HasPrefix(rel, "attempts/") || strings.HasPrefix(rel, "holds/")) && cap > 4096 {
+				cap = 4096
+			}
+			if strings.HasPrefix(rel, "recovery/") && cap > 8192 {
+				cap = 8192
+			}
+			image, e := d.Read(name, 0640, cap)
 			if e != nil {
 				return e
 			}
 			files[rel] = image
+			*remaining -= image.Length()
 		}
 	}
 	return nil
@@ -167,12 +193,14 @@ func ReadSnapshot(root *ReadDirectory, baseline SnapshotBaseline) (result ReadSn
 		return result, errors.Join(ErrUnavailable, e)
 	}
 	all := map[string]FileImage{}
-	if e := walkSnapshot(root, "", 0, all); e != nil {
+	dirs := map[string]bool{}
+	remaining := int64(pc2state.AggregateBytes)
+	if e := walkSnapshot(root, "", 0, all, dirs, &remaining); e != nil {
 		return result, e
 	}
 	var f nativeFunding
 	fi, ok := all[indexDir+"/funding.json"]
-	if !ok || fi.Digest != baseline.FundingDigest || decode(fi.Bytes(), &f) != nil || f.Version != "pc2-native-fixture-funding/1" || f.Allocations == nil || f.Native == nil || len(f.Allocations)+len(f.Native) > maxAllocations || f.MetadataIntegrity < 0 {
+	if !ok || fi.Digest != baseline.FundingDigest || decode(fi.Bytes(), &f) != nil || f.Version != "pc2-native-fixture-funding/1" || f.Allocations == nil || f.Native == nil || f.Outputs == nil || len(f.Outputs) > 6 || len(f.Allocations)+len(f.Native) > maxAllocations || f.MetadataIntegrity < 0 {
 		return result, ErrUnavailable
 	}
 	legacy := funding{"pc2-fixture-funding/1", f.Deployment, f.Incarnation, f.Q, f.Metadata, f.Allocations}
@@ -197,6 +225,15 @@ func ReadSnapshot(root *ReadDirectory, baseline SnapshotBaseline) (result ReadSn
 		alloc[a.Ticket] = a
 		result.envelope += a.MaxBytes + a.Integrity
 	}
+	seenOutput := map[string]bool{}
+	for _, o := range f.Outputs {
+		if (o.Kind != "head" && !admittedIdentityRole("manager", o.Kind)) || seenOutput[o.Kind] || o.Ordinal < 1 || o.Ordinal > pc2state.SafeInteger || o.MaxBytes < 1 || o.MaxBytes > pc2state.AggregateBytes || o.Integrity < 0 || o.Integrity > pc2state.AggregateBytes || (o.Kind == "head" && o.MaxBytes > 65536) {
+			return result, ErrUnavailable
+		}
+		seenOutput[o.Kind] = true
+		result.envelope += o.MaxBytes + o.Integrity
+	}
+	result.outputs = append([]CensusOutput(nil), f.Outputs...)
 	if result.envelope > pc2state.AggregateBytes {
 		return result, ErrUnavailable
 	}
@@ -314,8 +351,19 @@ func ReadSnapshot(root *ReadDirectory, baseline SnapshotBaseline) (result ReadSn
 		if a.Role == Capacity {
 			class = "inventory"
 		}
-		result.entries = append(result.entries, SnapshotEntry{st.installed.StorageID, class, loc, string(st.installed.Codec), image, a.Integrity})
+		result.entries = append(result.entries, SnapshotEntry{st.installed.StorageID, class, loc, string(st.installed.Codec), image, a.Integrity, st.association.Sequence})
 		expected[loc] = "payload"
+	}
+	allowedDirs := map[string]bool{"attempts": true, "holds": true, "recovery": true, "inventory": true, "capacity": true, "staging": true, indexDir: true, indexDir + "/records": true, indexDir + "/heads": true, indexDir + "/pending": true}
+	for _, st := range states {
+		a, _ := legacy.find(st.association.Ticket)
+		allowedDirs["staging/"+a.CopyID] = true
+		allowedDirs[string(a.Role)+"/"+a.CopyID] = true
+	}
+	for dir := range dirs {
+		if !allowedDirs[dir] {
+			return result, ErrUnavailable
+		}
 	}
 	aliases := map[[2]uint64]bool{}
 	var metadataCost int64
@@ -352,7 +400,7 @@ func ReadSnapshot(root *ReadDirectory, baseline SnapshotBaseline) (result ReadSn
 			integrity = f.MetadataIntegrity
 		}
 		metadataCost += image.Length() + integrity
-		result.entries = append(result.entries, SnapshotEntry{id, "inventory", loc, "", image, integrity})
+		result.entries = append(result.entries, SnapshotEntry{id, "inventory", loc, "", image, integrity, 0})
 	}
 	if metadataCost > f.Metadata+f.MetadataIntegrity {
 		return result, ErrUnavailable

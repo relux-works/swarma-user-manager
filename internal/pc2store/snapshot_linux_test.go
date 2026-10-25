@@ -61,7 +61,7 @@ func TestPC2ReadSnapshot(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	nf := nativeFunding{"pc2-native-fixture-funding/1", f.Deployment, f.Incarnation, f.Q, f.Metadata, 128, f.Allocations, []NativeAllocation{}}
+	nf := nativeFunding{"pc2-native-fixture-funding/1", f.Deployment, f.Incarnation, f.Q, f.Metadata, 128, f.Allocations, []NativeAllocation{}, []CensusOutput{}}
 	raw, _ := canonical(nf)
 	if e = os.WriteFile(filepath.Join(root, indexDir, "funding.json"), raw, 0640); e != nil {
 		t.Fatal(e)

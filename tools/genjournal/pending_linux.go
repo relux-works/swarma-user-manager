@@ -19,6 +19,10 @@ const PendingMarginMS int64 = 500
 const MaxPending = 512
 const pendingFormat = "gen-journal-pending/1"
 
+// ValidatePendingBytes checks only the existing complete marker encoding. It
+// proves neither liveness nor ownership and never reads clocks or files.
+func ValidatePendingBytes(raw []byte) error { _, err := decodePending(raw); return err }
+
 type pendingRecord struct {
 	BootID              string
 	StartedMS, BudgetMS int64

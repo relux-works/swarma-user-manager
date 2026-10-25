@@ -213,26 +213,11 @@ func effectBytes(state State) ([]byte, error) {
 	return canonical(effectEnvelope{storeFormat, state, hex.EncodeToString(digest[:])})
 }
 func (s *DiskStore) Load() (State, error) {
-	var envelope effectEnvelope
 	b, e := readFile(s.dir, "effects.json", s.owner, maxEvidence)
 	if e != nil {
 		return State{}, e
 	}
-	if strict(b, &envelope) != nil || envelope.Format != storeFormat {
-		return State{}, fail("effect_evidence_unavailable")
-	}
-	data, e := canonical(envelope.State)
-	if e != nil {
-		return State{}, fail("effect_evidence_unavailable")
-	}
-	digest := sha256.Sum256(data)
-	if envelope.Digest != hex.EncodeToString(digest[:]) {
-		return State{}, fail("effect_evidence_unavailable")
-	}
-	if err := validateStored(envelope.State); err != nil {
-		return State{}, err
-	}
-	return envelope.State, nil
+	return decodeCensusEffects(b)
 }
 
 func (s *DiskStore) Save(state State) error {
