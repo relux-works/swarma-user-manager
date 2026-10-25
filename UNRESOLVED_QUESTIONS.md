@@ -231,6 +231,15 @@ acceptance evidence.
 
 ## A3 evidence implementation gates
 
+The [A3e executor contracts](spec/requalification-executor-contracts.md) define
+our semantic validators, journal-derived frontiers, exact candidate/pin
+publication, composed sessions and fixed-call requirements. Its
+[external-owner matrix and open questions](spec/requalification-executor-contracts.md#8-external-owners-and-open-publication-decisions)
+separate those duties from Q2 baseline/checkpoint custody, real worker/qualifier
+fencing and root-writer continuity, qualified time and joint Q3 interlock/P7/
+incident/two-recipient receipt publication. These are still open authority and
+qualification gates, not interfaces implemented or authorized by the spec.
+
 The [evidence implementation](docs/update-evidence.md) adds a recorder, local
 archive-chain verifier and uninstalled hook examples. It supplies neither an
 automatic pin protocol nor host qualification. Before deployment:

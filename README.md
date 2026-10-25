@@ -289,6 +289,13 @@ description is review metadata; candidate installation, qualification, pinning,
 accepted-outcome execution and deployment qualification remain PENDING. The
 document maps all 38 spec obligations and the current sixteen narrowing mutants.
 
+The [A3e executor contracts](spec/requalification-executor-contracts.md) specify
+our semantic state/frontier derivation, exact publication and two-field pin
+transition, composed lease/call rules and closed consumer validators. They list
+the external owners' required baseline, fencing, time, interlock/P7 and receipt
+publications. This is a specification; the executor and its authority/deployment
+gates remain PENDING, with no accepting adapter or activation implied.
+
 ### A3 evidence tools
 
 | Tool | Purpose / exact entry point | Output |

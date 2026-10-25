@@ -177,13 +177,21 @@ including signed/compressed representations when required. Do not silently
 re-fetch today's candidate, widen trust or reset a source baseline.
 
 Per-source release dates never decrease; equal dates require equal release
-hashes. Preserve the qualified time high-water consumed by A3b and the ordering
-of authenticated samples across the entire history; time may not roll back or
-outlive its authority. The existing state wrapper has no new time-floor field:
-derive that floor from the imported qualified baseline and retained authenticated
-time/report evidence reachable through the accepted history. Q's audit issue
-timestamp is not time authority. If the owner import or pinned evidence cannot
-establish this floor/continuity, refuse; do not add a field or use wall time.
+hashes. The durable accepted time comparison floor is the maximum of imported
+A3b `LastTime` and every authenticated retained report `ObservedTime` through
+that accepted checkpoint. Recompute it from the original reports/time evidence,
+not Q's audit issue timestamp. Within an attempt, each sample's lower bound must
+also respect every prior consumed sample/high-water under the qualified time
+policy; no clock rollback or expired authority is allowed.
+
+The state wrapper has no time-floor field, and frozen intent links cannot be
+rewritten to insert a new pre-pin sample. The qualified time owner must supply
+durable collector/clock continuity covering later samples and reboot/recovery
+beyond that journal-derived minimum floor. A fresh pre-pin sample is still
+mandatory; do not claim its value is durably encoded in an unchanged earlier
+report. If this combination cannot establish the required continuity, refuse
+and resolve the time contract, rather than add a field, trust an independent
+cache, silently lower the floor or use wall time.
 
 Candidate `inputs` is independently computed as the existing normalized
 `SHA256(CCJ(I))` for the deterministic eligible candidate and confirmed against
@@ -442,3 +450,171 @@ notification-only terminal-boot exception on later writer boots. Receipt seq/pre
 may advance, accepted/frontier effects may not. These are requirements for a
 separate qualified delivery/recovery integration; the current inert executor
 does not activate it or use an absent contract to grant a write path.
+
+## 7. Fixed-call composition and full Q validation
+
+### 7.1 Required call contract
+
+Each enabled operation MUST have a reviewed closed `CallContract` containing
+exactly `{id,target,entry,argv,environment,cwd,identity,inputs,outputs,leases,deadline,graph,completion,failure,fence}`.
+Target/entry/argv are fixed native targets, not caller strings or PATH search.
+Identity pins the executable, loader/library/configuration/provider closure,
+effective unit/drop-ins and authenticated endpoint as applicable. Input/output
+types, maximum bytes/counts and finite deadline derive from the approved
+profile. No shell interpretation, caller environment, raw output logging,
+implicit timeout or unsupported topology is allowed. Cwd is `/` for native
+commands. Existing qualification entry sanitization and unit network denial
+remain mandatory; no new socket/network exception is introduced.
+
+Graph enumerates **all** synchronous and asynchronous transitive dependencies,
+native service/provider waits, helper children, files/IPC endpoints and locks,
+including timeout/failure paths. It must show no acquisition or wait on any
+caller-owned F/B/W/root-writer exclusion, and no parent D at a qualifier handoff.
+For calls made while D is held it must also show no back edge to that D. A
+relay, goroutine or subprocess does not eliminate a dependency. Completion must
+establish real terminal work/lease release; failure/fence must establish how
+late children/delegated work cannot mutate (§5). Caller context expiry and
+unit TimeoutStartSec are bounds, not native fencing proofs. If any callee graph,
+identity or failure behavior is unknown, this operation stays refusing.
+
+| Operation | Exact target / existing entry | Allowed lease boundary and required result |
+|---|---|---|
+| Initial Issue | `/usr/bin/env -i /opt/swarma/libexec/swarma-user-manager qualify`, equivalent direct exec with empty environment; root-only maintenance entry -> `qualification.Protocol.Issue(...,false)` | Parent retains outer exclusion, releases D; child owns exclusive D, withdraws old Q, captures/checks/recaptures and durably publishes protected initial Q; stdout digest/exit alone insufficient |
+| Boot unit control | Authenticated `/usr/bin/systemctl daemon-reload` only when the reviewed installed-unit contract requires it, then `/usr/bin/systemctl restart swarma-user-manager-qualify.service`; no other unit/verb | Parent D released before either launch/wait; outer exclusion continuous. Reload/start acknowledgements are not successful qualification. Concrete bounded controller and cancellation/fencing behavior remain platform publication gates |
+| Boot Issue | Exact installed unit `ExecStart=/opt/swarma/libexec/swarma-user-manager qualify --boot`, effective unit pinned to the [reviewed artifact](../deploy/systemd/swarma-user-manager-qualify.service) | Unit owns exclusive D. Authenticate root main process, kernel cgroup and invocation via `OwnUnitInvocation`; no manual boot invocation or inherited D |
+| Latest terminal observation | `/usr/bin/systemctl show swarma-user-manager-qualify.service --no-pager --property=LoadState,Type,ActiveState,SubState,Result,ExecMainCode,ExecMainStatus,ExecMainStartTimestampMonotonic,ExecMainExitTimestampMonotonic,InvocationID` via `SystemdUnit.Successful` | Reviewed outside inner locks; under D only with qualified no-back-edge graph. Require exact closed terminal oneshot success and fresh current-boot invocation equal to boot Q; helper observes, never restarts/proves launch freshness by itself |
+| Capture / CheckAll | Concrete installed `ProductionEnvironment.Capture` / `CheckAll` through `qualification.Deployment`, bound to protected policy and deployment manifest; no substituted snapshot/provider | Issuer exclusive D or admission-preparation shared D. Keep complete generation-bound reservation snapshot; execute provider/unit calls only after releasing effects/gate/data/R/append |
+| Provider / native proof helpers | Each exact protected executable/IPC endpoint and closure from the approved fixed manifest/profile, including NSS/inventory probes, pinned dpkg audit, signature verifier and decoders | Individually enumerated bounded graph required; no general network proof acquisition under maintenance locks, no raw fd inheritance or package installation/scripts. A tool name or manifest digest alone is not a call qualification |
+| Qualified time sample | Pinned `TimeSource.StartSample` -> reviewed `timeconf` provider/CollectorEntry and exact protected tool/policy identity (§6.1) | Retained outer exclusion compatible, no hidden network or owned-lock wait; fresh authoritative sample before pin. Concrete collector call/argv/provenance remain unavailable until time owner publication |
+
+This matrix selects our composition targets. It does **not** publish missing
+platform/provider mechanisms or certify the current helpers' transitive graphs.
+A different root, binary, unit, provider set or adapter requires explicit
+profile/contract review; the executor accepts no caller target override.
+
+### 7.2 Real snapshot and inner-lock release
+
+Exercise the real `Issue -> Capture -> reservedNames -> effects.lock ->
+genjournal.Checkpoint` path. Both issuer exclusive D and admission-preparation
+shared D use **D -> effects -> gate -> data**. Preserve complete reservations,
+generation binding and final bounded local retained-guard checks. The standalone
+lifecycle effects -> gate -> data path also remains valid.
+
+R and journal append MUST NOT overlap this snapshot branch. Release every
+effects/core and generation gate/data lock before any provider/unit call, even
+if D remains held under its reviewed contract. Never acquire F/B/W/D/R from
+inside lifecycle locks. Admission's final commit cannot acquire fresh D inside
+those locks; it uses retained authenticated facts for bounded local checks.
+Qualify the actual production issuer/admission path with the omitted-edge mutant
+in journal §7; a trace-only mock, unlocked substitute or removing reservation
+checks does not establish the required property. The graph is a requirement,
+not evidence that a runtime cycle or its absence has been demonstrated.
+
+### 7.3 Protected full Q and latest invocation
+
+Use the existing protected storage at the fixed installation's qualification
+directory and its owning `qualification` codec/limits. Validate full exact
+`station-qualification/2` bytes with `Decode`/`Record.Validate`, protected
+retained descriptor identity and current policy/manifest/normalized inputs.
+Validate station-name coverage internally without copying account data into
+the maintenance store. Initial issuer is exactly `{mode:initial,invocation_id:""}`;
+boot issuer is `mode:boot` with the real nonzero current unit invocation ID.
+Q boot must equal current kernel boot; `inputs_digest` must independently equal
+candidate inputs, and boot policy must have the matching pin.
+
+All eleven closed checks MUST be present, each exactly `{result:"ok",reason:""}`:
+`policy_protection`, `source_configuration`, `approved_skeleton`, `cron_denial`,
+`at_denial`, `allow_precedence`, `no_linger`, `account_directory`,
+`dynamic_user_ranges`, `no_launcher`, `account_restrictions`.
+Unknown/failed/missing checks, extra keys, any collector error despite passing
+fields, guard loss, changed recapture or incomplete name coverage refuse.
+Preserve Issue's old-Q withdrawal and durable exact publication; a failed retry
+cannot retain an earlier pass as its result.
+
+Capture/validate/hash the full initial Q before boot mode replaces it. Produce
+only the existing minimized proof, exact full-record SHA-256/size and eleven
+checks after that full validation; the minimized wrapper is not an independent
+certificate. At final commit revalidate its retained observation binding and
+the full live boot Q. Do not expect the now-replaced live file still to contain
+initial Q or export/store its raw account list as proof.
+
+Record the authenticated pre-start unit invocation, command/job association and
+new invocation after launch. Require a newly started invocation distinct from
+the previous one, current-boot monotonic start/exit ordering, terminal oneshot
+success and equality between the **latest** invocation and boot Q issuer.
+Reobserve after D reacquisition and at the final bounded commit guard using
+the qualified observation/retained-identity contract. A newer run, running/
+failed/unknown result or changed Q invalidates acceptance. No external unit
+query occurs inside append or inner state locks. If the platform cannot provide
+retained currency through the local commit boundary, that call contract remains
+unavailable; a last-seen cached unit success is not a workaround.
+
+## 8. External owners and open publication decisions
+
+Our lane owns the semantic derivation, reference/association validators,
+publication protocol, lease/call composition and negative qualification above.
+It MUST implement those duties once their closed prerequisites exist; they
+cannot all be delegated back to an owner as an unspecified service.
+
+| External owner | Required publication / decision | Safe state while absent |
+|---|---|---|
+| Baseline authority and platform restore owner (Q2) | Explicit initial accepted baseline/import association, deployment identity, trusted checkpoint provisioning/restore procedure, evidence/source pins and independent custody if coherent rollback resistance is claimed | No genesis or lower floor from current state; empty/lost/incoherent custody refuses |
+| Platform/service-manager owner | Real worker/qualifier/descendant mutation-authority revocation and proven quiescence; bounded authenticated unit control, new/latest invocation association and retained currency at commit; native process/timeout/failure graph | No timer/PID/exit-only takeover or accepting child launch |
+| Admission/P7 and root-writer owners jointly (Q3) | Versioned bounded authenticated interlock schema/validator, pre-package stopped starts/resumes, continuous root-writer ownership/epoch/invalidation; affected-set authority and original detection/clock/deadline/timely response; reboot continuity | Marker-only proof/unknown interval or P7 compliance refuses; owner retains immediate containment |
+| Timeconf/platform time owner | Qualified collector entry/tool/policy/provenance pins, confidence/uncertainty/freshness/authority/clock-high-water/reboot semantics, exact bounded lock-compatible graph | No wall time, cached pass or expiry extension; pin unavailable |
+| Incident authority | Authentic minimized incident issuance/validation, complete affected/response provenance, original event/deadline association and durable failure capacity | No fabricated failure terminal entry or dropped incident |
+| Owner recipient/transport authority | Versioned authenticated owner-role capability/receipt codec, incident binding, durable delivered acknowledgement and retry/capacity contract | Owner pending/unknown delivery holds acceptance/readiness |
+| Curator recipient/transport authority | Separate curator-role capability/receipt codec and authority with the same association/durability/retry guarantees | Curator pending/unknown delivery holds acceptance/readiness; one receipt never counts twice |
+| Qualification/provider owners | Actual Capture/CheckAll/provider/IPC/executable identities, complete lock/wait/failure graphs, reservation/generation snapshot guarantees and full-Q publication/currency contracts | Unreviewed call stays refusing, no accepting replacement adapter |
+| Profile/capacity and deployment owners (Q4/Q5) | Confirm existing encodings/source pins/hard limits against supported profile, concrete finite operation/freshness values and reserves; evidence-preserving migration, disposable-root crash/package/unit qualification and independent admission/boot guards | Unsupported profile/saturation refuses; no increased bound, migration, root/deployment activation or codec change implied |
+
+Open questions are requests for precise artifacts, not approval by implication:
+
+1. Which protected deployment/baseline/checkpoint import and restore-custody
+   record does Q2 select, and what independent failure domain supports any
+   stronger rollback claim? How does it retain the accepted time floor?
+2. Which real mechanism fences every old worker/qualifier/delegated writer and
+   proves quiescence across timeout/reboot? Which root-writer and interlock
+   epochs can our finite local guards retain continuously?
+3. Can the joint Q3 schemas bind original pre-package P7 events and later attempt
+   scopes to the same immutable interlock ref, with authoritative invalidation,
+   affected-set completeness and no deadline reset?
+4. Which qualified time adapter supplies fresh-current-boot sampling for retained
+   historical transactions, including lock compatibility and durable high-water
+   continuity? Publish the exact graph instead of assuming a cached sample.
+5. Which bounded incident/capability/receipt byte codecs and trust roots are
+   published by each recipient owner, and where is durable failure capacity
+   independently reserved and recovered?
+6. Which concrete unit/controller/provider contracts prove latest invocation
+   currency through the local commit boundary and no transitive back edge?
+   A `Successful` observation or `CommandContext` alone does not answer this.
+7. Which supported profile/budgets and owner-approved disposable qualification
+   procedure close Q4/Q5? Existing owner-confirmed native age/skew/P7 values are
+   preserved; this document chooses no new timeout, larger limit or topology.
+
+Admission and ordinary-boot guards, hooks/services, transports/P7 integration,
+migration and deployment activation remain separately implemented/reviewed gates.
+Step-4 boot Issue does not implement ordinary boot prechecks or authorize any
+marker clearing. Publication of this spec alone changes no refusal behavior.
+
+## 9. Documentation validation and tools
+
+Validate local source links/anchors, complete interface/owner/negative tables,
+exact eleven check names against the existing owning source, unchanged codec/
+source pins and forbidden-effect/authority boundaries. Use bounded malformed
+documentation controls to show that the checker rejects a missing required
+check/owner and broken link; these controls prove document coverage only.
+No executable validator, accepting fixture, crash test or native qualification
+is delivered by a documentation checker. Every runtime obligation in §1 is
+PENDING implementation/qualification unless the narrower existing component
+evidence explicitly says otherwise.
+
+| Tool | Exact entry / purpose | Output |
+|---|---|---|
+| Git | `git diff --check`; `git verify-commit <sha>` | Whitespace and signed-object verdicts |
+| ripgrep | `rg -n 'pattern' spec/requalification-executor-contracts.md` | Scoped terminology/source checks |
+| Python 3 | `python3 <task-local-checker.py>` | Task-local link, section, owner/interface/check-name and bounded negative-control logs; no product mutation |
+
+Scratch checker inputs/logs stay outside versioned product files. No binary is
+built or installed, no service/package operation or privileged execution is
+authorized, and no full test suite is needed for this specification-only change.
