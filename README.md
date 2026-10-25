@@ -281,6 +281,14 @@ boundary on 2026-10-25; per-operation review and Q2–Q5 remain required.
 their absent objects still refuse reference verification. No automatic pinning
 or admission is activated.
 
+The [A3d-2 retained sessions and refusing preflight](docs/requalification-coordinator.md)
+add native F/B ownership across reconciliation and a Writer-owned D session
+sharing the existing checked store operations. The coordinator refuses before
+mutation while authoritative input contracts remain unpublished. Its five-step
+description is review metadata; candidate installation, qualification, pinning,
+accepted-outcome execution and deployment qualification remain PENDING. The
+document maps all 38 spec obligations and the current sixteen narrowing mutants.
+
 ### A3 evidence tools
 
 | Tool | Purpose / exact entry point | Output |
@@ -288,6 +296,7 @@ or admission is activated.
 | Pinned registrar CCJ-1 / coreutils | Validate example bytes with `ccj.Parse` / `ccj.Marshal` from the `go.mod` pin; `sha256sum vectors/qual-maint/*.jsonl`; `wc -c vectors/qual-maint/*.jsonl` | Canonical-byte verdict, SHA-256 and byte counts including LF; expected identities in the vector README; framing only; semantic journal/host qualification is separate |
 | Go (serialized on shared hosts) | `env GOMAXPROCS=2 go test -p 1 ./internal/updateproof ./cmd/swarma-user-manager -count=1` | Narrow verdicts and owned fixtures; task-local untracked logs |
 | Go journal layer | `env GOMAXPROCS=2 go test -p 1 ./internal/qualmaint -count=1 -timeout=60s`; `env GOMAXPROCS=2 go build -p 1 ./internal/qualmaint` | Local codec/replay/store verdicts and Go-owned temporary fault fixtures; task-local untracked logs/coverage; no root qualification |
+| Go retained sessions / refusing coordinator | `env -u LINUXOS_ROOT_QUALIFICATION CGO_ENABLED=1 GORACE=atexit_sleep_ms=0 GOMAXPROCS=2 go test -p 1 ./internal/updateproof ./internal/qualmaint ./internal/qualreconcile -count=1 -timeout=90s`; race/build variants in the [narrow checks](docs/requalification-coordinator.md#tools-and-narrow-checks) | Owned native-lock, child, error-cut and preflight verdicts; task-local untracked logs/overlays; no integration qualification |
 | `dpkg` | Native held pinned descriptor with fixed `--audit`; owned lock/audit fixture: `go test ./internal/updateproof -run '^TestReconcileOwnedDpkgAuditExclusion$' -count=1` | Clean means exit zero and empty stdout/stderr; fixture uses only an owned empty database |
 | `systemctl` | Native held pinned descriptor with fixed `--no-block start swarma-user-manager-update-reconcile.service` | Bounded enqueue acknowledgement; root deployment remains pending |
 | `systemd-analyze` | `systemd-analyze verify --man=no --generators=no deploy/systemd/swarma-user-manager-update-reconcile.service deploy/systemd/swarma-user-manager-update-reconcile.path` | Unit parser diagnostics; uninstalled executable paths require owned copies pointing to a built fixture binary |

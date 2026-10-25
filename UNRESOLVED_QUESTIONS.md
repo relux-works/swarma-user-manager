@@ -54,8 +54,11 @@ rotation, admission reopening or generation changes are authorized.
 The A3c specification names the separate closed `qual-maint/1` journal, immutable
 transaction/evidence bindings and every A3 step's crash/recovery obligation. It
 now has a [local codec/replay/store implementation](docs/qual-maint-journal.md);
-its guard, automatic pinning, orchestration and root qualification remain
-unimplemented. The coverage map names the remaining PENDING runtime obligations. The [Q1 decision and four open recommendations](spec/qualification-maintenance-journal.md#9-open-decisions-and-recommendations)
+its [retained F/B and Writer-owned D sessions](docs/requalification-coordinator.md)
+are implemented, while the coordinator preflight refuses before mutation.
+The guard, automatic pinning, five-step mutating orchestration and root
+qualification remain unimplemented. The coverage maps name the remaining PENDING
+runtime obligations. The [Q1 decision and four open recommendations](spec/qualification-maintenance-journal.md#9-open-decisions-and-recommendations)
 record Q1 as decided by the curator on 2026-10-25: external-call boundaries under
 continuous package/worker exclusion, exclusive issuer D and shared admission-preparation
 D follow the accepted rule. Q2 selects
