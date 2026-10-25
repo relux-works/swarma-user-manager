@@ -24,6 +24,9 @@ hashes cannot prove that qualification happened.
   accepted retries and monotone notification-only updates. Historical accepted
   retry refreshes proof identity without a second `Advances` count. Failed-set
   retries cannot silently discard unresolved invocation/parent identities.
+  Context variants check cancellation after reads and before successful
+  completion; refusal returns an empty `History`, including at final EOF or
+  the last reference callback.
 - `Verify` / `VerifyContext` additionally verify every **direct entry reference**
   by exact size and SHA-256. They do not recursively authenticate object graphs,
   apply the owning A3b validators, verify full recorder membership/chronology,
@@ -46,13 +49,19 @@ hashes cannot prove that qualification happened.
   before entering this layer; it must not pre-hold D or lifecycle locks.
 - `Writer.PutObject` installs immutable exact bytes using exclusive temporary
   creation, file fsync, rename without replacement and objects-directory fsync.
-  Existing names must match; orphans/temporary files remain counted. The
+  Existing names must match; the actual file-synced descriptor remains open
+  through publication, with its device/inode bound to the digest path after
+  directory sync. Orphans/temporary files remain counted. The
   caller must validate each object's owning codec and authority before use.
 - `Writer.Append` requires the exact current checkpoint and a fully prepared
   entry. It verifies the prefix and direct objects, reserves the intent plus
   two maximum future entries/three sequence slots and planned content, syncs
   referenced objects, appends once, fsyncs journal and parent, then rereads the
-  exact bytes before returning a checkpoint. Short writes, sync failures,
+  exact bytes before returning a checkpoint. Synced reference descriptors stay
+  open through the operation, with identities rechecked after directory sync,
+  immediately before write and before receipt. Identity loss detected before
+  write leaves no journal bytes. Loss detected after write issues no receipt
+  and preserves uncertain bytes without repair. Short writes, sync failures,
   identity loss or expiry issue no receipt; uncertain mutations poison the
   handle. No tail truncation, rotation, repair or runtime collection exists.
 - `Writer.Reserve` rechecks a bounded content plan after recovery. The plan is
@@ -81,18 +90,18 @@ PENDING requirement. This is not root or end-to-end qualification.
 | `QualMaintSequenceReuse` | `TestQualMaintChain/sequence-reuse`, `TestQualMaintChain/sequence-gap`, `TestQualMaintSaturation` | PASS for contiguous safe bounded sequences |
 | `QualMaintNoncanonical` | `TestQualMaintNoncanonical`, `TestQualMaintEntryConstraints`, `TestQualMaintObjectCodecs`, `TestQualMaintObjectConstraints`, `TestQualMaintObjectTypeClosed` | PASS for the closed entry/new-wrapper codecs |
 | `QualMaintTruncatedTail` | `TestQualMaintChain/truncated-tail`, `TestQualMaintChain/corrupt-tail`, `TestQualMaintTruncatedTailStore` | PASS for refusing partial/corrupt tails without repair in owned files |
-| `QualMaintObjectMismatch` | `TestQualMaintObjectMismatch`, `TestQualMaintObjectStore`, `TestQualMaintStoreReferenceRefusals`, `TestQualMaintObjectInstallIdentity` | PARTIAL: direct size/hash/missing/collision checks PASS; owning A3b validators, transitive bindings and authenticated observations PENDING |
+| `QualMaintObjectMismatch` | `TestQualMaintObjectMismatch`, `TestQualMaintObjectStore`, `TestQualMaintStoreReferenceRefusals`, `TestQualMaintObjectInstallIdentity`, `TestReviewQualMaintReferenceIdentityLifetime`, `TestQualMaintReferenceCustodyCuts` | PARTIAL: direct size/hash/missing/collision checks PASS; owning A3b validators, transitive bindings and authenticated observations PENDING |
 | `QualMaintAssociation` | `TestQualMaintAssociation`, `TestQualMaintFailedSetCoverage` | PARTIAL: local uniqueness/kinds/parents and retry coverage PASS; authentic recorder membership/order PENDING |
 | `QualMaintCoverageGap` | `TestQualMaintFailedSetCoverage`, `TestQualMaintExactRetry` | PARTIAL: unresolved-set and accepted-baseline guards PASS; full before/after recorder and database coverage PENDING |
 | `QualMaintFalseAccepted` | `TestQualMaintPhases`, `TestQualMaintEntryConstraints` | PARTIAL: phase/required-proof shape and frozen fields PASS; actual qualification and semantic commit gate PENDING |
 | `QualMaintCrashCuts` | `TestQualMaintStoreCrashCuts`, `TestQualMaintObjectCrashCuts`, `TestQualMaintFsyncOrder`, `TestQualMaintTruncatedTailStore` | PARTIAL: 22 before/after local error cuts, real-sync call order and partial-write refusal PASS; actual crash/power-loss, policy/manifest/pin, qualifier and cache cuts PENDING |
 | `QualMaintPinWithoutOutcome` | No pin/admission API is connected | PENDING: real guard and qualified-pin/outcome binding |
 | `QualMaintWrongTransactionSet` | `TestQualMaintPhases/changed-input`, `TestQualMaintExactRetry`, `TestQualMaintFailedSetCoverage` | PARTIAL: frozen entry set and exact accepted retry PASS; authenticated complete manifest/frontier binding PENDING |
-| `QualMaintHandoffLost` | `TestQualMaintWriterExclusion`, `TestQualMaintReplayDeadline` | PARTIAL: W/D exclusion and local deadline refusal PASS; F/B/root-writer continuity and child handoff PENDING |
+| `QualMaintHandoffLost` | `TestQualMaintWriterExclusion`, `TestQualMaintReplayDeadline`, `TestReviewQualMaintFinalCancellation`, `TestQualMaintCancellationReadErrors` | PARTIAL: W/D exclusion and local deadline refusal PASS; F/B/root-writer continuity and child handoff PENDING |
 | `QualMaintQualifierStateSnapshotOrder` | Production issuer/state snapshot code unchanged | PENDING: real issuer and shared admission path through D -> effects -> gate -> data, provider-release boundaries and omitted-edge mutant |
 | `QualMaintStaleInvocation` | Local unit/boot field constraints only | PENDING: latest terminal successful current-boot invocation observations |
 | `QualMaintBootGap` | No boot precheck connected | PENDING: ordinary boot renewal and unmatched recorder transitions |
-| `QualMaintUncertainAck` | `TestQualMaintStoreCrashCuts`, `TestQualMaintTruncatedTailStore`, `TestQualMaintStoreReferenceRefusals`, `TestQualMaintExactRetry` | PARTIAL: no uncertain acknowledgement, no stale duplicate append and no second local advance PASS; restart/full-qualification recovery and cache protocol PENDING |
+| `QualMaintUncertainAck` | `TestQualMaintStoreCrashCuts`, `TestQualMaintTruncatedTailStore`, `TestQualMaintStoreReferenceRefusals`, `TestQualMaintExactRetry`, `TestReviewQualMaintReferenceIdentityLifetime`, `TestQualMaintReferenceCustodyCuts` | PARTIAL: no uncertain acknowledgement, no stale duplicate append and no second local advance PASS; restart/full-qualification recovery and cache protocol PENDING |
 | `QualMaintNotificationHeld` | `TestQualMaintNotificationLaterBoot`, `TestQualMaintEntryConstraints`, `TestQualMaintObjectConstraints` | PARTIAL: receipt shape, immutable incident and monotone delivery PASS; authenticated owner/curator transports, original P7 deadline and response authority PENDING |
 | `QualMaintNotificationLaterBoot` | `TestQualMaintNotificationLaterBoot` | PARTIAL: terminal boot/fields preserved in replay PASS; real later-boot delivery, clock continuity and authenticated receipts PENDING |
 | `QualMaintSaturation` | `TestQualMaintSaturation`, `TestQualMaintStoreSaturation` | PARTIAL: codec/store quotas, orphan accounting and intent/content budgets PASS; supported deployment budgets and durable incident reserve PENDING |
@@ -124,9 +133,14 @@ attack-surface coverage or root qualification.
 | Hash without final LF | Independent published line/checkpoint identities | `TestQualMaintPublishedChain` |
 | Ignore EOF with partial final line | Whole-tail refusal, no passing prefix | `TestQualMaintChain/truncated-tail` |
 | Allow embedded wrapper types | Exact closed Go/wire type boundary | `TestQualMaintObjectTypeClosed` |
-| Ignore publisher descriptor/name inode binding | Installed object is the inode actually fsynced | `TestQualMaintObjectInstallIdentity/object.install.before` |
+| Ignore content descriptor/name inode comparisons | Installed object is the inode actually fsynced | `TestQualMaintObjectInstallIdentity/object.install.before` |
+| Omit existing-object custody check | Existing receipt retains the file-synced inode after directory sync | `TestReviewQualMaintReferenceIdentityLifetime/existing-after-directory-sync` |
+| Omit append reference custody checks | Reference replacement before write refuses without appending | `TestReviewQualMaintReferenceIdentityLifetime/append-after-reference-sync` |
+| Omit final append custody check | Replacement after journal reread still refuses the receipt | `TestQualMaintReferenceCustodyCuts/journal.reread.after` |
+| Omit post-read/final replay cancellation checks | Final EOF cancellation cannot expose history | `TestReviewQualMaintFinalCancellation/reader-eof-cancel` |
+| Omit post-read/final reference cancellation checks | Last reference cancellation cannot expose history | `TestReviewQualMaintFinalCancellation/last-reference-cancel` |
 
-All twelve were rejected by the named test (each mutant command exits 1).
+All seventeen were rejected by the named test (each mutant command exits 1).
 There were no surviving mutants in these runs. This does not assert that any
 pending integration mutant in spec §7 has been executed.
 
@@ -136,6 +150,7 @@ Use the repository's pinned Go toolchain and serialize on a shared host:
 
 ```sh
 env GOMAXPROCS=2 go test -p 1 ./internal/qualmaint -count=1 -timeout=60s
+env GOMAXPROCS=2 go test -race -p 1 ./internal/qualmaint -count=1 -timeout=60s
 env GOMAXPROCS=2 go build -p 1 ./internal/qualmaint
 ```
 
