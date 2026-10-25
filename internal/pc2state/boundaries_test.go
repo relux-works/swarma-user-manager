@@ -178,16 +178,56 @@ func TestPC2InventoryNeighbors(t *testing.T) {
 		o["entries"].([]any)[0].(map[string]any)["kind"] = kind
 		mustDecode(t, RecoveryHistory, canonicalTest(t, o))
 	}
-	// Count limits are checked directly before element traversal, avoiding giant encodings.
-	for kind, keyCount := range map[Kind]int{RecoveryHistory: 65536, CapacityInventory: 1048576} {
-		o := tree(t, controls(t)[kind])
-		key := "entries"
-		if kind == CapacityInventory {
-			key = "objects"
-		}
-		o[key] = make([]any, keyCount+1)
-		requireInvalid(t, schema(kind)(o))
+}
+
+func countRowID(index int) string {
+	var digits [8]byte
+	for i := len(digits) - 1; i >= 0; i-- {
+		digits[i] = '0' + byte(index%10)
+		index /= 10
 	}
+	return string(digits[:])
+}
+
+// Claim: Public Decode accepts 65536 valid sorted history rows and rejects 65537 solely for the row count.
+func TestPC2RecoveryHistoryCountBoundary(t *testing.T) {
+	const maximum = 65536
+	rows := make([]any, maximum+1)
+	for i := range rows {
+		rows[i] = map[string]any{
+			"kind": "attempt", "id": countRowID(i),
+			"digest": "sha256:" + strings.Repeat("a", 64), "bytes": int64(1),
+		}
+	}
+	o := map[string]any{"version": string(RecoveryHistory), "entries": rows[:maximum]}
+	t.Run("at-limit", func(t *testing.T) {
+		mustDecode(t, RecoveryHistory, canonicalTest(t, o))
+	})
+	o["entries"] = rows
+	t.Run("over-limit", func(t *testing.T) {
+		invalid(t, RecoveryHistory, canonicalTest(t, o))
+	})
+}
+
+// Claim: The capacity schema accepts 1048576 valid sorted rows and rejects 1048577 solely for the row count.
+func TestPC2CapacityInventoryCountBoundary(t *testing.T) {
+	const maximum = 1048576
+	rows := make([]any, maximum+1)
+	for i := range rows {
+		rows[i] = map[string]any{"id": countRowID(i), "bytes": int64(1), "integrity_bytes": int64(0)}
+	}
+	o := map[string]any{
+		"version": string(CapacityInventory), "owner": "manager", "kind": "attempts", "objects": rows[:maximum],
+	}
+	t.Run("at-limit", func(t *testing.T) {
+		if err := schema(CapacityInventory)(o); err != nil {
+			t.Fatalf("valid capacity boundary: %v", err)
+		}
+	})
+	o["objects"] = rows
+	t.Run("over-limit", func(t *testing.T) {
+		requireInvalid(t, schema(CapacityInventory)(o))
+	})
 }
 
 // Claim: CCJ scalar, lexical and depth boundaries hold; configured large caps are checked without giant allocations.
