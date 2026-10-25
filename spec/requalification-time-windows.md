@@ -7,17 +7,30 @@ or activation is delivered.** This defines the pre-pin window and a proposed
 Scope, TimeFacts, Q, recorder and generation/effect formats remain unchanged.
 
 Provider references are the broker's
-[amended time contract](https://github.com/relux-works/swarma-credential-broker/blob/1ae6cace28cbe3795b76a6ef728e00119071fa2e/docs/time-contract.md#final-issuance-enrollment-and-registration-windows),
-[handoff requirements](https://github.com/relux-works/swarma-credential-broker/blob/1ae6cace28cbe3795b76a6ef728e00119071fa2e/docs/time-handoff.md),
-[window-profile schema](https://github.com/relux-works/swarma-credential-broker/blob/1ae6cace28cbe3795b76a6ef728e00119071fa2e/docs/time-window-profile.md)
-and [macOS requirements](https://github.com/relux-works/swarma-credential-broker/blob/1ae6cace28cbe3795b76a6ef728e00119071fa2e/docs/time-handoff-macos.md)
-at `1ae6cac`, plus the unchanged
+[amended time contract](https://github.com/relux-works/swarma-credential-broker/blob/7294b7aea68a8e0757437075efa3a6e318a18e51/docs/time-contract.md#final-issuance-enrollment-and-registration-windows),
+[handoff requirements](https://github.com/relux-works/swarma-credential-broker/blob/7294b7aea68a8e0757437075efa3a6e318a18e51/docs/time-handoff.md),
+[window-profile schema](https://github.com/relux-works/swarma-credential-broker/blob/7294b7aea68a8e0757437075efa3a6e318a18e51/docs/time-window-profile.md)
+and [macOS requirements](https://github.com/relux-works/swarma-credential-broker/blob/7294b7aea68a8e0757437075efa3a6e318a18e51/docs/time-handoff-macos.md)
+at `7294b7a`, plus the unchanged
 [API at `8cdea82`](https://github.com/relux-works/swarma-credential-broker/blob/8cdea829b261e97908623376fe6857e9960fe877/docs/qualified-time-api.md).
 These publish the handoff design and an inactive original-reader interface;
 they supply no accepting handoff codec, verifier, reader or macOS provider.
 The [eleven-fact adapter](requalification-executor-contracts.md#61-qualified-time)
 continues to apply. This profile keeps its native operation/window identities
 and owning journal format; the shared schema is not a provider wire codec.
+
+The seven published schema groups map to this profile as follows. These links
+organize the existing requirements; they do not qualify or activate the profile.
+
+| Provider schema group | Owning sections in this profile |
+|---|---|
+| Versioned identity and dependency graph | [Trust and preparation](#1-trust-and-preparation), [pre-pin identity and scope](#2-linux-pre-pin-window), [version and closed record](#41-version-and-closed-record) |
+| Canonical timing meanings | [Linux pre-pin window](#2-linux-pre-pin-window), [macOS binding](#3-mandatory-macos-equivalent) |
+| Uncertainty coverage | [Linux pre-pin window](#2-linux-pre-pin-window) |
+| Preparation authenticity and bounded ownership | [Trust and preparation](#1-trust-and-preparation) |
+| Final admission, durable use and recovery | [Linux pre-pin window](#2-linux-pre-pin-window), [versioned use transition](#4-proposed-qual-maint2-use-transition), [serialized burn, act and completion](#42-serialized-burn-act-and-completion), [crash cuts](#5-crash-cuts-and-recovery) |
+| Enforcement and per-platform qualification | [Linux pre-pin window](#2-linux-pre-pin-window), [mandatory macOS equivalent](#3-mandatory-macos-equivalent), [open gates](#7-open-gates-and-document-validation) |
+| Paired controls and composition | [Pre-pin scope and distinct later windows](#2-linux-pre-pin-window), [later executable controls](#6-later-executable-controls), [open gates](#7-open-gates-and-document-validation) |
 
 ## 1. Trust and preparation
 
@@ -42,7 +55,7 @@ Preparation must establish the following before entering the local window:
   settlement acknowledgment. The witness interface must establish the current
   independent checkpoint and ancestry under the original operation deadline;
   a digest of a witness head is not that authority. The published
-  [`OriginalReader` interface](https://github.com/relux-works/swarma-credential-broker/blob/1ae6cace28cbe3795b76a6ef728e00119071fa2e/timeconf/original_linux.go)
+  [`OriginalReader` interface](https://github.com/relux-works/swarma-credential-broker/blob/7294b7aea68a8e0757437075efa3a6e318a18e51/timeconf/original_linux.go)
   defines the original-loading boundary, but its only shipped implementation
   refuses. An accepting reader and the independent witness remain pending.
 - Retain bounded immutable owned copies, a private authenticated anchor and
@@ -77,9 +90,10 @@ Retain package F, B, worker W, root-writer exclusion and **exclusive deployment
 D** continuously. Provider collection and preparation require journal append
 to be released. Before the clock read, acquire append without waiting and admit
 the durable use transition by selecting its protected exact head, live writer
-epoch and unused operation/window key. Keep append through verification and the
-acknowledged burn. Effects/core, gate, data and recorder R remain absent at
-admission, read and verification. Package F is unrelated to another
+epoch and exact unused use revision for the operation/window key before `m`.
+Keep append through verification and the acknowledged burn.
+Effects/core, gate, data and recorder R remain absent at admission, read and
+verification. Package F is unrelated to another
 consumer's final F; do not release package exclusion to obtain time. The real
 snapshot branch remains D -> effects -> gate -> data, with R/append absent,
 and finishes before provider preparation. The two qualifier handoffs still
@@ -92,35 +106,39 @@ and pass its value as data. The read is not an injected Clock callback,
 come from the qualified platform binding; an unavailable/changed binding
 refuses. No clock read or other I/O occurs inside `VerifyWindow`.
 
-Use checked integer nanoseconds in one boot/domain:
+The schema names the original receipt observation `s`, the optional pre-lock
+capture `p`, and the sole final capture `m` (previously `n` here). This profile
+uses `p = s`, with no extra pre-lock capture. Use checked integer nanoseconds
+in one boot/domain:
 
 | Symbol | Meaning |
 |---|---|
 | `s` | The bound receipt's original post-collection `clock.observed_ns` |
-| `n` | The single in-window suspend-aware clock observation after append/use-transition admission |
+| `p` | The optional pre-lock capture; equal to `s` in this profile, with no extra capture |
+| `m` | The single in-window suspend-aware clock observation after append/use-transition admission |
 | `D` | Original exclusive absolute monotonic deadline; here D denotes time, not the deployment lock |
 | `T` | Qualified maximum observation-to-durable-completion delay, including preparation/admission already spent |
-| `f` | Enforced remaining-work bound from `n` through the endpoint below |
+| `f` | Enforced remaining-work bound from `m` through the endpoint below |
 | `eps` | Qualified conservative capture/conversion/rate error allowance |
 
-Require `n >= s`, `f > 0`, nonnegative finite bounds, and both:
+Require `m >= p >= s` (with `p = s`), `f > 0`, nonnegative finite bounds, and both:
 
 ```
-n - s + f + eps <= T
-n + f + eps < D
+m - s + f + eps <= T
+m + f + eps < D
 ```
 
 Reject overflow, underflow, mixed domains/boots and equality at D. The original
 boot/start/deadline tuple, UTC deadline identity, T, qualification and uncertainty
 reserve are immutable for this operation; retries or a second handoff cannot
-enlarge them. Include pre-entry elapsed time rather than resetting s to n.
+enlarge them. Include pre-entry elapsed time rather than resetting s to m.
 The original caller/qualified budget and provider's at-most-ten-second ceiling
 still bind. Other consumers' 250/1000/2000 ms budgets are not executor defaults.
 Finite installed f/T/eps values and the deadline conversion must be published
 and qualified; no measured average or new permissive default selects them here.
 
-Initial append admission and protected selection precede n; their elapsed cost
-is included in n-s and the original deadline. The bound f includes local
+Initial append admission and protected selection precede m; their elapsed cost
+is included in m-s and the original deadline. The bound f includes local
 verification, the serialized burn CAS, durable burn,
 policy staging/write/sync/rename, parent sync, exact protected readback, and
 the completion entry's nonwaiting append re-entry/sync/parent sync/readback.
@@ -137,7 +155,7 @@ its use-state**, established by policy durability/readback and the durable
 These are two files with ordered commits, not an atomic cross-file transaction.
 Both must be established before D; unknown durability yields no success.
 
-The interval after n still requires a qualified enforced read-to-act-and-durability
+The interval after m still requires a qualified enforced read-to-act-and-durability
 bound, or an act/commit primitive that itself obeys the original deadline.
 The clock read detects pre-entry delay; it cannot prevent descheduling after
 the read. Context cancellation, a watchdog, average fsync latency or detecting
@@ -269,9 +287,10 @@ The versioned transaction is:
 
 1. Retain the §2 outer exclusions and acquire journal append nonblockingly,
    with effects/gate/data/R absent. Admit this use transition against the
-   protected exact expected head, current writer epoch and unused key before
-   capturing n. With append still held, take the sole qualified clock read and
-   pass n into pure VerifyWindow over prepared originals, independently expected
+   protected exact expected head and current writer epoch; select the exact
+   unused use revision for the operation/window key before capturing m. With
+   append still held, take the sole qualified clock read and
+   pass m into pure VerifyWindow over prepared originals, independently expected
    identity/deadline, current protected intent/window_plan, floors, ownership
    and selected use revision. The proposed operation/window/deadline must match
    that frozen window_plan. Verification returns a candidate transition, not
@@ -282,7 +301,7 @@ The versioned transaction is:
    readback, then release append. This is one serialized durable compare-and-set;
    ambiguous persistence or acknowledgment gives no permission to act. All
    post-read CAS/storage/authority costs belong to f, without an external
-   callback. Initial admission has already spent part of n-s; it cannot follow
+   callback. Initial admission has already spent part of m-s; it cannot follow
    the read or restart the original budget.
 3. Only the live call holding that successful burn may dispatch the one planned
    policy pin. A recovered burned record is not permission to resume dispatch.
@@ -350,12 +369,12 @@ failure, a skipped plant or rejection of every valid control is insufficient.
 |---|---|---|
 | `ExecutorWindowAdmissionOrder` | A clock read before initial append admission and protected exact-head/current-epoch/unused-key selection must fail the order invariant, with no burn or pin. Provider collection inside append and any second read also fail. | Admit the use transition, capture once, verify locally, burn while append remains held, act and complete within f and original D. Move capture ahead of admission as the narrowing plant; require the named ordering failure. |
 | `ExecutorWindowStaleCapture` | Identical stale pre-entry data cannot distinguish timely entry from a pause. Require the actual in-window read; do not claim a pure checker detects elapsed time it never observed. | Same qualified inputs and original deadline, timely read admits the candidate; remove/move the fixed read and require the native pause control to fail. |
-| `ExecutorWindowTimelyAndLate` | With illustrative milliseconds s=0, f=20, eps=1, T=2000, D=250, n=1500 refuses the deadline predicate and performs no burn/act. | n=110 yields 131<=2000 and 131<250, a time-predicate pass only. A real timely/late native run must also prove the enforced remaining act/durability bound; substituted arithmetic inputs prove arithmetic only. Plant renewed D or reuse n=110 after an actual pause. |
-| `ExecutorWindowAfterReadPause` | Pause/suspend after n cannot permit dispatch/durability past original D; otherwise the profile stays unqualified. A late post-write check does not undo a violation. | Qualified deadline-aware act/fence or enforced bound completes the same act and use-state before D. Remove that mechanism and require the intended late-act assertion to fail. |
+| `ExecutorWindowTimelyAndLate` | With illustrative milliseconds s=0, f=20, eps=1, T=2000, D=250, m=1500 refuses the deadline predicate and performs no burn/act. | m=110 yields 131<=2000 and 131<250, a time-predicate pass only. A real timely/late native run must also prove the enforced remaining act/durability bound; substituted arithmetic inputs prove arithmetic only. Plant renewed D or reuse m=110 after an actual pause. |
+| `ExecutorWindowAfterReadPause` | Pause/suspend after m cannot permit dispatch/durability past original D; otherwise the profile stays unqualified. A late post-write check does not undo a violation. | Qualified deadline-aware act/fence or enforced bound completes the same act and use-state before D. Remove that mechanism and require the intended late-act assertion to fail. |
 | `ExecutorWindowDoubleCheck` | Two pure checks over the same unused revision may both return candidates; only one durable consume can authorize dispatch. Assert one burn and at most one dispatch. | One live candidate burns/acts/commits. Remove the serialized unused/head check and require the racing duplicate assertion to fail. |
 | `ExecutorWindowSecondHRefused` | After H1 burns a key, a fresh valid H2 for that same operation/window refuses even with new challenge/run; no second act or use reset. | A separately permitted original operation/window with current intent and fresh H may consume. Plant keying by H instead of operation/window. |
 | `ExecutorWindowOriginalBinding` | Changed attempt/ref size/window/boot/start/UTC deadline/clock mapping or requester-chosen expected values refuses before burn. | Complete independently derived Scope and original tuple match. Plant copying the expected operation/deadline from H. |
-| `ExecutorWindowReserveBoundary` | Checked overflow, n<s, n-s+f+eps>T, n+f+eps=D, missing reserve or shrinking δ refuses without act. | Exact representable interior bounds pass time predicates; plant inclusive deadline or omitted burn/parent-sync cost. |
+| `ExecutorWindowReserveBoundary` | Checked overflow, m<s, m-s+f+eps>T, m+f+eps=D, missing reserve or shrinking δ refuses without act. | Exact representable interior bounds pass time predicates; plant inclusive deadline or omitted burn/parent-sync cost. |
 | `ExecutorWindowBurnCrashCuts` | Cut before/after every burn, policy publication and completion durability boundary in §5. No uncertain burn permits act; acknowledged burn never becomes unused. | Neighboring uninterrupted sequence commits the policy/use outcome; plant dispatch before durable burn or recovery redispatch from burned. |
 | `ExecutorWindowRestoredUseRefused` | Restore the unused journal together with its run nonce, or resume an old writer/delegated job; independent currentness/fencing refuses. | Current non-restored history plus authentic exclusion permits one use. Plant trusting D/run nonce or matching restored local files alone. |
 | `ExecutorWindowOriginalsAndPureCheck` | Substituted/missing originals, requester-selected validator/anchor, provider/witness/clock callback or I/O inside VerifyWindow refuses or fails the dependency gate. | Enrolled original-reader/witness preparation and exact bounded copies pass local validation. Plant omitted original validation or a callback reachable by the pure check. |
@@ -372,7 +391,7 @@ scheduling, suspend, power-loss, currentness or process-fence guarantees.
 ## 7. Open gates and document validation
 
 The provider's handoff, profile schema, macOS requirements and inactive
-OriginalReader interface are published at the pinned `1ae6cac` references above.
+OriginalReader interface are published at the pinned `7294b7a` references above.
 Before codec/adapters: implement and review the accepting original reader,
 handoff codec/preparer/verifier/consume and independently current witness;
 review this consumer version transition and custody, concrete finite
