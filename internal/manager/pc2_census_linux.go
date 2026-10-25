@@ -59,6 +59,7 @@ type censusEvidence struct {
 	Commitment   string                  `json:"commitment"`
 	Index        pc2store.Head           `json:"index"`
 	Heads        []string                `json:"heads"`
+	Capture      censusCaptureEvidence   `json:"capture"`
 	Native       []string                `json:"native_observations"`
 	Held         int64                   `json:"held_bytes"`
 	Envelope     int64                   `json:"envelope_bytes"`
@@ -151,6 +152,10 @@ func prepareManagerCensus(c *censusContext) (prepared *PreparedCensus, err error
 		return bad(nil)
 	}
 	q, total, sources, e := reservationCensus(proof.Reservation)
+	if e != nil {
+		return bad(e)
+	}
+	bindings, e := censusBindings(c)
 	if e != nil {
 		return bad(e)
 	}
@@ -371,7 +376,18 @@ func prepareManagerCensus(c *censusContext) (prepared *PreparedCensus, err error
 	if digestCensus([]byte(c.commit)) != c.commitDigest || original.commit != c.commit || original.commitDigest != c.commitDigest || original.baseline != c.baseline {
 		return bad(nil)
 	}
-	evidence := censusEvidence{"pc2-census-evidence/1", proof.Installation, c.commitDigest, c.baseline.Head, append([]string(nil), proof.Heads...), []string{}, held, snapshot.Envelope(), bounds, verdict, owner}
+	finalBindings, e := censusBindings(c)
+	if e != nil || !sameCensusBindings(bindings, finalBindings) {
+		return bad(e)
+	}
+	evidence := censusEvidence{
+		Version: "pc2-census-evidence/1", Installation: proof.Installation,
+		Commitment: c.commitDigest, Index: c.baseline.Head,
+		Heads:   append([]string(nil), proof.Heads...),
+		Capture: captureCensusEvidence(c, bindings, c1, entries, native),
+		Native:  []string{}, Held: held, Envelope: snapshot.Envelope(),
+		Prospective: bounds, Verdict: verdict, Owner: owner,
+	}
 	for _, n := range snapshot.History() {
 		b, _ := canonical(n)
 		evidence.Native = append(evidence.Native, digestCensus(b))

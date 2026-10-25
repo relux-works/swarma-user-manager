@@ -16,6 +16,18 @@ import (
 // FileIdentity is a measured identity, not a custody or currentness credential.
 type FileIdentity struct{ Device, Inode, Mount uint64 }
 
+// DirectoryBinding copies a checked named directory/parent relationship. These
+// measured facts confer no custody authority and retain no file description.
+type DirectoryBinding struct {
+	Name       string       `json:"name"`
+	Identity   FileIdentity `json:"identity"`
+	Parent     FileIdentity `json:"parent"`
+	UID        uint32       `json:"uid"`
+	GID        uint32       `json:"gid"`
+	Mode       uint32       `json:"mode"`
+	ParentMode uint32       `json:"parent_mode"`
+}
+
 // ReadDirectory owns one pinned description and borrows its retained parent.
 // PinReadDirectory is mechanical validation only; callers must authenticate the
 // installation independently. It creates nothing and grants no census authority.
@@ -97,6 +109,26 @@ func (d *ReadDirectory) Close() error {
 		return nil
 	}
 	return closeOwned(&d.file)
+}
+
+// Bindings checks the retained chain and returns independent values, ordered
+// from its earliest pinned ancestor to this directory. Call outside the fence.
+func (d *ReadDirectory) Bindings() ([]DirectoryBinding, error) {
+	if e := d.check(); e != nil {
+		return nil, e
+	}
+	bindings := []DirectoryBinding{}
+	for pin := d; pin != nil; pin = pin.parentPin {
+		bindings = append(bindings, DirectoryBinding{
+			Name: pin.name, Identity: FileIdentity{pin.id.Device, pin.id.Inode, pin.id.Mount},
+			Parent: FileIdentity{pin.parentID.Device, pin.parentID.Inode, pin.parentID.Mount},
+			UID:    pin.policy.uid, GID: pin.policy.gid, Mode: pin.mode, ParentMode: pin.parentMode,
+		})
+	}
+	for i, j := 0, len(bindings)-1; i < j; i, j = i+1, j-1 {
+		bindings[i], bindings[j] = bindings[j], bindings[i]
+	}
+	return bindings, nil
 }
 
 type FileImage struct {
