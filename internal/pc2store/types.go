@@ -245,6 +245,12 @@ func (f funding) validate() error {
 	}
 	return nil
 }
+
+// Four bootstrap slots cover funding/genesis/archive/current head. Each later
+// transition owns three disjoint maxRecord slots: record, archived head and
+// current-head output. Renaming a slot's file never makes that slot reusable.
+func (f funding) metadataTransitions() int64 { return (f.Metadata - 4*maxRecord) / (3 * maxRecord) }
+
 func (f funding) find(ticket string) (allocation, bool) {
 	for _, a := range f.Allocations {
 		if a.Ticket == ticket {

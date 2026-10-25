@@ -213,8 +213,8 @@ func (s *Store) inspect() (Report, funding, map[string]*copyState, error) {
 		return report, f, nil, ErrUnavailable
 	}
 	h, e := s.readHead()
-	if e != nil {
-		return report, f, nil, e
+	if e != nil || h.Sequence > f.metadataTransitions() {
+		return report, f, nil, ErrUnavailable
 	}
 	report.Head = h
 	states, _, e := s.history(f, h)

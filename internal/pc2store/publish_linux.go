@@ -41,7 +41,7 @@ func (s *Store) Publish(expected Head, ticket string, o pc2state.Object) (Receip
 	}
 	// The committed fixture metadata frontier pays for BOTH association and
 	// installation outputs and their simultaneous head/archive/staging copies.
-	if report.MetadataBytes+6*maxRecord > f.Metadata || expected.Sequence+2 >= maxRecords {
+	if expected.Sequence+2 > f.metadataTransitions() || report.MetadataBytes+6*maxRecord > f.Metadata || expected.Sequence+2 >= maxRecords {
 		return Receipt{}, ErrUnavailable
 	}
 	assoc := record{Event: "associate", Ticket: ticket, Digest: digest, Bytes: int64(len(raw)), Codec: o.Kind(), To: location(a, digest, true)}
