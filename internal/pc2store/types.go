@@ -122,7 +122,7 @@ func admittedIdentityRole(owner, role string) bool {
 	return false
 }
 func admittedDirectory(owner, role string) bool {
-	return admittedIdentityRole(owner, role) || (owner == "manager" && role == "capacity")
+	return admittedIdentityRole(owner, role) || (owner == "manager" && (role == "capacity" || role == "native-effects" || role == "native-generations"))
 }
 func text(s string) bool {
 	if len(s) < 1 || len(s) > 255 || !utf8.ValidString(s) {
