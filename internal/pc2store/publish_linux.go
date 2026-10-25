@@ -3,20 +3,34 @@
 package pc2store
 
 import (
+	"errors"
+
 	"github.com/relux-works/swarma-user-manager/internal/pc2state"
 )
+
+// A receipt is acknowledged only after writer release. Preserve any earlier
+// refusal as the first cause and attach the cleanup failure without rollback.
+func finishReceipt(result *Receipt, err *error, release func() error) {
+	if e := release(); e != nil {
+		*result = Receipt{}
+		if *err == nil {
+			*err = ErrIndeterminate
+		}
+		*err = errors.Join(*err, e)
+	}
+}
 
 // Publish associates a prefunded physical copy before creating staging bytes.
 // Any error after starting publication is indeterminate and retains the exact
 // original funding. It never means that the operation was rolled back.
-func (s *Store) Publish(expected Head, ticket string, o pc2state.Object) (Receipt, error) {
+func (s *Store) Publish(expected Head, ticket string, o pc2state.Object) (result Receipt, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	unlock, e := s.lock()
 	if e != nil {
 		return Receipt{}, e
 	}
-	defer unlock()
+	defer finishReceipt(&result, &err, unlock)
 	report, f, states, e := s.inspect()
 	if e != nil {
 		return Receipt{}, e
@@ -31,8 +45,8 @@ func (s *Store) Publish(expected Head, ticket string, o pc2state.Object) (Receip
 		if prior.installed == nil || prior.installed.Digest != digest || prior.installed.Codec != o.Kind() {
 			return Receipt{}, ErrUnavailable
 		}
-		if s.stabilize(report.Head) != nil {
-			return Receipt{}, ErrIndeterminate
+		if e = s.stabilize(report.Head); e != nil {
+			return Receipt{}, errors.Join(ErrIndeterminate, e)
 		}
 		return Receipt{prior.receipt, prior.installed.StorageID, prior.installed.To}, nil
 	}
@@ -47,38 +61,38 @@ func (s *Store) Publish(expected Head, ticket string, o pc2state.Object) (Receip
 	assoc := record{Event: "associate", Ticket: ticket, Digest: digest, Bytes: int64(len(raw)), Codec: o.Kind(), To: location(a, digest, true)}
 	assocHead, e := s.publishRecord(expected, assoc)
 	if e != nil {
-		return Receipt{}, ErrIndeterminate
+		return Receipt{}, errors.Join(ErrIndeterminate, e)
 	}
 	// No payload pathname is created until the association head is durable.
 	if e = s.makeLineage("staging", a.CopyID); e != nil {
-		return Receipt{}, ErrIndeterminate
+		return Receipt{}, errors.Join(ErrIndeterminate, e)
 	}
 	if e = s.makeLineage(string(a.Role), a.CopyID); e != nil {
-		return Receipt{}, ErrIndeterminate
+		return Receipt{}, errors.Join(ErrIndeterminate, e)
 	}
 	stage, dest := location(a, digest, true), location(a, digest, false)
 	if e = s.writeFile(stage, raw); e != nil {
-		return Receipt{}, ErrIndeterminate
+		return Receipt{}, errors.Join(ErrIndeterminate, e)
 	}
 	if e = s.rename(stage, dest, false); e != nil {
-		return Receipt{}, ErrIndeterminate
+		return Receipt{}, errors.Join(ErrIndeterminate, e)
 	}
 	actual, id, e := s.read(dest, a.MaxBytes)
 	if e != nil || hash(actual) != digest {
-		return Receipt{}, ErrIndeterminate
+		return Receipt{}, errors.Join(ErrIndeterminate, e)
 	}
 	sid, e := f.identity(a, digest, dest)
 	if e != nil {
-		return Receipt{}, ErrIndeterminate
+		return Receipt{}, errors.Join(ErrIndeterminate, e)
 	}
 	installed := record{Event: "install", Ticket: ticket, Digest: digest, Bytes: int64(len(raw)), Codec: o.Kind(), From: stage, To: dest, StorageID: sid, Identity: id}
 	h, e := s.publishRecord(assocHead, installed)
 	if e != nil {
-		return Receipt{}, ErrIndeterminate
+		return Receipt{}, errors.Join(ErrIndeterminate, e)
 	}
 	final, _, _, e := s.inspect()
 	if e != nil || final.Head != h {
-		return Receipt{}, ErrIndeterminate
+		return Receipt{}, errors.Join(ErrIndeterminate, e)
 	}
 	return Receipt{h, sid, dest}, nil
 }

@@ -4,6 +4,7 @@ package pc2store
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -32,20 +33,50 @@ type Store struct {
 }
 
 func OpenInstalled(_ string) (*Store, error) { return nil, ErrUnavailable }
+
+// cleanupError marks failed release (including a close whose descriptor is
+// already gone). It must not be mistaken for an absent immutable destination.
+type cleanupError struct{ cause error }
+
+func (e *cleanupError) Error() string   { return e.cause.Error() }
+func (e *cleanupError) Unwrap() []error { return []error{ErrUnavailable, e.cause} }
+
+// closeOwned consumes ownership before close, even on error: retrying close
+// could affect a reused descriptor. A deferred fallback sees nil after a
+// deliberate early close, so every owned description is closed exactly once.
+func closeOwned(slot **os.File) error {
+	f := *slot
+	if f == nil {
+		return nil
+	}
+	*slot = nil
+	if e := f.Close(); e != nil {
+		return &cleanupError{fmt.Errorf("close %q: %w", f.Name(), e)}
+	}
+	return nil
+}
+
+func closeInto(result *error, slot **os.File) {
+	if e := closeOwned(slot); e != nil {
+		*result = errors.Join(*result, e)
+	}
+}
+
+func releaseLock(slot **os.File) error {
+	if *slot == nil {
+		return nil
+	}
+	var err error
+	if e := unix.Flock(int((*slot).Fd()), unix.LOCK_UN); e != nil {
+		err = &cleanupError{fmt.Errorf("unlock: %w", e)}
+	}
+	return errors.Join(err, closeOwned(slot))
+}
+
 func (s *Store) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.root == nil {
-		return nil
-	}
-	e := s.root.Close()
-	p := s.parent.Close()
-	s.root = nil
-	s.parent = nil
-	if e != nil {
-		return e
-	}
-	return p
+	return errors.Join(closeOwned(&s.root), closeOwned(&s.parent))
 }
 func identity(f *os.File) (inode, error) {
 	var st unix.Statx_t
@@ -89,12 +120,11 @@ func openAt(d *os.File, name string, dir bool, p protection) (*os.File, error) {
 	}
 	fd, e := unix.Openat(int(d.Fd()), name, flags, 0)
 	if e != nil {
-		return nil, ErrUnavailable
+		return nil, errors.Join(ErrUnavailable, e)
 	}
 	f := os.NewFile(uintptr(fd), name)
 	if e = check(f, p, mode, dir); e != nil {
-		f.Close()
-		return nil, e
+		return nil, errors.Join(e, closeOwned(&f))
 	}
 	return f, nil
 }
@@ -108,24 +138,19 @@ func openFixtureRoot(root string, p protection, b baseline) (*Store, error) {
 	}
 	parent := os.NewFile(uintptr(fd), "anchor")
 	if e = check(parent, p, 0700, true); e != nil {
-		parent.Close()
-		return nil, e
+		return nil, errors.Join(e, closeOwned(&parent))
 	}
 	r, e := openAt(parent, "pc2", true, p)
 	if e != nil {
-		parent.Close()
-		return nil, e
+		return nil, errors.Join(e, closeOwned(&parent))
 	}
 	id, e := identity(r)
 	if e != nil {
-		r.Close()
-		parent.Close()
-		return nil, e
+		return nil, errors.Join(e, closeOwned(&r), closeOwned(&parent))
 	}
 	s := &Store{root: r, parent: parent, rootName: "pc2", rootID: id, policy: p, base: b}
 	if _, _, _, e = s.inspect(); e != nil {
-		s.Close()
-		return nil, e
+		return nil, errors.Join(e, s.Close())
 	}
 	return s, nil
 }
@@ -154,22 +179,22 @@ func (s *Store) dir(rel string) (*os.File, error) {
 	for _, part := range strings.Split(rel, "/") {
 		f, e := openAt(parent, part, true, s.policy)
 		if owned {
-			parent.Close()
+			e = errors.Join(e, closeOwned(&parent))
 		}
 		if e != nil {
-			return nil, e
+			return nil, errors.Join(e, closeOwned(&f))
 		}
 		parent = f
 		owned = true
 	}
 	return parent, nil
 }
-func (s *Store) stillDir(rel string, f *os.File) error {
+func (s *Store) stillDir(rel string, f *os.File) (err error) {
 	got, e := s.dir(rel)
 	if e != nil {
 		return e
 	}
-	defer got.Close()
+	defer closeInto(&err, &got)
 	a, e := identity(f)
 	if e != nil {
 		return e
@@ -180,7 +205,7 @@ func (s *Store) stillDir(rel string, f *os.File) error {
 	}
 	return nil
 }
-func (s *Store) read(rel string, limit int64) ([]byte, inode, error) {
+func (s *Store) read(rel string, limit int64) (raw []byte, id inode, err error) {
 	if !relative(rel) || limit < 0 || limit > 268435456 {
 		return nil, inode{}, ErrUnavailable
 	}
@@ -188,22 +213,25 @@ func (s *Store) read(rel string, limit int64) ([]byte, inode, error) {
 	if e != nil {
 		return nil, inode{}, e
 	}
-	defer d.Close()
+	defer closeInto(&err, &d)
 	f, e := openAt(d, filepath.Base(rel), false, s.policy)
 	if e != nil {
 		return nil, inode{}, e
 	}
-	defer f.Close()
-	id, e := identity(f)
+	defer closeInto(&err, &f)
+	id, e = identity(f)
 	if e != nil {
 		return nil, inode{}, e
 	}
 	b, e := io.ReadAll(io.LimitReader(f, limit+1))
-	if e != nil || int64(len(b)) > limit || named(d, filepath.Base(rel), id) != nil || s.stillDir(filepath.Dir(rel), d) != nil {
-		return nil, inode{}, ErrUnavailable
+	if e != nil || int64(len(b)) > limit {
+		return nil, inode{}, errors.Join(ErrUnavailable, e)
 	}
-	if f.Close() != nil {
-		return nil, inode{}, ErrUnavailable
+	if e = named(d, filepath.Base(rel), id); e != nil {
+		return nil, inode{}, e
+	}
+	if e = s.stillDir(filepath.Dir(rel), d); e != nil {
+		return nil, inode{}, e
 	}
 	return b, id, nil
 }
@@ -222,7 +250,7 @@ func (s *Store) step(label string, fn func() error) error {
 	return nil
 }
 func (s *Store) sync(label string, f *os.File) error { return s.step(label, f.Sync) }
-func (s *Store) lock() (func(), error) {
+func (s *Store) lock() (release func() error, err error) {
 	if s.rootCheck() != nil {
 		return nil, ErrUnavailable
 	}
@@ -230,34 +258,51 @@ func (s *Store) lock() (func(), error) {
 	if e != nil {
 		return nil, e
 	}
-	defer d.Close()
-	f, e := openAt(d, "writer.lock", false, s.policy)
+	var f *os.File
+	held := false
+	defer func() {
+		closeInto(&err, &d)
+		if err != nil {
+			if held {
+				err = errors.Join(err, releaseLock(&f))
+			} else {
+				closeInto(&err, &f)
+			}
+			release = nil
+		}
+	}()
+	f, e = openAt(d, "writer.lock", false, s.policy)
 	if e != nil {
 		return nil, e
 	}
 	id, e := identity(f)
 	if e != nil {
-		f.Close()
 		return nil, e
 	}
 	st, e := f.Stat()
-	if e != nil || st.Size() != 0 || unix.Flock(int(f.Fd()), unix.LOCK_EX|unix.LOCK_NB) != nil {
-		f.Close()
-		return nil, ErrUnavailable
+	if e != nil || st.Size() != 0 {
+		return nil, errors.Join(ErrUnavailable, e)
 	}
-	if named(d, "writer.lock", id) != nil || s.stillDir("inventory/owner-index", d) != nil {
-		unix.Flock(int(f.Fd()), unix.LOCK_UN)
-		f.Close()
-		return nil, ErrUnavailable
+	if e = unix.Flock(int(f.Fd()), unix.LOCK_EX|unix.LOCK_NB); e != nil {
+		return nil, errors.Join(ErrUnavailable, e)
 	}
-	return func() { unix.Flock(int(f.Fd()), unix.LOCK_UN); f.Close() }, nil
+	held = true
+	if e = named(d, "writer.lock", id); e != nil {
+		return nil, e
+	}
+	if e = s.stillDir("inventory/owner-index", d); e != nil {
+		return nil, e
+	}
+	// Transfer the lock file only after the directory cleanup succeeds. The
+	// deferred error path above consumes it if that cleanup instead fails.
+	return func() error { return releaseLock(&f) }, nil
 }
-func (s *Store) makeLineage(role, copyID string) error {
+func (s *Store) makeLineage(role, copyID string) (err error) {
 	d, e := s.dir(role)
 	if e != nil {
 		return e
 	}
-	defer d.Close()
+	defer closeInto(&err, &d)
 	e = s.step("lineage-create", func() error { return unix.Mkdirat(int(d.Fd()), copyID, 0750) })
 	if e != nil && !errors.Is(e, unix.EEXIST) {
 		return e
@@ -266,20 +311,23 @@ func (s *Store) makeLineage(role, copyID string) error {
 	if e != nil {
 		return e
 	}
-	defer child.Close()
-	if s.sync("lineage-sync", child) != nil || s.sync("lineage-parent-sync", d) != nil || s.stillDir(role, d) != nil {
-		return ErrUnavailable
+	defer closeInto(&err, &child)
+	if e = s.sync("lineage-sync", child); e != nil {
+		return e
 	}
-	return nil
+	if e = s.sync("lineage-parent-sync", d); e != nil {
+		return e
+	}
+	return s.stillDir(role, d)
 }
 
 // writeFile never unlinks failed output. Its bytes remain in the funded frontier.
-func (s *Store) writeFile(rel string, b []byte) error {
+func (s *Store) writeFile(rel string, b []byte) (err error) {
 	d, e := s.dir(filepath.Dir(rel))
 	if e != nil {
 		return e
 	}
-	defer d.Close()
+	defer closeInto(&err, &d)
 	name := filepath.Base(rel)
 	var f *os.File
 	e = s.step("create", func() error {
@@ -289,9 +337,7 @@ func (s *Store) writeFile(rel string, b []byte) error {
 		}
 		return e
 	})
-	if f != nil {
-		defer f.Close()
-	}
+	defer closeInto(&err, &f)
 	if e != nil {
 		return e
 	}
@@ -321,25 +367,28 @@ func (s *Store) writeFile(rel string, b []byte) error {
 	if e = s.sync("file-sync", f); e != nil {
 		return e
 	}
-	if e = s.step("close", f.Close); e != nil {
+	if e = s.step("close", func() error { return closeOwned(&f) }); e != nil {
 		return e
 	}
-	if named(d, name, id) != nil || s.stillDir(filepath.Dir(rel), d) != nil {
-		return ErrUnavailable
+	if e = named(d, name, id); e != nil {
+		return e
+	}
+	if e = s.stillDir(filepath.Dir(rel), d); e != nil {
+		return e
 	}
 	return s.sync("created-parent-sync", d)
 }
-func (s *Store) rename(from, to string, replace bool, expected ...inode) error {
+func (s *Store) rename(from, to string, replace bool, expected ...inode) (err error) {
 	a, e := s.dir(filepath.Dir(from))
 	if e != nil {
 		return e
 	}
-	defer a.Close()
+	defer closeInto(&err, &a)
 	b, e := s.dir(filepath.Dir(to))
 	if e != nil {
 		return e
 	}
-	defer b.Close()
+	defer closeInto(&err, &b)
 	flags := uint(unix.RENAME_NOREPLACE)
 	label := "immutable-rename"
 	if replace {
@@ -354,8 +403,11 @@ func (s *Store) rename(from, to string, replace bool, expected ...inode) error {
 	}); e != nil {
 		return e
 	}
-	if s.stillDir(filepath.Dir(from), a) != nil || s.stillDir(filepath.Dir(to), b) != nil {
-		return ErrUnavailable
+	if e = s.stillDir(filepath.Dir(from), a); e != nil {
+		return e
+	}
+	if e = s.stillDir(filepath.Dir(to), b); e != nil {
+		return e
 	}
 	if e = s.sync("destination-parent-sync", b); e != nil {
 		return e

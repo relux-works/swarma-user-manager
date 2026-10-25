@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/relux-works/swarma-user-manager/internal/pc2state"
+	"golang.org/x/sys/unix"
 )
 
 const indexDir = "inventory/owner-index"
@@ -21,12 +22,12 @@ type copyState struct {
 	receipt     Head
 }
 
-func (s *Store) list(dir string, limit int) ([]string, error) {
+func (s *Store) list(dir string, limit int) (result []string, err error) {
 	d, e := s.dir(dir)
 	if e != nil {
 		return nil, e
 	}
-	defer d.Close()
+	defer closeInto(&err, &d)
 	names, e := d.Readdirnames(limit + 1)
 	if e != nil && !errors.Is(e, io.EOF) {
 		return nil, ErrUnavailable
@@ -43,7 +44,7 @@ func (s *Store) loadFunding() (funding, error) {
 	var f funding
 	b, _, e := s.read(indexDir+"/funding.json", maxRecord)
 	if e != nil || hash(b) != s.base.FundingDigest || decode(b, &f) != nil || f.validate() != nil {
-		return f, ErrUnavailable
+		return f, errors.Join(ErrUnavailable, e)
 	}
 	return f, nil
 }
@@ -51,7 +52,7 @@ func (s *Store) readHead() (Head, error) {
 	var h Head
 	b, _, e := s.read(indexDir+"/head.json", maxRecord)
 	if e != nil || decode(b, &h) != nil || h.Sequence < 0 || h.Sequence >= maxRecords || !digestOK(h.Digest) {
-		return h, ErrUnavailable
+		return h, errors.Join(ErrUnavailable, e)
 	}
 	return h, nil
 }
@@ -103,7 +104,7 @@ func (s *Store) history(f funding, h Head) (map[string]*copyState, map[string]re
 		}
 		b, _, e := s.read(indexDir+"/records/"+n, maxRecord)
 		if e != nil || hash(b)[7:]+".json" != n {
-			return nil, nil, ErrUnavailable
+			return nil, nil, errors.Join(ErrUnavailable, e)
 		}
 		var r record
 		if decode(b, &r) != nil {
@@ -210,11 +211,11 @@ func (s *Store) inspect() (Report, funding, map[string]*copyState, error) {
 	report.MetadataObjects = metaCount
 	report.ReservedBytes -= meta
 	if e != nil || meta > f.Metadata {
-		return report, f, nil, ErrUnavailable
+		return report, f, nil, errors.Join(ErrUnavailable, e)
 	}
 	h, e := s.readHead()
 	if e != nil || h.Sequence > f.metadataTransitions() {
-		return report, f, nil, ErrUnavailable
+		return report, f, nil, errors.Join(ErrUnavailable, e)
 	}
 	report.Head = h
 	states, _, e := s.history(f, h)
@@ -231,7 +232,7 @@ func (s *Store) inspect() (Report, funding, map[string]*copyState, error) {
 		b, _, e := s.read(indexDir+"/heads/"+n, maxRecord)
 		var old Head
 		if e != nil || decode(b, &old) != nil || old.Sequence < 0 || old.Sequence > h.Sequence {
-			return report, f, states, ErrUnavailable
+			return report, f, states, errors.Join(ErrUnavailable, e)
 		}
 		if !digestOK(old.Digest) {
 			return report, f, states, ErrUnavailable
@@ -239,7 +240,7 @@ func (s *Store) inspect() (Report, funding, map[string]*copyState, error) {
 		rb, _, e := s.read(indexDir+"/records/"+old.Digest[7:]+".json", maxRecord)
 		var r record
 		if e != nil || decode(rb, &r) != nil || r.Sequence != old.Sequence {
-			return report, f, states, ErrUnavailable
+			return report, f, states, errors.Join(ErrUnavailable, e)
 		}
 		archived[old.Digest] = true
 	}
@@ -248,11 +249,11 @@ func (s *Store) inspect() (Report, funding, map[string]*copyState, error) {
 	}
 	pending, e := s.list(indexDir+"/pending", maxRecords)
 	if e != nil || len(pending) != 0 {
-		return report, f, states, ErrUnavailable
+		return report, f, states, errors.Join(ErrUnavailable, e)
 	}
 	roots, e := s.list("", 8)
 	if e != nil || len(roots) != 6 {
-		return report, f, states, ErrUnavailable
+		return report, f, states, errors.Join(ErrUnavailable, e)
 	}
 	admitted := map[string]bool{"attempts": true, "holds": true, "recovery": true, "inventory": true, "capacity": true, "staging": true}
 	for _, n := range roots {
@@ -288,9 +289,10 @@ func (s *Store) inspect() (Report, funding, map[string]*copyState, error) {
 			}
 			dir := role + "/" + lineage
 			if !hexString(lineage, 32) || !lineages[dir] {
-				report.OrphanBytes += s.orphanSize(dir)
+				orphan, err := s.orphanSize(dir)
+				report.OrphanBytes += orphan
 				report.TotalBytes += report.OrphanBytes
-				return report, f, states, ErrUnavailable
+				return report, f, states, errors.Join(ErrUnavailable, err)
 			}
 			files, e := s.list(dir, 2)
 			if e != nil {
@@ -300,9 +302,10 @@ func (s *Store) inspect() (Report, funding, map[string]*copyState, error) {
 				loc := dir + "/" + name
 				st := expected[loc]
 				if st == nil || !dataName(name) {
-					report.OrphanBytes += s.orphanSize(loc)
+					orphan, err := s.orphanSize(loc)
+					report.OrphanBytes += orphan
 					report.TotalBytes += report.OrphanBytes
-					return report, f, states, ErrUnavailable
+					return report, f, states, errors.Join(ErrUnavailable, err)
 				}
 				a, _ := f.find(st.association.Ticket)
 				b, id, e := s.read(loc, a.MaxBytes)
@@ -350,53 +353,57 @@ func (s *Store) inspect() (Report, funding, map[string]*copyState, error) {
 	}
 	return report, f, states, nil
 }
-func (s *Store) orphanSize(rel string) int64 {
+func (s *Store) orphanSize(rel string) (size int64, err error) {
 	d, e := s.dir(filepath.Dir(rel))
 	if e != nil {
-		return 0
+		return 0, e
 	}
-	defer d.Close()
+	defer closeInto(&err, &d)
 	f, e := openAt(d, filepath.Base(rel), false, s.policy)
 	if e != nil {
-		return 0
+		return 0, e
 	}
-	defer f.Close()
+	defer closeInto(&err, &f)
 	st, e := f.Stat()
 	if e != nil {
-		return 0
+		return 0, e
 	}
-	return st.Size()
+	return st.Size(), nil
 }
-func (s *Store) Inspect() (Report, error) {
+func (s *Store) Inspect() (report Report, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	unlock, e := s.lock()
 	if e != nil {
 		return Report{}, e
 	}
-	defer unlock()
+	defer func() {
+		if e := unlock(); e != nil {
+			err = errors.Join(err, e)
+		}
+	}()
 	r, _, _, e := s.inspect()
 	return r, e
 }
 func (s *Store) Head() (Head, error) { r, e := s.Inspect(); return r.Head, e }
 
 // Reconcile never selects an unpublished suffix or changes the original debt.
-func (s *Store) Reconcile(expected Head) (Receipt, error) {
+func (s *Store) Reconcile(expected Head) (result Receipt, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	unlock, e := s.lock()
 	if e != nil {
 		return Receipt{}, e
 	}
-	defer unlock()
+	defer finishReceipt(&result, &err, unlock)
 	r, _, states, e := s.inspect()
 	if e != nil || r.Head != expected {
-		return Receipt{}, ErrUnavailable
+		return Receipt{}, errors.Join(ErrUnavailable, e)
 	}
 	for _, st := range states {
 		if st.receipt == expected && st.installed != nil {
-			if s.stabilize(r.Head) != nil {
-				return Receipt{}, ErrIndeterminate
+			if e = s.stabilize(r.Head); e != nil {
+				return Receipt{}, errors.Join(ErrIndeterminate, e)
 			}
 			return Receipt{st.receipt, st.installed.StorageID, st.installed.To}, nil
 		}
@@ -407,11 +414,16 @@ func (s *Store) Reconcile(expected Head) (Receipt, error) {
 func (s *Store) installMetadata(dir string, b []byte) error {
 	name := hash(b)[7:] + ".json"
 	dest := indexDir + "/" + dir + "/" + name
-	if old, _, e := s.read(dest, maxRecord); e == nil {
+	old, _, e := s.read(dest, maxRecord)
+	if e == nil {
 		if bytes.Equal(old, b) {
 			return nil
 		}
 		return ErrUnavailable
+	}
+	var cleanup *cleanupError
+	if !errors.Is(e, unix.ENOENT) || errors.As(e, &cleanup) {
+		return e
 	}
 	stage := indexDir + "/pending/" + name
 	if e := s.writeFile(stage, b); e != nil {
@@ -423,7 +435,7 @@ func (s *Store) publishRecord(expected Head, r record) (Head, error) {
 	headRaw, headID, e := s.read(indexDir+"/head.json", maxRecord)
 	var current Head
 	if e != nil || decode(headRaw, &current) != nil || current != expected {
-		return Head{}, ErrConflict
+		return Head{}, errors.Join(ErrConflict, e)
 	}
 	r.Version = "pc2-owner-transition/1"
 	r.Sequence = expected.Sequence + 1
@@ -447,7 +459,7 @@ func (s *Store) publishRecord(expected Head, r record) (Head, error) {
 	if e = s.step("previous-head", func() error {
 		got, e := s.readHead()
 		if e != nil || got != expected {
-			return ErrConflict
+			return errors.Join(ErrConflict, e)
 		}
 		return nil
 	}); e != nil {
@@ -459,7 +471,7 @@ func (s *Store) publishRecord(expected Head, r record) (Head, error) {
 	if e = s.step("head-readback", func() error {
 		got, e := s.readHead()
 		if e != nil || got != h {
-			return ErrUnavailable
+			return errors.Join(ErrUnavailable, e)
 		}
 		return nil
 	}); e != nil {
@@ -503,32 +515,8 @@ func (s *Store) stabilize(expected Head) error {
 		}
 	}
 	for _, rel := range files {
-		d, e := s.dir(filepath.Dir(rel))
-		if e != nil {
+		if e := s.stabilizeFile(rel); e != nil {
 			return e
-		}
-		f, e := openAt(d, filepath.Base(rel), false, s.policy)
-		if e != nil {
-			d.Close()
-			return e
-		}
-		id, e := identity(f)
-		if e == nil {
-			e = s.sync("recovery-file-sync", f)
-		}
-		if e == nil {
-			e = named(d, filepath.Base(rel), id)
-		}
-		if e == nil {
-			e = s.stillDir(filepath.Dir(rel), d)
-		}
-		ce := f.Close()
-		d.Close()
-		if e != nil {
-			return e
-		}
-		if ce != nil {
-			return ce
 		}
 	}
 	sort.Slice(dirs, func(i, j int) bool {
@@ -540,12 +528,8 @@ func (s *Store) stabilize(expected Head) error {
 			return e
 		}
 		e = s.sync("recovery-parent-sync", d)
-		ce := d.Close()
-		if e != nil {
+		if e = errors.Join(e, closeOwned(&d)); e != nil {
 			return e
-		}
-		if ce != nil {
-			return ce
 		}
 	}
 	if e := s.sync("recovery-anchor-sync", s.parent); e != nil {
@@ -553,7 +537,33 @@ func (s *Store) stabilize(expected Head) error {
 	}
 	r, _, _, e := s.inspect()
 	if e != nil || r.Head != expected {
-		return ErrUnavailable
+		return errors.Join(ErrUnavailable, e)
 	}
 	return nil
+}
+
+// Each iteration owns its descriptors in a separate scope: both cleanup
+// results are attached even when opening, syncing or identity checking fails.
+func (s *Store) stabilizeFile(rel string) (err error) {
+	d, e := s.dir(filepath.Dir(rel))
+	if e != nil {
+		return e
+	}
+	defer closeInto(&err, &d)
+	f, e := openAt(d, filepath.Base(rel), false, s.policy)
+	if e != nil {
+		return e
+	}
+	defer closeInto(&err, &f)
+	id, e := identity(f)
+	if e != nil {
+		return e
+	}
+	if e = s.sync("recovery-file-sync", f); e != nil {
+		return e
+	}
+	if e = named(d, filepath.Base(rel), id); e != nil {
+		return e
+	}
+	return s.stillDir(filepath.Dir(rel), d)
 }
