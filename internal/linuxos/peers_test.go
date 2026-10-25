@@ -17,8 +17,13 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+// Only the explicit CI opt-in skips before lookup. Review leaves it unset so
+// missing or overlapping peer identities still fail instead of being skipped.
 func peerUID(t *testing.T, name string) uint32 {
 	t.Helper()
+	if os.Getenv("SWARMA_TEST_UNPRIVILEGED") == "1" {
+		t.Skip("needs the platform-test peer accounts; runs in review on a prepared host")
+	}
 	u, e := (NSS{}).UID(context.Background(), name)
 	if e != nil || u == 0 || u == uint32(os.Getuid()) {
 		t.Fatal("test identity unavailable/distinctness failure", e)
