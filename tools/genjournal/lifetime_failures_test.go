@@ -302,6 +302,34 @@ func TestAppendPreparedLifetimeBudget(t *testing.T) {
 		}
 		f.locksFree()
 	})
+	t.Run("expiry-between-post-verifier-records", func(t *testing.T) {
+		f := newLifetimeFixture(t)
+		base, e := bootTimeMS()
+		wantCode(t, e, "ok")
+		verifying := false
+		calls := 0
+		f.hooks.now = func() (int64, error) {
+			if verifying {
+				calls++
+				if calls >= 4 {
+					return base + 1000, nil
+				}
+			}
+			return base, nil
+		}
+		f.hooks.at = func(event string) error {
+			if event == "before:verify-post" {
+				verifying = true
+			}
+			return nil
+		}
+		r, e := f.run()
+		wantCode(t, e, "journal_writer_deadline")
+		if r.Outcome() != UnknownWrite {
+			t.Fatal("expired verifier proved a full chain")
+		}
+		f.locksFree()
+	})
 	t.Run("wait-spends-original", func(t *testing.T) {
 		f := newLifetimeFixture(t)
 		base, e := bootTimeMS()

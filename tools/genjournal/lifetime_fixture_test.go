@@ -303,6 +303,27 @@ func TestAppendPreparedLifetimeCapability(t *testing.T) {
 		_, _, e = copy.PrepareAppend(context.Background(), f.request)
 		wantCode(t, e, "bump_key_admission_unconfirmed")
 	})
+	t.Run("typed-nil-operations", func(t *testing.T) {
+		f := newLifetimeFixture(t)
+		f.issuer.preparer = lifetimeNilOpsPreparer{}
+		_, _, e := f.issuer.PrepareAppend(context.Background(), f.request)
+		wantCode(t, e, "bump_key_admission_unconfirmed")
+		f.noMarker()
+		f.unchanged()
+	})
+	t.Run("active-close-and-alias", func(t *testing.T) {
+		f := newLifetimeFixture(t)
+		p, g := f.prepare()
+		f.ops.check = func(w *GuardWindow) error {
+			wantCode(t, p.Close(), "bump_key_admission_unconfirmed")
+			_, e := AppendPreparedLifetime(context.Background(), p, g)
+			wantCode(t, e, "bump_key_admission_unconfirmed")
+			lifetimeAssertHeld(t, f.fencePath, true)
+			return w.CheckBudget()
+		}
+		r, e := AppendPreparedLifetime(context.Background(), p, g)
+		f.clean(r, e)
+	})
 	t.Run("close-entry-race", func(t *testing.T) {
 		for n := 0; n < 12; n++ {
 			f := newLifetimeFixture(t)
@@ -328,4 +349,12 @@ func TestAppendPreparedLifetimeCapability(t *testing.T) {
 			f.locksFree()
 		}
 	})
+}
+
+// A typed-nil operations object cannot become an issued capability.
+type lifetimeNilOpsPreparer struct{}
+
+func (lifetimeNilOpsPreparer) Prepare(context.Context, AppendBinding) (PreparedGuardOps, error) {
+	var ops *lifetimeFixtureOps
+	return ops, nil
 }

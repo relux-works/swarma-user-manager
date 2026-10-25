@@ -185,13 +185,32 @@ func TestAppendPreparedLifetimePreMarker(t *testing.T) {
 				return
 			}
 			if mode == "capacity" {
-				b := sizedCapacityHistory(t, MaxFile-529, "active")
-				if e := os.WriteFile(filepath.Join(f.path, "journal"), b, 0644); e != nil {
+				filler := sizedCapacityHistory(t, MaxFile-600-len(f.before), "removed")
+				all := append([]byte(nil), f.before...)
+				tail := f.request.Tail
+				for _, line := range bytes.Split(bytes.TrimSuffix(filler, []byte{'\n'}), []byte{'\n'}) {
+					r, e := decode(line)
+					if e != nil {
+						t.Fatal(e)
+					}
+					r.Seq = tail.Seq + 1
+					r.Prev = tail.Hash
+					encoded, e := Encode(r)
+					if e != nil {
+						t.Fatal(e)
+					}
+					all = append(all, encoded...)
+					tail = Floor{r.Seq, Digest(encoded)}
+				}
+				if e := os.WriteFile(filepath.Join(f.path, "journal"), all, 0644); e != nil {
 					t.Fatal(e)
 				}
+				f.request.Tail = tail
 				_, _, e := f.issuer.PrepareAppend(context.Background(), f.request)
-				if e == nil {
-					t.Fatal("invalid floor/capacity preparation admitted")
+				wantCode(t, e, "journal_capacity_reserve")
+				stored, e := os.ReadFile(filepath.Join(f.path, "journal"))
+				if e != nil || !bytes.Equal(stored, all) {
+					t.Fatal("capacity refusal changed bytes")
 				}
 				f.noMarker()
 				return
@@ -338,6 +357,7 @@ func TestAppendPreparedLifetimeOrderAndUnwind(t *testing.T) {
 	for _, failure := range []string{"", "acquired:gate.lock", "acquired:data.lock", "before:acquire:F_auth", "acquired:F_auth", "after:verify-current", "before:write"} {
 		t.Run(fmt.Sprint("failure=", failure), func(t *testing.T) {
 			f := newLifetimeFixture(t)
+			p, g := f.prepare()
 			var events []string
 			f.hooks.at = func(event string) error {
 				events = append(events, event)
@@ -353,6 +373,9 @@ func TestAppendPreparedLifetimeOrderAndUnwind(t *testing.T) {
 					lifetimeAssertHeld(t, data, true)
 					lifetimeAssertHeld(t, f.fencePath, false)
 				case "acquired:F_auth", "after:write", "after:journal-sync", "after:verify-post", "after:marker-unlink", "after:provider-finish":
+					if !p.pair.resources.fence.held {
+						t.Fatal("F ownership not registered before post-acquire work")
+					}
 					lifetimeAssertHeld(t, gate, true)
 					lifetimeAssertHeld(t, data, true)
 					lifetimeAssertHeld(t, f.fencePath, true)
@@ -370,7 +393,7 @@ func TestAppendPreparedLifetimeOrderAndUnwind(t *testing.T) {
 				}
 				return nil
 			}
-			r, e := f.run()
+			r, e := AppendPreparedLifetime(context.Background(), p, g)
 			if failure == "" {
 				f.clean(r, e)
 			} else {
