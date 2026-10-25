@@ -33,12 +33,20 @@ control PENDING. Owned component controls are not deployed-host qualification.
 | `ExecutorWriteAheadPublication` | Install before intent receipt, mixed P0/manifest accepted, inode substitution or unsynced directory | Neighboring full durable sequence for each distinct file cut | Skip intent readback or one parent fsync |
 | `ExecutorPinOnlyTwoFields` | Extra policy change or pin from initial stdout/cached expiry verdict | Exact P0-to-pin two-field change after fresh complete revalidation | Ignore a third changed field |
 | `ExecutorFullQ` | Wrong/missing check, collector error with all-ok fields, wrong full-record hash/size or inputs | Real protected initial and boot Q, every check ok and no collector error | Trust minimized proof or digest alone |
-| `ExecutorFreshBootInvocation` | Initial Q, stale same-boot success, wrong boot/ID, newer running/failed unit | Newly started latest terminal successful current-boot invocation equals boot Q | Reuse earlier same-boot unit result |
+| `ExecutorFreshBootInvocation` | Initial Q, stale same-boot success, wrong boot/ID/unit, newer running/failed maintenance unit | Newly started latest terminal successful current-boot maintenance invocation equals boot Q | Reuse earlier same-boot unit result |
+| `ExecutorMaintenanceIsolation` | Restart adds any consumer lifecycle job, state transition or invocation change; reverse Requires/Wants/BindsTo/PartOf/Upholds edge | Restart the dedicated target with active, active-exited and inactive consumers; every consumer keeps its state and invocation throughout success and failure; ordinary boot still blocks consumers on failed qualification | Attach a consumer Requires/After edge to the maintenance target |
+| `ExecutorIssuerUnitBinding` | Normal-boot, alias, preflight or caller-selected unit accepted as maintenance issuer/latest result, even with matching ID | Root main PID, kernel cgroup, effective dedicated unit and latest job/invocation all match the maintenance context; separate normal-boot control retains its original target | Accept either unit name or authenticate the environment ID alone |
 | `ExecutorFinalCommit` | Pin/Q-only acceptance, newer recorder event, drift after boot or early frontier/cache advance | Both full Q validations, stable final snapshot and durable accepted5 readback | Skip final capture or acknowledge before fsync |
 | `ExecutorExactSetRecovery` | Visible uncertain line treated as receipt; subset retry, new endpoint or duplicate advance | Established durable redelivery, or full exact-set fresh retry with one frontier effect | Trust parseability or advance twice |
 | `ExecutorLeaseContinuity` | Lost F/B/W/root-writer/interlock epoch, copied/replaced/expired capability | Native retained owners and authenticated continuous owner epoch | Drop one outer continuity check |
 | `ExecutorQualifierHandoff` | Parent retains/lends D or qualifier waits on F/B/W/R | Both real qualifiers independently acquire D; parent freshly reacquires/revalidates | Keep parent D at one launch |
 | `ExecutorQuiescence` | Retry on cancellation, timeout, exit status or absent PID alone | Owner-fenced mutation authority and proof every old worker/child can no longer mutate | Treat process absence as fencing |
+| `ExecutorSubtreeFence` | Direct child exits but descendant survives; replaced cgroup path, escaped writer or reactivation after empty observation | Retained subtree identity, successful cgroup.kill, populated=0, revoked escape/reactivation authority through recovery commit; normal completion separately accounts for the whole tree | Accept unit success, released lock or one empty observation alone |
+| `ExecutorDelegatedJobFence` | Client/RPC timeout or empty subtree hides a queued/running PID1 job or delayed delegated mutation | Authenticated job/invocation association, all submitted work terminal or owner-fenced and durable state freshly revalidated before retry | Treat client cancellation or job enqueue acknowledgement as cancellation/completion |
+| `ExecutorDescendantDeadline` | Stalled dpkg-deb decoder outlives direct child/deadline, holds a pipe or can still mutate | Authentic bounded archive succeeds; stalled decoder reaches refusal within the operation budget, without accepting until native fence evidence exists | Treat CommandContext or WaitDelay as a whole-tree bound |
+| `ExecutorOutputBackpressure` | Blocked initial stdout or refusal journal output delays containment or produces a success/fence receipt | Draining authentic sinks complete normally; blocked sinks have independent bounded supervision, closed admission and no overlap/accepted result | Bound bytes only or wait for the blocked writer to fence itself |
+| `ExecutorPropertyGraph` | Printed property allowlist hides an unreviewed GetAll server dependency/back edge | Exact supported systemctl/server build has its full property-evaluation and failure graph qualified; unavailable graph refuses before launch | Equate --property output filtering with a restricted RPC graph |
+| `ExecutorProviderProfile` | Non-enumerating provider or records outside the closed projection become an empty complete inventory | Supported enumerable closed records retain complete reservations; unsupported class explicitly refuses before mutation | Skip the unsupported provider or discard unknown record keys |
 | `ExecutorTimeAuthority` | Unbound adapter, unknown clock/boot/confidence, stale authority or rollback | Qualified fresh bounded sample with continuity and pinned adapter | Substitute wall time or cached trusted boolean |
 | `ExecutorPrePinTime` | Release expires or time authority lapses between proof and pin | Fresh qualified resample immediately before pin, all chains still valid | Reuse initial expiry verdict |
 | `ExecutorInterlock` | Marker-only proof, foreign attempt, revoked epoch or loss then reacquisition | Authenticated pre-package enforcement continuous through final commit | Accept marker/approval flag or reset epoch |
@@ -340,6 +348,42 @@ ownership incident to the qualified owner mechanism; a local Close or worker
 exit cannot be presented as a safe retry. Retrying requires new authenticated
 ownership, proof of old quiescence and §3.4 recovery, not a fresh timeout alone.
 
+### 5.1 Retained subtree and delegated-work fence
+
+The Linux recovery contract MUST retain the original cgroup-v2 subtree identity
+from launch, held by a qualified supervisor outside that subtree. Bind the
+kernel boot, launch/ownership epoch, authenticated unit/job/invocation and
+effective KillMode, SendSIGKILL and stop deadlines. A reusable path string,
+pidfd for the main process or unit result cannot identify the whole old tree.
+The owner must exclude escapes and revoke all reactivation sources, including
+external starts, timer/socket/path triggers and automatic restart; Restart=no
+alone does not close them. An unrestricted root writer's migration authority
+cannot be assumed contained by cgroup membership.
+
+Before recovery may overlap a replacement writer, require a successful write
+of `1` to the retained subtree's `cgroup.kill` and authenticated observation of
+`cgroup.events` with `populated=0`. Keep identity and the prohibition on
+repopulation continuous through the recovery commit. The kernel's
+[cgroup-v2 interfaces](https://docs.kernel.org/admin-guide/cgroup-v2.html#core-interface-files)
+cover the subtree and concurrent forks during killing; subtree emptiness does
+not close future activation or work delegated outside it. Normal completion
+also requires whole-tree terminal evidence; direct-child exit or a successful
+oneshot result does not discharge that requirement.
+
+Enumerate and resolve or owner-fence **every** submitted PID1 job and other
+delegated effect, including requests with lost acknowledgements, merged jobs,
+queued work and delayed failure handlers. Killing a controller or emptying its
+cgroup cannot cancel work already handed to PID1. Distinguish submission,
+cancel acknowledgement, process exit, subtree emptiness, delegated completion
+and durable-state revalidation in the owner evidence. None substitutes for
+another; full §3.4 recovery still follows native quiescence.
+
+If kill, empty observation, reactivation closure, delegated-work accounting or
+their finite overall budget cannot be established, leave the operation unknown
+or refused, admission fenced and retry unavailable. This contract promises no
+successful bounded recovery from an unfenceable writer. It adds no fields to
+`FenceFacts`; its existing closed owner subrecords must supply these bindings.
+
 ## 6. Our closed side of external dependencies
 
 Every record below includes its owner's `Authority` and exact authenticated
@@ -496,9 +540,9 @@ identity or failure behavior is unknown, this operation stays refusing.
 | Operation | Exact target / existing entry | Allowed lease boundary and required result |
 |---|---|---|
 | Initial Issue | `/usr/bin/env -i /opt/swarma/libexec/swarma-user-manager qualify`, equivalent direct exec with empty environment; root-only maintenance entry -> `qualification.Protocol.Issue(...,false)` | Parent retains outer exclusion, releases D; child owns exclusive D, withdraws old Q, captures/checks/recaptures and durably publishes protected initial Q; stdout digest/exit alone insufficient |
-| Boot unit control | Authenticated `/usr/bin/systemctl daemon-reload` only when the reviewed installed-unit contract requires it, then `/usr/bin/systemctl restart swarma-user-manager-qualify.service`; no other unit/verb | Parent D released before either launch/wait; outer exclusion continuous. Reload/start acknowledgements are not successful qualification. Concrete bounded controller and cancellation/fencing behavior remain platform publication gates |
-| Boot Issue | Exact installed unit `ExecStart=/opt/swarma/libexec/swarma-user-manager qualify --boot`, effective unit pinned to the [reviewed artifact](../deploy/systemd/swarma-user-manager-qualify.service) | Unit owns exclusive D. Authenticate root main process, kernel cgroup and invocation via `OwnUnitInvocation`; no manual boot invocation or inherited D |
-| Latest terminal observation | `/usr/bin/systemctl show swarma-user-manager-qualify.service --no-pager --property=LoadState,Type,ActiveState,SubState,Result,ExecMainCode,ExecMainStatus,ExecMainStartTimestampMonotonic,ExecMainExitTimestampMonotonic,InvocationID` via `SystemdUnit.Successful` | Reviewed outside inner locks; under D only with qualified no-back-edge graph. Require exact closed terminal oneshot success and fresh current-boot invocation equal to boot Q; helper observes, never restarts/proves launch freshness by itself |
+| Maintenance boot-mode unit control | Authenticated `/usr/bin/systemctl daemon-reload` only when the reviewed installed-unit contract requires it, then `/usr/bin/systemctl restart swarma-user-manager-qualify-maintenance.service`; no other unit/verb | Parent D released before either launch/wait; outer exclusion continuous. No consumer lifecycle jobs/state/invocation changes. Reload/start acknowledgements are not successful qualification. Dedicated artifact, bounded controller and cancellation/fencing remain publication gates |
+| Maintenance Boot Issue | Dedicated `swarma-user-manager-qualify-maintenance.service`, exact `ExecStart=/opt/swarma/libexec/swarma-user-manager qualify --boot`; effective root oneshot unit/drop-ins must be published and pinned | Unit owns exclusive D. Authenticate its own root main PID, kernel cgroup and invocation against this exact maintenance name, using the existing OwnUnitInvocation validation model with a separately reviewed fixed context; current helper is not maintenance-capable. No manual boot invocation or inherited D |
+| Latest maintenance terminal observation | `/usr/bin/systemctl show swarma-user-manager-qualify-maintenance.service --no-pager --property=LoadState,Type,ActiveState,SubState,Result,ExecMainCode,ExecMainStatus,ExecMainStartTimestampMonotonic,ExecMainExitTimestampMonotonic,InvocationID`; fixed maintenance-bound equivalent of `SystemdUnit.Successful` is required | Reviewed outside inner locks; under D only with qualified no-back-edge graph including GetAll. Require exact closed terminal oneshot success and fresh current-boot maintenance invocation equal to boot Q; observer never restarts/proves launch freshness by itself |
 | Capture / CheckAll | Concrete installed `ProductionEnvironment.Capture` / `CheckAll` through `qualification.Deployment`, bound to protected policy and deployment manifest; no substituted snapshot/provider | Issuer exclusive D or admission-preparation shared D. Keep complete generation-bound reservation snapshot; execute provider/unit calls only after releasing effects/gate/data/R/append |
 | Provider / native proof helpers | Each exact protected executable/IPC endpoint and closure from the approved fixed manifest/profile, including NSS/inventory probes, pinned dpkg audit, signature verifier and decoders | Individually enumerated bounded graph required; no general network proof acquisition under maintenance locks, no raw fd inheritance or package installation/scripts. A tool name or manifest digest alone is not a call qualification |
 | Qualified time sample | Pinned `TimeSource.StartSample` -> reviewed `timeconf` provider/CollectorEntry and exact protected tool/policy identity (§6.1) | Retained outer exclusion compatible, no hidden network or owned-lock wait; fresh authoritative sample before pin. Concrete collector call/argv/provenance remain unavailable until time owner publication |
@@ -507,6 +551,51 @@ This matrix selects our composition targets. It does **not** publish missing
 platform/provider mechanisms or certify the current helpers' transitive graphs.
 A different root, binary, unit, provider set or adapter requires explicit
 profile/contract review; the executor accepts no caller target override.
+
+#### Fixed maintenance target and ordinary boot
+
+Step 4 now selects only `swarma-user-manager-qualify-maintenance.service`.
+It is a distinct dedicated unit, not an alias, template instance or fallback
+for `swarma-user-manager-qualify.service`. No consumer may Requires= or Wants=
+the maintenance unit. Its effective graph MUST have no reverse Requires,
+Wants, BindsTo, PartOf or Upholds edge, including generated dependencies,
+drop-ins, aliases and transitive consumer paths. No activation/install or
+failure/success-handler path may couple its transaction to consumer lifecycle
+work. Qualify the full state-dependent transaction, not only the anchor job:
+restart must cause **no consumer unit state or invocation change**, on successful
+qualification, failure, cancellation or timeout.
+
+The existing [consumer drop-in](../deploy/systemd/qualify-consumer.conf) retains
+Requires=/After= on the **ordinary boot** unit
+`swarma-user-manager-qualify.service`. This preserves mandatory qualification
+before consumer startup. Restarting that shared unit is unsuitable for the
+executor: [Requires semantics](https://www.freedesktop.org/software/systemd/man/latest/systemd.unit.html#Requires=)
+propagate explicit restarts, and the
+[systemd transaction implementation](https://github.com/systemd/systemd/blob/v259.5/src/core/transaction.c)
+uses try-restart for affected active dependents. An active-exited consumer also
+counts as active; not starting an inactive dependent is insufficient isolation.
+Changing ordinary boot ordering is unnecessary when the maintenance target has
+its own isolated graph. Admission remains closed throughout maintenance.
+
+The dedicated artifact and its authenticated issuer/latest-observer integration
+are **not implemented here**. The [current unit](../deploy/systemd/swarma-user-manager-qualify.service)
+and [unit identity helpers](../internal/qualification/unit_linux.go), including
+`OwnUnitInvocation`, `ValidateOwnUnit` and `SystemdUnit.Successful`, remain bound
+to the ordinary boot name. They must not be described as implementing the new
+target, nor globally changed to accept either name. Future integration must
+select separately reviewed fixed maintenance and ordinary-boot validation
+contexts from protected authority; no caller-selected name or environment value
+may select issuer authority. The existing `qualify --boot` entry also needs
+that reviewed context binding before this target can run successfully.
+
+Both contexts retain the existing boot-mode Q codec; no unit-name field or new
+issuer mode is added. In the executor, authenticate the maintenance unit first,
+then bind its real invocation to Q and to the maintenance latest observer.
+Ordinary-boot guards keep their existing unit/issuer association. A maintenance
+Q in the shared protected location does not satisfy an ordinary-boot guard
+merely because its mode is boot or its inputs match. The future guard/currency
+integration must distinguish those contexts without a permissive dual-name
+fallback; its publication and qualification remain open.
 
 ### 7.2 Real snapshot and inner-lock release
 
@@ -539,7 +628,8 @@ directory and its owning `qualification` codec/limits. Validate full exact
 retained descriptor identity and current policy/manifest/normalized inputs.
 Validate station-name coverage internally without copying account data into
 the maintenance store. Initial issuer is exactly `{mode:initial,invocation_id:""}`;
-boot issuer is `mode:boot` with the real nonzero current unit invocation ID.
+boot issuer is `mode:boot` with the real nonzero current invocation ID of
+`swarma-user-manager-qualify-maintenance.service`, authenticated as in §7.1.
 Q boot must equal current kernel boot; `inputs_digest` must independently equal
 candidate inputs, and boot policy must have the matching pin.
 
@@ -559,8 +649,10 @@ certificate. At final commit revalidate its retained observation binding and
 the full live boot Q. Do not expect the now-replaced live file still to contain
 initial Q or export/store its raw account list as proof.
 
-Record the authenticated pre-start unit invocation, command/job association and
-new invocation after launch. Require a newly started invocation distinct from
+Record the authenticated pre-start maintenance unit invocation, command/job
+association and new invocation after launch, all bound to the exact
+`swarma-user-manager-qualify-maintenance.service` name and retained identity.
+Require a newly started invocation distinct from
 the previous one, current-boot monotonic start/exit ordering, terminal oneshot
 success and equality between the **latest** invocation and boot Q issuer.
 Reobserve after D reacquisition and at the final bounded commit guard using
@@ -569,6 +661,43 @@ failed/unknown result or changed Q invalidates acceptance. No external unit
 query occurs inside append or inner state locks. If the platform cannot provide
 retained currency through the local commit boundary, that call contract remains
 unavailable; a last-seen cached unit success is not a workaround.
+
+### 7.4 Process, output and RPC completion budgets
+
+Every process entry needs a qualified descendant-containment contract, bounded
+pipe drain and post-cancellation fence (§5.1). In particular, a direct-child
+timeout is not a decoder-tree bound: `dpkg-deb` archive operations can launch
+copy/decompression children. `CommandContext`, `WaitDelay`, byte caps and a
+successful unit result cannot stand in for descendant quiescence. The platform
+and verifier owners must publish the actual process graph and all termination
+and drain bounds, not assume a particular helper has no children.
+
+Qualify each actual output sink and lease context. Initial mode writes its
+digest to launcher stdout only after `Issue` returns and releases issuer D;
+the boot unit does not print that success digest, while refusal output uses
+its configured journal transport. Hook and native-reconcile output have their
+own stages and leases. Journal or stdout backpressure can block completion
+despite a byte cap. Require an independently supervised bounded failure path
+that preserves containment without waiting for the blocked writer; output
+failure grants no accepted result, fence receipt or retry authority.
+
+The exact `systemctl show --property=...` output projection remains closed,
+but it is not a closed server call graph. In the referenced systemd build,
+[show](https://github.com/systemd/systemd/blob/v259.5/src/systemctl/systemctl-show.c)
+uses [Properties.GetAll](https://github.com/systemd/systemd/blob/v259.5/src/shared/bus-map-properties.c);
+the property list filters printed output. Review all applicable server-side
+property evaluation, IPC/waits and failure paths for each installed build.
+An output allowlist does not prove absence of a lock dependency.
+
+An enqueue/RPC acknowledgement proves submission only; RPC timeout, controller
+exit or connection closure does not cancel a submitted job. Retain its
+authenticated unit/job/invocation association and resolve or fence every
+possibly submitted operation before retry. One absolute operation deadline
+must budget connect, RPC reply, queueing, execution, drain, stop and fence
+verification. A bus method timeout, TimeoutStartSec or
+[job timeout](https://www.freedesktop.org/software/systemd/man/latest/systemd.unit.html#JobTimeoutSec=)
+is not that combined bound or a subtree fence. Unresolved work at the deadline
+stays unknown/refused with admission fenced, without overlapping replacement.
 
 ## 8. External owners and open publication decisions
 
