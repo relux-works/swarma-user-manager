@@ -303,6 +303,7 @@ gates remain PENDING, with no accepting adapter or activation implied.
 | Pinned registrar CCJ-1 / coreutils | Validate example bytes with `ccj.Parse` / `ccj.Marshal` from the `go.mod` pin; `sha256sum vectors/qual-maint/*.jsonl`; `wc -c vectors/qual-maint/*.jsonl` | Canonical-byte verdict, SHA-256 and byte counts including LF; expected identities in the vector README; framing only; semantic journal/host qualification is separate |
 | Go (serialized on shared hosts) | `env GOMAXPROCS=2 go test -p 1 ./internal/updateproof ./cmd/swarma-user-manager -count=1` | Narrow verdicts and owned fixtures; task-local untracked logs |
 | Go journal layer | `env GOMAXPROCS=2 go test -p 1 ./internal/qualmaint -count=1 -timeout=60s`; `env GOMAXPROCS=2 go build -p 1 ./internal/qualmaint` | Local codec/replay/store verdicts and Go-owned temporary fault fixtures; task-local untracked logs/coverage; no root qualification |
+| [Linux Go CI](.github/workflows/linux-ci.yml) | Pull requests and pushes to `main`; hosted Ubuntu 24.04, pinned Go 1.26.10. Reproduce with `go mod verify`, `go build ./...`, `go vet ./...`, `test -z "$(gofmt -l .)"`, then `env -u LINUXOS_ROOT_QUALIFICATION CGO_ENABLED=1 GOMAXPROCS=2 go test -p 1 -count=1 -timeout=20m ./...` | GitHub step logs or task-local untracked logs; Go-owned temporary fixtures; full check scope, without root qualification |
 | Go retained sessions / refusing coordinator | `env -u LINUXOS_ROOT_QUALIFICATION CGO_ENABLED=1 GORACE=atexit_sleep_ms=0 GOMAXPROCS=2 go test -p 1 ./internal/updateproof ./internal/qualmaint ./internal/qualreconcile -count=1 -timeout=90s`; race/build variants in the [narrow checks](docs/requalification-coordinator.md#tools-and-narrow-checks) | Owned native-lock, child, error-cut and preflight verdicts; task-local untracked logs/overlays; no integration qualification |
 | `dpkg` | Native held pinned descriptor with fixed `--audit`; owned lock/audit fixture: `go test ./internal/updateproof -run '^TestReconcileOwnedDpkgAuditExclusion$' -count=1` | Clean means exit zero and empty stdout/stderr; fixture uses only an owned empty database |
 | `systemctl` | Native held pinned descriptor with fixed `--no-block start swarma-user-manager-update-reconcile.service` | Bounded enqueue acknowledgement; root deployment remains pending |
@@ -312,3 +313,18 @@ The [evidence tool contract](docs/update-evidence.md#tools-and-narrow-checks)
 also documents the synthetic `gpg`/`gpgconf` signer, pinned `gpgv` and `dpkg-deb`
 entry points and their retained artifacts. `TestReviewNativeXZDecoder` uses
 `/usr/bin/xz --compress --stdout` only to create its owned package fixture.
+
+The Linux workflow has read-only repository permissions and no privileged setup
+or credentials retained by checkout. Its formatting check currently identifies
+four existing reviewer fixtures: `internal/linuxbackend/testdata/review_systemd_guard_test.go`
+and `internal/linuxos/review_mail_policy_test.go`, `review_mail_reference_test.go`,
+`review_shadow_primary_test.go`. These remain unchanged; the formatting gate is
+red until their formatting is resolved separately.
+
+Full Linux tests also require the existing distinct `platform-test-a` and
+`platform-test-b` NSS identities and sudo-to-peer Python access described in the
+[primitive tools contract](internal/linuxos/README.md#tools-and-evidence).
+The workflow does not provision those host-specific prerequisites or skip their
+tests, so local results on a prepared host do not establish stock-runner success.
+Root qualification stays opt-in and is explicitly unset by the CI command;
+native root/open-inode/namespace qualification remains outside this check.
