@@ -3,8 +3,54 @@
 package manager
 
 import (
+	"bytes"
+
 	"github.com/relux-works/swarma-user-manager/internal/pc2state"
 )
+
+// ReadSnapshot already binds each observation to its original role allocation.
+// That funding is necessary but does not supply the retained semantic link:
+// specific evidence must also belong to an actual immutable attempt/hold graph.
+func specificCensusEvidenceLinks(objects map[string]pc2state.Object, native []nativeCensusImage, origins []string) error {
+	for _, image := range native {
+		role := image.observation.Role
+		if image.observation.Destination != nil {
+			role = *image.observation.Destination
+		}
+		if role != "attempt-evidence" && role != "hold-evidence" {
+			continue
+		}
+		linked := false
+		for _, object := range objects {
+			m, e := treeCensus(object.Bytes())
+			if e != nil {
+				return e
+			}
+			if role == "attempt-evidence" && object.Kind() == pc2state.ActivationAttempt {
+				preimage, e := pc2state.AttemptPreimage(object)
+				if e == nil && (bytes.Equal(preimage, image.image.Bytes()) || m["evidence_digest"] == image.image.Digest) {
+					linked = true
+				}
+			}
+			if role == "hold-evidence" && object.Kind() == pc2state.Hold {
+				for _, origin := range origins {
+					if origin == image.image.Digest && pc2state.CheckHoldOrigin(object, image.image.Bytes()) == nil {
+						linked = true
+					}
+				}
+			}
+			if role == "hold-evidence" && object.Kind() == pc2state.RecoveryRecord && m["evidence_digest"] == image.image.Digest {
+				// retainedCensusLinks has resolved every referenced hold and its
+				// origin before this helper runs.
+				linked = true
+			}
+		}
+		if !linked {
+			return ErrCensusUnavailable
+		}
+	}
+	return nil
+}
 
 // Retained links resolve against this exact captured closure. A digest label is
 // not evidence of a missing predecessor, body, hold or discharged obligation.

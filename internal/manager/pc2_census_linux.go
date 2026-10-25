@@ -540,6 +540,9 @@ func censusSlot(heads []pc2store.FileImage, proof censusFixtureCommit, entries [
 		}
 	}
 	// All non-null guard/history references must resolve against this capture.
+	if specificCensusEvidenceLinks(objects, native, proof.Origins) != nil {
+		return unavailable()
+	}
 	for _, key := range []string{"attempt", "resolution", "release_prepared", "released"} {
 		if guard[key] != nil {
 			r := guard[key].(map[string]any)
