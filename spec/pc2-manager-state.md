@@ -394,3 +394,303 @@ catalog/installation, C0 and initial funding frontier, qualified overhead and
 zero-length representation, independent per-transaction custody/fencing, finite
 recovery envelope, and both joint spend anchors. Defaults are unavailable and
 retained debt, never implicit genesis, cleanup, fold or replenishment.
+
+## Census preparation: native-observation index contract
+
+Status: **specification for review; not implemented**. The following extension
+requires the explicitly admitted `pc2-native-owner-index/1` profile. Existing
+`pc2-owner-transition/1`, fixture funding and production openers do not accept
+native observations. This section creates no accepting census, registration,
+publication, committed-credit or native-write path. Native formats and the
+seven closed G4 codecs remain unchanged.
+
+### Closed native observation and shared chain
+
+Under the new profile, the one retained owner-index chain admits exactly two
+record variants: the unchanged `pc2-owner-transition/1` above and the following
+`pc2-native-observation/1`. They share one sequence, predecessor relation and
+exact `Head`; there is no independently authoritative native head or side index.
+The original genesis remains the separately admitted genesis, never a native
+observation. Existing readers must reject the new variant, not skip it. A
+profile change needs independently admitted installation/funding/baseline
+agreement before use; it cannot be inferred from finding a new file.
+
+Every member below is required. Records are exact CCJ-1 UTF-8 bytes without LF,
+with the Byte contract's duplicate/unknown-member, scalar, integer and depth
+rules; maximum encoded record length is **8192 bytes**, checked before parsing.
+D, H, N, Z, ID and Text have the definitions above; relative_name is further
+restricted to the exact single-component catalog below. T is `pc2t1:` plus
+64 lowercase hex digits; S is `pc2o1:` plus 64 lowercase hex digits. Deployment
+and authority incarnation are admitted 32-lowercase-hex identifiers for this
+profile. Identity components must be positive exact safe integers; an OS value
+outside that representable range is unsupported, not rounded. No extra map,
+optional field or permissive decoding fallback is admitted.
+
+```text
+NativeObservation = {
+ version:"pc2-native-observation/1",sequence:N,previous:D,
+ funding_digest:D,native_ticket:T,
+ deployment_id:ID,authority_incarnation:ID,
+ native_role:NativeRole,directory_role:NativeDirectory,relative_name:Text,
+ destination_role:NativeRole|null,
+ copy_id:ID,disposition_version:N,
+ previous_observation:D|null,replaces:D|null,
+ content_digest:D,bytes:Z,integrity_bytes:Z,storage_id:S,
+ identity:{device:N,inode:N,mount:N},
+ encoding:NativeEncoding,revision:N|null,
+ journal_floor:Checkpoint|null,journal_tail:Checkpoint|null
+}
+Checkpoint = {seq:Z,hash:H}
+NativeDirectory = "native-effects"|"native-generations"
+```
+
+Sequence is the predecessor sequence plus one without overflow; previous is D
+of the complete preceding chain record, whichever variant it uses. The record
+filename is that complete record's digest under the existing fixed
+`inventory/owner-index/records/` namespace. Immutable head versions, current
+head and pending metadata keep their existing locations and head codec. The
+observation's own hash is not a member. No record modifies an earlier record.
+
+`funding_digest` identifies the exact original admitted allocation declaration,
+held independently with the profile/baseline, not this record or a future Qn.
+It retains the original Qn and complete ticket preimage/partition, source class,
+destination role, copy lineage, content/integrity maxima and index-output
+frontier. `native_ticket` is recomputed with the unchanged ticket-ID recipe
+against that declaration; a bare ticket string or calculator result is not
+funding proof. The declaration and all referenced retained records must resolve;
+missing, conflicting, co-restored-only or uncommitted authority is unavailable.
+Private fixture declarations exercise representations only and are not eligible
+common reservations. The existing fixture-funding/1 format is not silently
+extended to accept native allocations.
+
+Owner is implicitly manager. Derive the StorageID class from the fixed role
+table below; recompute S using the unchanged ordered preimage and the EXACT
+recorded deployment/incarnation, class, directory_role, relative_name, copy_id,
+disposition_version and content_digest. Retain this entire preimage. A filename,
+content digest or schema tag alone does not choose ownership or deduplicate a
+copy. Equal bytes on separately funded lineages/inodes are separate charges.
+
+The admitted installation pins each native directory role to one protected
+retained directory descriptor and its device/inode/mount identity. Relative
+names are single components from the table, not received paths; no symlink,
+separator, dot/dot-dot, alternate root or recursive wildcard traversal. Verify
+retained parent and named file identities as well as the open descriptor,
+single-link regular-file type, source owner/mode and protection metadata.
+Directories/files keep native policies: effects 0700/0600, generations
+0755/0644; do not apply PC2 0750/0640 by rewriting a native file. Installation
+principals, group/ACL/capability/mount exclusions and allocation profiles still
+require native qualification.
+
+Read the complete file with the role cap and limit+1; length must equal bytes,
+and D of ALL original retained bytes must equal content_digest. Digest includes
+native LF/envelope bytes; no re-encoding, substring, last-record projection,
+sparse-block discount or copied snapshot substitutes for it. Check named and
+open identities/versions before and after the unlocked read. Validate those
+same captured bytes with the native format owner. A recorded stat/hash alone
+proves neither completeness, currency nor writer exclusion.
+
+### Fixed native role and encoding catalog
+
+The following is the entire `NativeRole` catalog. Each role selects exactly
+one manager class. Fixed directory roles are new catalog entries, not arbitrary
+strings accepted by the existing StorageID implementation. H in a native
+basename is exactly 64 lowercase hex digits; ID is exactly 32 lowercase hex.
+Finite enumeration must reconcile both directions against indexed locations;
+a pattern never authorizes an unregistered file.
+
+| NativeRole | Directory / admitted basename | Class | Whole-file cap | NativeEncoding |
+|---|---|---|---:|---|
+| generation-journal | native-generations / journal | recovery | 1048576 | journal |
+| generation-pending | native-generations / writer.pending | recovery | 512 | pending |
+| effects-store | native-effects / effects.json | recovery | 8388608 | effects |
+| effects-ledger | native-effects / ledger.json | recovery | 8388608 | ledger |
+| recovery-evidence | native-effects / evidence-H.json | recovery | 65536 | evidence |
+| attempt-evidence | native-effects / evidence-H.json | attempts | 65536 | evidence |
+| hold-evidence | native-effects / evidence-H.json | holds | 65536 | evidence |
+| effects-temporary | native-effects / .write-ID | staging | destination cap | destination encoding |
+| pending-temporary | native-generations / .pending-ID | staging | 512 | pending |
+
+`NativeEncoding` is exactly journal, pending, effects, ledger or evidence. These
+are index parser selectors, NOT new native serialized format tags. journal
+uses existing gen-journal/1 bytes (4096-byte line cap including LF), pending
+uses existing gen-journal-pending/1 bytes including its final LF, effects uses
+the complete station-effects-store/2 envelope, ledger uses the existing encoded
+genjournal.View, and evidence preserves the exact original native evidence
+bytes and their owner-validated meaning. Native evidence need not become a new
+CCJ document to fit this index. H in evidence-H.json equals the raw content
+SHA-256 suffix, not an observation or StorageID digest.
+
+For effects-temporary, destination_role is exactly effects-store, effects-ledger,
+recovery-evidence, attempt-evidence or hold-evidence. For pending-temporary it
+is exactly generation-pending. The encoding/cap matches that destination. All
+other roles have destination_role=null. The authenticated allocation fixes this
+choice before writing; a temporary basename cannot reveal or authorize it.
+Complete valid temporary encodings can be observed in staging; partial/malformed
+ones remain retained debt and make preparation unavailable.
+
+Attempt-/hold-specific evidence takes precedence over recovery-evidence only
+with the retained immutable origin/evidence links and corresponding allocation.
+One physical file cannot register under multiple roles. Evidence with no
+accepted specific attribution uses recovery-evidence only if its authenticated
+allocation/meaning proves that role; unknown provenance is unavailable. This
+catalog creates no new native snapshot filename/codec. Separately retained
+recovery images outside these admitted locations need another reviewed catalog
+version; do not copy them into an accepted name or silently ignore them.
+
+For journal, revision=null and both journal_floor and journal_tail are required;
+verify the independently accepted floor occurs in the complete native chain and
+tail equals its verified endpoint. For effects, revision equals the validated
+State.Revision, journal_floor equals State.Floor and journal_tail=null. For
+ledger, revision=null, journal_floor=null and journal_tail equals View.Tail.
+For pending/evidence, revision and both checkpoints are null. Temporary roles
+use the same rules as their destination. A seq=0 checkpoint has the all-zero H;
+that representation alone does not authorize genesis. Every parsed checkpoint
+must match the same admitted baseline/retained linkage; local fields cannot
+appoint themselves an independent floor. State.Revision is positive and must
+fit N; a larger native integer is unsupported rather than rounded. Ledger omits View.History in JSON and can
+never replace complete journal history.
+
+writer.pending's native four fields are only format/boot/start/budget. This
+record does not infer its effect, A2/ordinal, Qn or slot owner from timing,
+process liveness, a lone attempt or marker absence. Without a separately
+accepted durable owner association the slot/census remains unavailable. Neither
+open pre-A2 debit nor carried-spend anchor is decided by this schema.
+
+### Observation lineage, completeness and unsupported cases
+
+First observation of a lineage has disposition_version=1 and
+previous_observation=null. A later observation has previous_observation equal
+to the full immediately preceding observation digest, same original allocation,
+copy_id and exactly incremented disposition_version. The shared chain retains
+all such versions even when their old location/content no longer materializes.
+`replaces` is null except the first installed observation of a different new
+lineage performing an admitted atomic replacement: it names the exact formerly
+current observation at that endpoint. That new lineage may have an earlier
+staging observation; its installed observation then links that staging version
+through previous_observation as well. Replacing an unknown endpoint or replacing
+the same predecessor twice is unavailable. Replacement provenance never retires
+old funding. Replaces is permitted only for effects-store/effects-ledger
+installation; it is null for every other destination in this profile.
+
+The only same-lineage changes admitted are (a) append-in-place of journal on
+the same identity/location and (b) same-inode rename of an authenticated
+complete temporary to its declared installed destination, with unchanged bytes
+and digest. For append verify the prior observation's entire length/hash as a
+prefix within the current full file, not as a second physical row. For rename
+fold the old staging location/class into the destination exactly once; its
+observation remains history. An exact observation replay uses its existing retained record, not a new
+version or allocation. Every other in-place mutation is unsupported.
+
+Effects/ledger atomic replacement uses a new copy_id, identity and independently
+funded native ticket plus replaces. The old installed endpoint must differ from
+the new identity; staging-to-installed rename preserves the new lineage
+identity. Verify retained logical OSRecords/terminal identities and journal
+linkage across effects versions. Do not demand that the
+native writer retained old raw envelopes it actually replaced, and do not copy
+one to invent history. Actually retained old images are additional physical
+copies with their own allocation/catalog registration. Apply acknowledged
+replacement/location transitions before physical closure; an old observation
+is not automatically a currently required raw file. Unexpected missing current
+objects, missing required retained logical evidence or unacknowledged versions
+still refuse. No record in this version authorizes unlink/deletion, marker
+removal, truncation, tombstoning, retirement or replenishment; such a transition
+requires later approved owner evidence/protocol, not inference from absence.
+
+All PC2 and native observations together retain the existing finite profile
+ceilings: 1024 total chain records including genesis, 256 allocated physical
+copy lineages, record/head caps and the single cross-owner 268435456-byte peak.
+Observation versions count against the chain ceiling; replaced lineages still
+count against allocation/history bounds. A native writer's separate 10000-file
+or 8-MiB budget does not enlarge this profile. Exhaustion refuses before growth;
+no truncation/compaction, admission from a partial scan or new uncharged genesis.
+
+Unknown roles/encodings/locations, malformed or changed bytes, unindexed names,
+aliases (including cross-class/cross-owner), missing histories/funding, unsafe
+protection metadata, unsupported mount/identity range or unknown owner remain
+unavailable. Measurable surviving orphans/partials remain retained and charged,
+not deleted. Zero-length native journal is valid native genesis but cannot be
+a positive-byte G4 object: bytes=0 can describe diagnostic debt only, never a
+successful class row. No padding, omission or invented C0. Empty gate.lock,
+data.lock and effects.lock are only fixed admitted infrastructure, not native
+observations; their allocation/directory overhead needs explicit funded
+attribution. Unknown empty files are not implicitly infrastructure.
+
+### Metadata funding and prospective maxima
+
+Native content and observation metadata have distinct original allocations.
+The observation and all its index/head outputs are auxiliary metadata funded
+from disjoint subtickets of **keymaker/reservation_metadata**, materializing as
+**manager/inventory**; temporary metadata outputs are **manager/staging**. This
+is the joint proposal's cross-owner destination transfer, not a second manager
+reservation. A fixed guard ticket remains its separate manager/staging source;
+never spend it again for observations. The native file itself uses its declared
+native ticket: an explicitly partitioned original recovery envelope where it
+fits, otherwise an additional explicit Classes.ReservedBytes allocation with
+the destination fixed by the role table. The fixed 65536 recovery bound cannot
+implicitly cover an 8-MiB effects file or all later versions.
+
+Preserve the existing four maximum-size bootstrap slots and, for EACH chain
+sequence, three fresh disjoint **65536-content-byte** metadata slots: complete
+record, immutable archived head and current-head output. The 8192 observation
+cap is tighter than its reserved record slot; unused bytes stay reserved. The
+existing conservative content frontier remains
+`floor((metadata_content_bytes - 4*65536)/(3*65536))`, additionally limited by
+1024 total records. Here metadata_content_bytes is the admitted content portion
+of the original metadata envelope, not content plus overhead. The fixture's
+current metadata_bytes field accounts for content slots only and does not
+qualify native physical overhead.
+
+Before ANY record/temp/directory creation, assign those output slots from the
+original committed partition and add separately qualified integrity/allocation
+maxima for every simultaneous copy plus funded namespace growth. The previous
+record/archived heads/current head are already charged and remain accounted;
+new slots cover their new outputs. Same-inode metadata staging-to-final rename
+consumes its slot once. A concurrently retained second inode, extra recovery
+copy or publication retry creating a fresh output needs another disjoint slot.
+Consumed slots cannot be overwritten/reused. Current head replacement does not
+return its old assigned reservation to the pool.
+
+Bound actual complete CCJ encodings prospectively, including maximum-width
+sequence/identity/size/revision values, D/T/S names, native basename/role strings,
+all required nullable members and checkpoint expansion. Both content caps and
+the original per-output integrity/allocation maxima must fit; combine totals
+with all five/nine classes and retained residual reservations under the one
+aggregate. Overrun remains held/unavailable, never borrowed free space. Actual
+materialization converts only b+i from its source reservation to the physical
+destination, counts one object and leaves unused remainder reserved. No prefix,
+reference or rename debits again; separate actual copies debit separately.
+
+Records hash predecessors/native content/original funding only, never their own
+future hash, future Qn or future inventory output. Existing metadata is counted
+now; candidate new class/head/index encodings are prospective under their
+already funded frontier until a later census seals them. No fixed-point hash,
+metadata exemption, recredit, fold or production funding issuer is introduced.
+Missing native allocation/integrity/zero-length profile is PENDING-VERIFY and
+keeps preparation unavailable.
+
+### Currentness gate and document validation
+
+This schema is representation and accounting design only. A later real
+publication/currentness producer must bind owner-index and native versions to
+the EXISTING root/guard/manager-inventory/continuity commitments under the
+approved all-writer protocol. Current writer.lock publication alone, repeated
+local scans, matching hashes or a co-restored floor cannot prove that binding.
+The capture algorithm and independently current baseline must refuse mixed
+versions, dropped history and coherent rollback. Until that producer and native
+qualification exist, production opening/preparation stays unavailable even for
+root; private fixture success conveys no admission grant.
+
+No extra final-window metadata file/read, native scan, lock back edge, provider
+or deadline is authorized: retain the exact 22-file/1421312-content-byte set,
+ten measurements and 24-file/2097152-byte defensive ceilings. No native wire
+format changes, marker ownership shortcut, pre-A2 debit, carried-spend rule or
+accepting census API follows from this section.
+
+Validate this documentation with `git diff --check`, local Markdown target
+checks and bounded schema/catalog/funding contract fixtures (including a known
+invalid control). The [specification tools](../README.md#pc2-specification-tools)
+are unchanged. These checks validate document consistency only; runtime codec,
+real-file/mutant, race/build and native privilege/allocation/durability evidence
+are NOT RUN by this specification change. Later implementation must retain the
+accepted plan's negative/positive controls and name actual killed/surviving
+mutants; a document fixture is not runtime qualification.
