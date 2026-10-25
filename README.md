@@ -328,3 +328,8 @@ The workflow does not provision those host-specific prerequisites or skip their
 tests, so local results on a prepared host do not establish stock-runner success.
 Root qualification stays opt-in and is explicitly unset by the CI command;
 native root/open-inode/namespace qualification remains outside this check.
+
+The optional race step is omitted after local measurement put the manager
+package within about twelve seconds of the 20-minute package timeout. The
+workflow keeps the normal test command and its existing budget; the race result
+does not establish sufficient timing margin on the unverified hosted runner.
