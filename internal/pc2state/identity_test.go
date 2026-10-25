@@ -30,8 +30,7 @@ func requireInvalid(t *testing.T, err error) {
 	}
 }
 
-// A2's public preimage/ID and hold remain identical across disposition updates;
-// every other immutable leaf affects the ID. No retention/authority is inferred.
+// Claim: Dispositions preserve public A2/hold identity, and every immutable leaf affects the A2 ID.
 func TestPC2AttemptIdentityStable(t *testing.T) {
 	base := mustDecode(t, ActivationAttempt, fixture(t, "attempt"))
 	pre, err := AttemptPreimage(base)
@@ -122,8 +121,7 @@ func TestPC2AttemptIdentityStable(t *testing.T) {
 	}
 }
 
-// Only an exact A2 preimage or authority-transaction preimage may originate its
-// respective hold; a valid-looking digest of C0/full attempt still refuses.
+// Claim: Hold origins require matching A2 or transaction preimages; C0 and mutable attempts refuse.
 func TestPC2HoldOriginDomains(t *testing.T) {
 	for _, kind := range []string{"activation", "authority"} {
 		origin := fixture(t, "attempt-preimage")
@@ -169,8 +167,7 @@ func TestPC2HoldOriginDomains(t *testing.T) {
 	}
 }
 
-// These checks bind original canonical intent bytes, not their authority/schema;
-// disposition updates preserve the binding and changed originals do not match.
+// Claim: Exact canonical original intent bytes bind through disposition changes; changed originals do not.
 func TestPC2EffectIntentBinding(t *testing.T) {
 	original := []byte(`{"effect":{"ordinal":1},"operation":"activate"}`)
 	d, err := EffectIntentDigest(original)
@@ -194,8 +191,7 @@ func TestPC2EffectIntentBinding(t *testing.T) {
 	requireInvalid(t, err)
 }
 
-// Full preceding disposition digests and positive consecutive ordinals prevent
-// reused/pending/durable retries; only conclusively absent history advances once.
+// Claim: Exact predecessor links permit absent-to-fresh advance and reject pending, durable or reused-ordinal retries.
 func TestPC2AttemptDispositionLinks(t *testing.T) {
 	base := mustDecode(t, ActivationAttempt, fixture(t, "attempt"))
 	absent := changedAttempt(t, base, func(o map[string]any) {

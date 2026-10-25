@@ -91,8 +91,7 @@ func controls(t *testing.T) map[Kind][]byte {
 	}
 }
 
-// Each manager object accepts its canonical control and rejects every missing
-// required member, extra/duplicate/escaped member, newline and extra document.
+// Claim: Each closed manager schema accepts its canonical control and rejects missing, extra or noncanonical input.
 func TestPC2ManagerCodecClosed(t *testing.T) {
 	for kind, b := range controls(t) {
 		t.Run(string(kind), func(t *testing.T) {
@@ -139,8 +138,7 @@ func TestPC2ManagerCodecClosed(t *testing.T) {
 	}
 }
 
-// Schema-negative mutations recompute A2 IDs so an unrelated hash mismatch
-// cannot hide a missing field/type/range check. Each row has a valid control.
+// Claim: Schema-negative cases refuse despite recomputed A2 IDs, alongside valid controls.
 func TestPC2ManagerObjectNegatives(t *testing.T) {
 	digest := "sha256:" + strings.Repeat("a", 64)
 	rows := []struct {

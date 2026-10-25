@@ -8,8 +8,7 @@ import (
 	"testing"
 )
 
-// Public S1 fixture hashes/bytes independently anchor round trips, preimages and
-// recovery phase/zero-checkpoint controls; the owner-restricted subset is explicit.
+// Claim: Pinned public hashes, supported round trips and preimages match; key-service ownership stays outside this subset.
 func TestPC2PublicVectors(t *testing.T) {
 	var manifest struct {
 		Source, Commit string
@@ -71,8 +70,7 @@ func TestPC2PublicVectors(t *testing.T) {
 	}
 }
 
-// All phase/hold unions have valid controls, and omission of any earlier required
-// phase link or attempt/hold relation refuses. This does not resolve MetaRefs.
+// Claim: Valid guard unions pass; changing a required phase reference or hold/attempt relation refuses.
 func TestPC2GuardPhaseUnions(t *testing.T) {
 	digest := "sha256:" + strings.Repeat("a", 64)
 	ref := func(kind Kind, size int64) map[string]any {
@@ -117,8 +115,7 @@ func TestPC2GuardPhaseUnions(t *testing.T) {
 	}
 }
 
-// Each known recovery phase/outcome requires evidence; open is unknown with
-// null evidence. Rejections change only the property exercised by that row.
+// Claim: Open recovery is unknown/null; each known phase/outcome requires evidence.
 func TestPC2RecoveryOutcomeEvidence(t *testing.T) {
 	for _, phase := range []string{"resolved", "release-prepared", "released"} {
 		for _, outcome := range []string{"absent", "durable"} {
@@ -140,8 +137,7 @@ func TestPC2RecoveryOutcomeEvidence(t *testing.T) {
 	mustDecode(t, RecoveryRecord, fixture(t, "recovery-open"))
 }
 
-// Sorted unique IDs, non-null arrays and exact per-row bounds apply to histories
-// and all five manager classes, including explicit empty-class controls.
+// Claim: Valid empty/sorted class and history objects pass; invalid row order, uniqueness or bounds refuse.
 func TestPC2InventoryNeighbors(t *testing.T) {
 	digest := "sha256:" + strings.Repeat("a", 64)
 	for _, kind := range []Kind{RecoveryHistory, CapacityInventory} {
@@ -194,8 +190,7 @@ func TestPC2InventoryNeighbors(t *testing.T) {
 	}
 }
 
-// Canonical lexical/scalar/depth boundaries are exercised independently of the
-// closed schemas; large per-file cap constants are checked without 256 MiB allocations.
+// Claim: CCJ scalar, lexical and depth boundaries hold; configured large caps are checked without giant allocations.
 func TestPC2CanonicalBounds(t *testing.T) {
 	for _, raw := range []string{`{"n":9007199254740991}`, `{"n":-9007199254740991}`, `{"s":"é😀<>&/"}`, strings.Repeat(`{"a":`, 15) + `{}` + strings.Repeat(`}`, 15)} {
 		if _, err := EffectIntentDigest([]byte(raw)); err != nil {
@@ -228,8 +223,7 @@ func TestPC2CanonicalBounds(t *testing.T) {
 	mustDecode(t, ActivationAttempt, wireTest(t, ActivationAttempt, o))
 }
 
-// Returned byte slices and original decode buffers cannot mutate an Object;
-// zero/wrong-kind identity inputs fail without returning a partial document.
+// Claim: Caller buffer writes cannot change an Object; zero or wrong-kind identity inputs refuse.
 func TestPC2ObjectIsolation(t *testing.T) {
 	b := fixture(t, "attempt")
 	original := bytes.Clone(b)
