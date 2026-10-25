@@ -28,6 +28,7 @@ type Store struct {
 	policy       protection
 	base         baseline
 	fault        func(string) error
+	shortWrite   bool
 }
 
 func OpenInstalled(_ string) (*Store, error) { return nil, ErrUnavailable }
@@ -201,6 +202,9 @@ func (s *Store) read(rel string, limit int64) ([]byte, inode, error) {
 	if e != nil || int64(len(b)) > limit || named(d, filepath.Base(rel), id) != nil || s.stillDir(filepath.Dir(rel), d) != nil {
 		return nil, inode{}, ErrUnavailable
 	}
+	if f.Close() != nil {
+		return nil, inode{}, ErrUnavailable
+	}
 	return b, id, nil
 }
 func (s *Store) step(label string, fn func() error) error {
@@ -299,7 +303,11 @@ func (s *Store) writeFile(rel string, b []byte) error {
 		return e
 	}
 	if e = s.step("write", func() error {
-		n, e := f.Write(b)
+		input := b
+		if s.shortWrite && len(b) > 0 {
+			input = b[:len(b)-1]
+		}
+		n, e := f.Write(input)
 		if e != nil {
 			return e
 		}

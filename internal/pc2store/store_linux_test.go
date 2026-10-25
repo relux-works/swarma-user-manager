@@ -43,6 +43,9 @@ func publish(t *testing.T, s *Store, ticket string) Receipt {
 func TestPC2StoreSameRoleCopies(t *testing.T) {
 	s, base, f := fixture(t, 2)
 	defer s.Close()
+	if location(f.Allocations[0], hash(object(t).Bytes()), false) == location(f.Allocations[1], hash(object(t).Bytes()), false) {
+		t.Fatal("same-role distinct-lineage locations collided")
+	}
 	r1 := publish(t, s, f.Allocations[0].Ticket)
 	r2 := publish(t, s, f.Allocations[1].Ticket)
 	if r1.Location == r2.Location || r1.StorageID == r2.StorageID {
@@ -121,7 +124,7 @@ func TestPC2OwnerIndexClosure(t *testing.T) {
 					t.Fatal(e)
 				}
 			case "hardlink":
-				if e := os.Link(name, filepath.Join(base, "staging", "alias")); e != nil {
+				if e := os.Link(name, filepath.Join(filepath.Dir(base), "outside-copy")); e != nil {
 					t.Fatal(e)
 				}
 			case "symlink":

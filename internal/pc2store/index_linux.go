@@ -4,8 +4,10 @@ package pc2store
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/relux-works/swarma-user-manager/internal/pc2state"
@@ -26,7 +28,7 @@ func (s *Store) list(dir string, limit int) ([]string, error) {
 	}
 	defer d.Close()
 	names, e := d.Readdirnames(limit + 1)
-	if e != nil && len(names) == 0 && e != io.EOF {
+	if e != nil && !errors.Is(e, io.EOF) {
 		return nil, ErrUnavailable
 	}
 	if len(names) > limit {
@@ -393,6 +395,9 @@ func (s *Store) Reconcile(expected Head) (Receipt, error) {
 	}
 	for _, st := range states {
 		if st.receipt == expected && st.installed != nil {
+			if s.stabilize(r.Head) != nil {
+				return Receipt{}, ErrIndeterminate
+			}
 			return Receipt{st.receipt, st.installed.StorageID, st.installed.To}, nil
 		}
 	}
@@ -461,4 +466,94 @@ func (s *Store) publishRecord(expected Head, r record) (Head, error) {
 		return h, e
 	}
 	return h, nil
+}
+
+// stabilize recovers an exact complete visible publication by replaying sync
+// barriers; visibility/readback alone is not a durable recovery receipt.
+func (s *Store) stabilize(expected Head) error {
+	dirs := []string{"", "attempts", "holds", "recovery", "inventory", "capacity", "staging", indexDir, indexDir + "/records", indexDir + "/heads", indexDir + "/pending"}
+	files := []string{indexDir + "/funding.json", indexDir + "/head.json"}
+	for _, dir := range []string{"records", "heads", "pending"} {
+		ns, e := s.list(indexDir+"/"+dir, maxRecords*2)
+		if e != nil {
+			return e
+		}
+		for _, n := range ns {
+			files = append(files, indexDir+"/"+dir+"/"+n)
+		}
+	}
+	for _, role := range []string{"attempts", "holds", "recovery", "inventory", "capacity", "staging"} {
+		ns, e := s.list(role, maxAllocations+1)
+		if e != nil {
+			return e
+		}
+		for _, n := range ns {
+			if role == "inventory" && n == "owner-index" {
+				continue
+			}
+			dir := role + "/" + n
+			dirs = append(dirs, dir)
+			ns, e := s.list(dir, 2)
+			if e != nil {
+				return e
+			}
+			for _, n := range ns {
+				files = append(files, dir+"/"+n)
+			}
+		}
+	}
+	for _, rel := range files {
+		d, e := s.dir(filepath.Dir(rel))
+		if e != nil {
+			return e
+		}
+		f, e := openAt(d, filepath.Base(rel), false, s.policy)
+		if e != nil {
+			d.Close()
+			return e
+		}
+		id, e := identity(f)
+		if e == nil {
+			e = s.sync("recovery-file-sync", f)
+		}
+		if e == nil {
+			e = named(d, filepath.Base(rel), id)
+		}
+		if e == nil {
+			e = s.stillDir(filepath.Dir(rel), d)
+		}
+		ce := f.Close()
+		d.Close()
+		if e != nil {
+			return e
+		}
+		if ce != nil {
+			return ce
+		}
+	}
+	sort.Slice(dirs, func(i, j int) bool {
+		return strings.Count(dirs[i], "/") > strings.Count(dirs[j], "/") || strings.Count(dirs[i], "/") == strings.Count(dirs[j], "/") && len(dirs[i]) > len(dirs[j])
+	})
+	for _, rel := range dirs {
+		d, e := s.dir(rel)
+		if e != nil {
+			return e
+		}
+		e = s.sync("recovery-parent-sync", d)
+		ce := d.Close()
+		if e != nil {
+			return e
+		}
+		if ce != nil {
+			return ce
+		}
+	}
+	if e := s.sync("recovery-anchor-sync", s.parent); e != nil {
+		return e
+	}
+	r, _, _, e := s.inspect()
+	if e != nil || r.Head != expected {
+		return ErrUnavailable
+	}
+	return nil
 }

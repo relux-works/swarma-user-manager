@@ -90,7 +90,7 @@ type CopyIdentity struct {
 }
 
 func StorageID(i CopyIdentity) (string, error) {
-	if !text(i.Deployment) || !text(i.Incarnation) || (i.Owner != "manager" && i.Owner != "keymaker") || !text(i.Role) || !text(i.DirectoryRole) || !relative(i.RelativeName) || !hexString(i.CopyID, 32) || i.DispositionVersion < 1 || i.DispositionVersion > pc2state.SafeInteger || !digestOK(i.ContentDigest) {
+	if !text(i.Deployment) || !text(i.Incarnation) || (i.Owner != "manager" && i.Owner != "keymaker") || !admittedIdentityRole(i.Owner, i.Role) || !admittedDirectory(i.Owner, i.DirectoryRole) || !relative(i.RelativeName) || !hexString(i.CopyID, 32) || i.DispositionVersion < 1 || i.DispositionVersion > pc2state.SafeInteger || !digestOK(i.ContentDigest) {
 		return "", ErrUnavailable
 	}
 	// Role catalogs are checked by the installed mapping before this pure recipe.
@@ -109,6 +109,20 @@ func TicketID(q, owner, kind, role string, ordinal int64) (string, error) {
 		return "", e
 	}
 	return "pc2t1:" + hash(b)[7:], nil
+}
+func admittedIdentityRole(owner, role string) bool {
+	if owner == "manager" {
+		return role == "attempts" || role == "holds" || role == "recovery" || role == "inventory" || role == "staging"
+	}
+	for _, v := range []string{"installed", "artifacts", "recovery", "staging", "pending_proofs", "policy_history", "root_history", "migration_history", "reservation_metadata"} {
+		if role == v {
+			return true
+		}
+	}
+	return false
+}
+func admittedDirectory(owner, role string) bool {
+	return admittedIdentityRole(owner, role) || (owner == "manager" && role == "capacity")
 }
 func text(s string) bool {
 	if len(s) < 1 || len(s) > 255 || !utf8.ValidString(s) {
@@ -163,7 +177,7 @@ func canonical(v any) ([]byte, error) {
 	return b, nil
 }
 func decode(raw []byte, v any) error {
-	if len(raw) == 0 || len(raw) > maxRecord {
+	if len(raw) == 0 || len(raw) > maxRecord || !boundedDepth(raw) {
 		return ErrUnavailable
 	}
 	o, e := ccj.Parse(raw, ccj.RegistrationMalformed)
@@ -253,7 +267,11 @@ func (f funding) identity(a allocation, digest, loc string) (string, error) {
 	if strings.HasPrefix(loc, "staging/") {
 		dir = "staging"
 	}
-	return StorageID(CopyIdentity{f.Deployment, f.Incarnation, "manager", string(a.Role), dir, loc, a.CopyID, a.Version, digest})
+	role := string(a.Role)
+	if a.Role == Capacity {
+		role = "inventory"
+	}
+	return StorageID(CopyIdentity{f.Deployment, f.Incarnation, "manager", role, dir, loc, a.CopyID, a.Version, digest})
 }
 
 type inode struct {
@@ -282,4 +300,36 @@ type baseline struct {
 	FundingDigest string
 	Genesis       string
 	Floor         Head
+}
+
+func boundedDepth(raw []byte) bool {
+	depth := 0
+	quoted, escape := false, false
+	for _, c := range raw {
+		if quoted {
+			if escape {
+				escape = false
+			} else if c == '\\' {
+				escape = true
+			} else if c == '"' {
+				quoted = false
+			}
+			continue
+		}
+		switch c {
+		case '"':
+			quoted = true
+		case '{', '[':
+			depth++
+			if depth > 16 {
+				return false
+			}
+		case '}', ']':
+			depth--
+			if depth < 0 {
+				return false
+			}
+		}
+	}
+	return depth == 0 && !quoted
 }

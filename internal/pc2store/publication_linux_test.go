@@ -126,7 +126,7 @@ func TestPC2StorePreviousHead(t *testing.T) {
 						if e != nil {
 							t.Fatal(e)
 						}
-						if e = os.Rename(name, name+".retained"); e != nil {
+						if e = os.Rename(name, filepath.Join(filepath.Dir(base), "retained-head")); e != nil {
 							t.Fatal(e)
 						}
 						fixtureWrite(t, name, b)

@@ -31,6 +31,9 @@ func (s *Store) Publish(expected Head, ticket string, o pc2state.Object) (Receip
 		if prior.installed == nil || prior.installed.Digest != digest || prior.installed.Codec != o.Kind() {
 			return Receipt{}, ErrUnavailable
 		}
+		if s.stabilize(report.Head) != nil {
+			return Receipt{}, ErrIndeterminate
+		}
 		return Receipt{prior.receipt, prior.installed.StorageID, prior.installed.To}, nil
 	}
 	if report.Head != expected {
