@@ -22,7 +22,11 @@ func (testOperator) Confirm(_ context.Context, c Caller, r Request, _ Policy, _ 
 	return OperatorAct{c.Principal, c.Generation, r.ID, r.Args.Generation, strings.Repeat("c", 64), true, strings.Repeat("d", 64)}, nil
 }
 func (b *fakeBackend) Evidence(_ context.Context, i AuthorityInput) (AuthorityEvidence, error) {
-	return AuthorityEvidence{Verdict: "admit", Input: i, ScopeDigest: scopeDigest(i), EvidenceDigest: digest(i), Until: time.Now().Add(30 * time.Second), Guard: testGuard{}}, nil
+	ttl := b.evidenceTTL
+	if ttl == 0 {
+		ttl = 30 * time.Second
+	}
+	return AuthorityEvidence{Verdict: "admit", Input: i, ScopeDigest: scopeDigest(i), EvidenceDigest: digest(i), Until: time.Now().Add(ttl), Guard: testGuard{}}, nil
 }
 func fakeFS(t Task) FileObject {
 	return FileObject{"fs", 1, uint64(t.Account.UID + 1000), "directory", 0, t.Account.GID, 0750, 2, ""}

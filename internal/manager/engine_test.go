@@ -109,6 +109,7 @@ func (j *memJournal) Append(_ context.Context, f genjournal.Floor, u int64, g, s
 
 type fakeBackend struct {
 	availableDelay time.Duration
+	evidenceTTL    time.Duration
 	j              *memJournal
 	trace          *[]string
 	fault          string
@@ -930,10 +931,12 @@ func TestAvailabilityStepBudget(t *testing.T) {
 	h := setup(t)
 	h.e.Policy.Limits.StepMS = 10
 	h.b.availableDelay = 15 * time.Millisecond
-	want(t, h.run(t, "user.create", "first", "demo"), "cleanup_pending")
+	r := h.run(t, "user.create", "first", "demo")
+	want(t, r, "cleanup_pending")
 	if len(h.s.state.Effects) != 0 || len(h.j.raw) != 0 {
 		t.Fatal("timed-out preflight reserved")
 	}
+	t.Logf("step budget=%dms, backend delay=%s: %s, no effect or journal reservation", h.e.Policy.Limits.StepMS, h.b.availableDelay, r.Error.Code)
 	setup(t).created(t)
 }
 

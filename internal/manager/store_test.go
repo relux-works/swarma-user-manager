@@ -31,11 +31,28 @@ func diskFixture(t *testing.T) (*DiskStore, string) {
 	return s, anchor
 }
 
+// Disk-backed lifecycle fixtures perform hundreds of real fsyncs on shared CI storage.
+// Give their operations, activation/source contexts and evidence deliberate headroom;
+// setup and its short deadline/interruption tests retain their original budgets.
+const (
+	diskOperationBudget = 2 * time.Minute
+	diskStepBudget      = time.Minute
+)
+
+func setupDiskHarness(t *testing.T, store *DiskStore) *harness {
+	t.Helper()
+	h := setup(t)
+	h.e.Store = store
+	h.e.Policy.Limits.OperationMS = diskOperationBudget.Milliseconds()
+	h.e.Policy.Limits.StepMS = diskStepBudget.Milliseconds()
+	h.b.evidenceTTL = diskOperationBudget
+	return h
+}
+
 // Atomic disk evidence survives a fresh engine/store open; corrupt derived state is rebuilt and terminal replay does not execute the backend again.
 func TestDiskPersistenceAndLedger(t *testing.T) {
 	s, anchor := diskFixture(t)
-	h := setup(t)
-	h.e.Store = s
+	h := setupDiskHarness(t, s)
 	g := h.created(t)
 	before := append([]byte{}, h.j.raw...)
 	if e := os.WriteFile(filepath.Join(s.path, "ledger.json"), []byte(`{"wrong":true}`), 0600); e != nil {

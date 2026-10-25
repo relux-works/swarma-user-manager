@@ -333,8 +333,7 @@ func (badOperator) Confirm(_ context.Context, c Caller, r Request, _ Policy, _ s
 // allocation completes through the disk lock while the first Execute is blocked outside all locks.
 func TestExternalIOHoldsNoStateLock(t *testing.T) {
 	s, _ := diskFixture(t)
-	h := setup(t)
-	h.e.Store = s
+	h := setupDiskHarness(t, s)
 	entered := make(chan struct{})
 	release := make(chan struct{})
 	result := make(chan Response, 1)
@@ -350,7 +349,7 @@ func TestExternalIOHoldsNoStateLock(t *testing.T) {
 	go func() { result <- h.run(t, "user.create", "first", "demo") }()
 	select {
 	case <-entered:
-	case <-time.After(10 * time.Second):
+	case <-time.After(diskStepBudget):
 		t.Fatal("worker did not start")
 	}
 	// Always release only the goroutine this test started, including assertion failures.
@@ -370,7 +369,7 @@ func TestExternalIOHoldsNoStateLock(t *testing.T) {
 	select {
 	case r := <-result:
 		want(t, r, "cleanup_pending")
-	case <-time.After(10 * time.Second):
+	case <-time.After(diskStepBudget):
 		t.Fatal("stopped worker did not resolve")
 	}
 	state, e := s.Load()
