@@ -51,7 +51,7 @@ control PENDING. Owned component controls are not deployed-host qualification.
 
 These refine, rather than replace, all obligations in
 [A3 §7](upgrade-requalification.md#7-qualification-plan--negative-cases-first)
-and [journal §7](qualification-maintenance-journal.md#7-qualification-plan--negative-cases-first).
+and [journal §7](qualification-maintenance-journal.md#7-qualification-obligations-and-narrowing-controls).
 Crash/error controls MUST cover every boundary in journal §5.2, including each
 file's write/fsync/rename/parent sync, both D handoffs, both Q publications,
 final snapshot and accepted append/readback. Injected local I/O failures are
@@ -258,3 +258,187 @@ to the independent admission owner. Never clear the marker, open admission,
 resume work, mutate generations/reservations/effects/restore floors or export
 accounts/credentials. `qualification.Protocol.Pin` is an admission reader using
 shared D, not this policy publisher, and MUST NOT be called under parent D.
+
+## 5. Composed F/B/W/D ownership and recovery
+
+Acquire native frontend F, database B, worker W, independently qualified
+root-writer exclusion before capture, then exclusive D. Root-writer exclusion
+MUST NOT acquire/wait on a predecessor lock. The recorder branch is
+F -> B -> W -> D -> R; acquire only needed locks in that order, no upgrades.
+The local state branch is D -> effects -> gate -> data with R/append absent.
+Hooks already owning F/B may record under short R and enqueue, but never wait
+for W/D or a qualifier. Never acquire maintenance locks from lifecycle locks.
+
+Use the landed acquire-only `Recorder.AcquirePackageSession`, then held proof
+execution only after the remaining ownership is established. `ReconcileHeld`
+preserves the proof algorithm but does not establish those other authorities.
+Use `Writer.Deployment` for Writer-owned D and its shared checked local
+operations; do not independently lock D then invoke a legacy per-call Writer
+operation. Bound each deadline by its owner and the qualified overall operation
+deadline. Zero/copy/foreign/released/replaced/expired capabilities refuse. Do not
+replace sessions with no-op exclusion, raw borrowed descriptors or held flags.
+
+At **both** qualifier handoffs, explicitly close parent D before any child
+launch or wait. Retain the original F/B/W/root-writer/interlock ownership
+continuously. Qualifier lock descriptors are not inherited or lent; it acquires
+its own exclusive D and never F/B/W/R. After terminal execution and authenticated
+release/quiescence, reacquire a **new** D session. Revalidate every outer owner,
+finite lifetime, descriptor/path/metadata identity, continuity epoch, installed
+plan/input hash, recorder endpoint, package/closure snapshot, full Q and time
+authority before the next pin/outcome. Reacquiring a lost outer lease is not
+proof of continuous ownership. Failed D acquisition grants no partial progress.
+
+The platform/admission/root-writer owners must jointly supply a closed
+`FenceFacts` consumer record with exactly
+`{authority,evidence,scope,ownership_epoch,subjects,revocation,quiescence}`.
+`subjects` is an authenticated bounded ref covering **all** prior workers,
+qualifiers, descendants/delegated mutation authorities for this deployment;
+`revocation` binds the owner-enforced cutoff and invalidated authority epoch;
+`quiescence` is authenticated proof that none can mutate after that cutoff.
+The owner-defined closed subrecords must identify the mechanism, enforcement
+domain and clock/boot continuity; unbounded or unspecified subrecords refuse.
+The executor verifies exact scope, complete subjects, enforcement epoch,
+irreversible cutoff relative to retry and continuing root-writer exclusion.
+This required normalized record is not a published native fencing mechanism.
+
+Context cancellation, timeout, process exit, successful wait, absent PID,
+service-manager acknowledgement or a released advisory lock alone is never
+sufficient fencing/quiescence. The owners must explain how inherited/open
+handles, descendants and delayed service work lose mutation authority. Unknown
+previous ownership stays fenced; do not overlap a new attempt, truncate its
+history or take over on a timer. A fence failure returns no accepting result.
+
+Normal reverse cleanup releases D, then root-writer exclusion, W, B, F, after
+the owned mutators are terminal/quiescent; no inner lock remains. Cancellation
+invalidates operations but does not automatically release retained locks or
+prove child safety. On uncertainty, preserve the admission/P7 hold and hand the
+ownership incident to the qualified owner mechanism; a local Close or worker
+exit cannot be presented as a safe retry. Retrying requires new authenticated
+ownership, proof of old quiescence and §3.4 recovery, not a fresh timeout alone.
+
+## 6. Our closed side of external dependencies
+
+Every record below includes its owner's `Authority` and exact authenticated
+`Evidence` (§2); success is produced only by a reviewed validator, never by a
+caller constructing these fields. All indicated refs resolve through the same
+bounded retained-byte/owning-codec checks. A receipt's durability is independent
+of its authenticity; both must pass. These consumer shapes require joint owner
+publication before implementation can accept them.
+
+### 6.1 Qualified time
+
+`TimeFacts` has exactly
+`{authority,evidence,adapter,policy,scope,sample,clock,observed,uncertainty,authority_until,continuity}`.
+Adapter/policy are pinned identity/version/digest bindings to the actual
+`timeconf` collector entry, protected policy and transitive executable/provider
+closure; sample identifies the fresh observation, not a cached pass. Clock binds
+kernel boot and the owner's authoritative time/monotonic domains. Observed,
+uncertainty and authority-until retain the source codec's exact representation;
+continuity binds previous accepted floors and reboot/clock transitions.
+
+The validator MUST check authenticated provenance, qualified confidence and
+freshness, same intended current boot, bounded nonnegative uncertainty, complete
+authority interval and no rollback against accepted and in-attempt high-waters.
+Do not rewrite original recorder boot tokens to the sampling boot. Any API
+mismatch between historical transaction identity and fresh-current-boot sampling
+needs an explicit reviewed binding; it cannot be hidden by substituting an ID.
+The existing `TimeSource.StartSample`/`timeconf.Sample` checks are necessary but
+do not themselves establish production collector provenance or durable reboot
+continuity. Nil/unknown time refuses, with no wall-time or historical-clock fallback.
+
+Sample for proof verification and **resample immediately before pin** under the
+retained exclusions, checking every release's Date/skew, effective expiry and
+source high-water with the full uncertainty interval. Effective expiry remains
+the earlier of signed Valid-Until and the pinned maximum age; malformed present
+expiry refuses. Preserve already confirmed native profile values and source
+validation bounds; add no permissive defaults. If a deadline/authority lapses
+before publication, do not pin. The time owner must publish the lock-compatible
+bounded collector path; general network acquisition is outside maintenance
+locks. Network wait under exclusion, cached freshness or dropping F/B cannot
+bridge an incompatible collector graph.
+
+### 6.2 Continuous admission and maintenance interlock
+
+The proposed closed `InterlockFacts` record, to be published jointly with the
+admission/P7 and root-writer owners, is exactly
+`{authority,evidence,scope,version,epoch,maintenance,new_starts,resumes,root_writers,worker,p7,invalidation}`.
+Version selects one explicitly pinned schema/validator. Epoch binds the original
+pre-package enforcement, not a new assertion minted after mutation. Maintenance
+binds the protected current-boot assertion; new-start/resume evidence proves
+their real stopped enforcement. Root-writers and worker bind the continuous
+exclusive ownership domain/subjects; P7 binds §6.3's original event. Invalidation
+defines owner-authenticated revocation/version/boot/lease changes and how the
+live guard detects them without external calls under inner locks.
+
+Authenticate this interlock before the first mutation, after each handoff and
+immediately before pin/accepted append. Its guard must prove continuity over
+the entire interval: loss followed by reacquisition is a failure, not renewal.
+A marker, policy flag, caller approval or current stopped observation alone
+does not prove pre-package closure or continuous exclusion. The exact immutable
+interlock ref frozen in the intent must remain bound to that enforced epoch;
+live checks authenticate its continuing validity, not rewrite its bytes.
+If the joint owner contract cannot express this within existing frozen-reference
+semantics, refuse and obtain versioned contract review instead of adding an
+entry field, replacing its ref or inventing evidence of future continuity.
+
+### 6.3 Original P7 event and response
+
+`P7Facts` is exactly
+`{authority,evidence,scope,event,affected,detected,deadline,response,continuity}`.
+Event is the original detection identity. Affected is the owner's authenticated
+complete execution-set ref, not an executor-generated account list. Detected is
+the original `{boot_id,monotonic_ms}`; deadline is the absolute value on that
+same boot clock from the published P7 profile, never a retry-relative duration.
+Response authenticates timely verified narrower scope or complete stop for the
+entire affected set; unknown scope requires the owner's complete stop response.
+Continuity explains any retry/reboot interpretation without extending the
+original deadline or changing the original incident.
+
+The validator checks complete association to the interlock/event/transaction
+set, original clock/domain and already confirmed response bound, actual response
+completion within it, and immediate new-start/resume closure. It cannot infer
+compliance from a notification, queue acknowledgement or present marker.
+Unknown clock continuity never resets/extends the deadline: retain stopped work
+and report uncertainty. The P7 owner enforces the immediate response independently
+of this worker; neither missing evidence nor delivery delay postpones it.
+
+### 6.4 Incident, capability and both recipient receipts
+
+Use the existing closed `qual-maint-incident/1` byte schema and validators;
+add no fields. Its attempt, boot, old/candidate inputs, reason, transaction ref,
+affected/response refs and original detection/deadline MUST equal §§2/6.3's
+authenticated facts. A digest-correct incident constructed without its owner's
+authority is invalid. Retain exact sanitized bytes/durable refs, never raw
+transport messages, account identities, addresses, headers or credentials.
+
+`DeliveryCapabilityFacts` is exactly
+`{authority,evidence,deployment,recipient,transport,version,reserve,retry}`.
+Recipient is exactly `owner` or `curator`; transport/version identifies the
+pinned closed authenticated receipt codec, trust authority and bounded delivery
+semantics. Reserve authenticates durable failure/incident/receipt capacity;
+retry binds the durable event-driven retry contract, not a timer granting
+readiness. Both recipient capabilities must be available before first mutation.
+
+`DeliveryFacts` is exactly
+`{authority,evidence,incident,recipient,transport,version,delivery}`.
+Incident is its exact durable SHA-256/size ref; recipient and transport/version
+must match the corresponding capability; delivery is owner-authenticated
+terminal delivered proof with the contract's bounded identity and replay rules.
+One receipt MUST NOT serve both roles. Reject enqueue-only, foreign incident,
+wrong role, counterfeit/expired authority or ambiguous delivery semantics.
+
+Reserve journal intent plus two maximum entries/three slots and **all** planned
+content, incident and two receipt objects, counting orphans/temporary bytes;
+also require the owner's durable incident failure reserve (journal §2.6).
+Local `Reserve` alone does not prove external queue capacity. If capacity or
+incident authority is unavailable, remain held without inventing a refused/
+interrupted entry; an intact intent may remain open until authentic recovery.
+
+Required prior deliveries pending/unknown block a new attempt's acceptance and
+readiness. Delivery transport runs outside **all** maintenance locks; persist
+validated receipt updates under W/D before a new attempt. Existing terminal
+bindings, incident and original P7 clock/deadline stay immutable, including the
+notification-only terminal-boot exception on later writer boots. Receipt seq/prev
+may advance, accepted/frontier effects may not. These are requirements for a
+separate qualified delivery/recovery integration; the current inert executor
+does not activate it or use an absent contract to grant a write path.
