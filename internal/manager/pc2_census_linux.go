@@ -186,6 +186,25 @@ func prepareManagerCensus(c *censusContext) (prepared *PreparedCensus, err error
 	}
 	entries := snapshot.Entries()
 	aliases := map[[2]uint64]bool{}
+	for _, index := range []int{0, 3, 4} {
+		image := c1[index]
+		key := [2]uint64{image.Identity.Device, image.Identity.Inode}
+		if aliases[key] {
+			return bad(nil)
+		}
+		aliases[key] = true
+	}
+	for _, index := range []int{1, 2} {
+		found := false
+		for _, row := range entries {
+			if row.Image == c1[index] {
+				found = true
+			}
+		}
+		if !found {
+			return bad(nil)
+		}
+	}
 	ids := map[string]bool{}
 	classes := [5]censusClass{}
 	for i, k := range censusClasses {

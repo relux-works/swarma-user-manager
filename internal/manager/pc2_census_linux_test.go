@@ -81,6 +81,7 @@ func censusValid(t *testing.T, c *censusContext) *PreparedCensus {
 // Claim: missing old native observations and linked immutable PC2 bodies are
 // not omitted just because the newest native file and head remain well formed.
 func TestManagerCensusHistory(t *testing.T) {
+	t.Run("native-logical-regressions", censusNativeHistoryControls)
 	for _, which := range []string{"native-prefix", "class-inventory"} {
 		t.Run(which, func(t *testing.T) {
 			f := newCensusFixture(t, censusOptions{})
@@ -310,7 +311,7 @@ func TestManagerSlotCredit(t *testing.T) {
 // Claim: native modes, named identity, symlinks and ordinary hardlinks are
 // checked on actual files; this does not qualify bind/cross-owner aliases.
 func TestManagerCensusProtection(t *testing.T) {
-	for _, which := range []string{"mode", "symlink", "hardlink", "directory"} {
+	for _, which := range []string{"mode", "symlink", "hardlink", "directory", "fence-content", "uncounted-guard-copy"} {
 		t.Run(which, func(t *testing.T) {
 			f := newCensusFixture(t, censusOptions{})
 			censusValid(t, f.c)
@@ -331,6 +332,15 @@ func TestManagerCensusProtection(t *testing.T) {
 				if e == nil {
 					e = os.Mkdir(filepath.Join(f.root, "effects"), 0700)
 				}
+			case "fence-content":
+				censusWrite(t, filepath.Join(f.root, "fence/authority.lock"), []byte("uncharged"), 0640)
+			case "uncounted-guard-copy":
+				image, err := f.c.targets[1].Directory.Read(f.c.targets[1].Name, 0640, 65536)
+				if err != nil {
+					t.Fatal(err)
+				}
+				censusWrite(t, filepath.Join(f.root, "auth/guard-copy.json"), image.Bytes(), 0640)
+				f.c.targets[1] = pc2store.HeadTarget{Directory: f.c.targets[0].Directory, Name: "guard-copy.json", Cap: 65536}
 			}
 			if e != nil {
 				t.Fatal(e)
@@ -342,7 +352,12 @@ func TestManagerCensusProtection(t *testing.T) {
 
 // Claim: F is exclusive/nonblocking; no native/effects/index writer flock is
 // needed for stable preparation, and F is released before unlocked validation.
+var censusCaptureScopeTrace func(*testing.T) // Installed by the amd64 owned-child tracer.
+
 func TestManagerCensusCaptureLockScope(t *testing.T) {
+	if censusCaptureScopeTrace != nil {
+		t.Run("syscall-trace", censusCaptureScopeTrace)
+	}
 	f := newCensusFixture(t, censusOptions{})
 	censusValid(t, f.c)
 	var held []*os.File

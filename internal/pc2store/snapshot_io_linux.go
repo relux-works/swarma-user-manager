@@ -240,6 +240,10 @@ func CaptureHeads(fence *ReadDirectory, fenceID FileIdentity, targets []HeadTarg
 	if e != nil || (FileIdentity{id.Device, id.Inode, id.Mount}) != fenceID {
 		return nil, errors.Join(ErrUnavailable, e)
 	}
+	var fenceStat unix.Stat_t
+	if e := unix.Fstat(int(f.Fd()), &fenceStat); e != nil || fenceStat.Size != 0 {
+		return nil, errors.Join(ErrUnavailable, e)
+	}
 	if e = unix.Flock(int(f.Fd()), unix.LOCK_EX|unix.LOCK_NB); e != nil {
 		return nil, errors.Join(ErrUnavailable, e)
 	}
@@ -252,6 +256,9 @@ func CaptureHeads(fence *ReadDirectory, fenceID FileIdentity, targets []HeadTarg
 	}
 	if e = named(fence.file, "authority.lock", id); e != nil {
 		return nil, e
+	}
+	if e := unix.Fstat(int(f.Fd()), &fenceStat); e != nil || fenceStat.Size != 0 {
+		return nil, errors.Join(ErrUnavailable, e)
 	}
 	return images, fence.check()
 }

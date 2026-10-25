@@ -4,6 +4,7 @@ package manager
 
 import (
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"golang.org/x/sys/unix"
@@ -17,6 +18,15 @@ import (
 	"time"
 	"unsafe"
 )
+
+func init() {
+	censusCaptureScopeTrace = func(t *testing.T) { traceCensusCloseChild(t, "scope", false) }
+}
+
+type censusTraceArm struct {
+	Root  string          `json:"root"`
+	Heads map[string]bool `json:"heads"`
+}
 
 // Claim: a real successful close reported as EIO prevents any prepared result,
 // preserves primary ENOENT and all retained bytes, and leaks no owned FD. Only
@@ -43,7 +53,22 @@ func TestManagerCensusCloseHelper(t *testing.T) {
 	if mode == "primary" {
 		f.c.targets[0].Name = "missing.json"
 	}
-	if e := os.WriteFile(os.Getenv("CENSUS_CLOSE_ARM"), []byte("ready"), 0600); e != nil {
+	arm := censusTraceArm{Root: f.root, Heads: map[string]bool{}}
+	for path := range before {
+		for _, target := range f.c.targets {
+			if filepath.Base(path) == target.Name {
+				arm.Heads[path] = true
+			}
+		}
+	}
+	if len(arm.Heads) != 5 {
+		t.Fatal("head trace catalog", arm.Heads)
+	}
+	armPath := os.Getenv("CENSUS_CLOSE_ARM")
+	if e := os.WriteFile(armPath+".tmp", censusWire(t, arm), 0600); e != nil {
+		t.Fatal(e)
+	}
+	if e := os.Rename(armPath+".tmp", armPath); e != nil {
 		t.Fatal(e)
 	}
 	p, e := prepareManagerCensus(f.c)
@@ -144,6 +169,17 @@ func traceCensusCloseChild(t *testing.T, mode string, inject bool) {
 	pending := map[int]target{}
 	released := map[[2]uint64]bool{}
 	events, exit := 0, -1
+	type scopeCall struct{ nr, fd, flags uint64 }
+	calls := map[int]scopeCall{}
+	var catalog censusTraceArm
+	held, captures, opens := false, 0, 0
+	var readBytes int64
+	violation := ""
+	forbid := func(format string, args ...any) {
+		if violation == "" {
+			violation = fmt.Sprintf(format, args...)
+		}
+	}
 	for {
 		tid, e := unix.Wait4(-1, &status, unix.WALL, nil)
 		if errors.Is(e, unix.EINTR) {
@@ -176,10 +212,35 @@ func traceCensusCloseChild(t *testing.T, mode string, inject bool) {
 			if info[0] == 1 { // syscall entry
 				nr, fd, arg2 := binary.LittleEndian.Uint64(info[24:]), binary.LittleEndian.Uint64(info[32:]), binary.LittleEndian.Uint64(info[40:])
 				_, armed := os.Stat(arm)
+				if mode == "scope" && armed == nil {
+					if catalog.Root == "" {
+						raw, e := os.ReadFile(arm)
+						if e != nil || json.Unmarshal(raw, &catalog) != nil || len(catalog.Heads) != 5 {
+							t.Fatal("trace arm unreadable", e)
+						}
+					}
+					path, _ := os.Readlink(fmt.Sprintf("/proc/%d/fd/%d", tid, fd))
+					if nr == unix.SYS_FLOCK && strings.HasPrefix(path, catalog.Root+"/") {
+						if path != catalog.Root+"/fence/authority.lock" {
+							forbid("non-F flock under capture: %s", path)
+						}
+						if arg2 != unix.LOCK_UN && arg2 != unix.LOCK_EX|unix.LOCK_NB {
+							forbid("wrong F operation %d", arg2)
+						}
+						calls[tid] = scopeCall{nr, fd, arg2}
+					} else if held && nr == unix.SYS_OPENAT {
+						calls[tid] = scopeCall{nr, fd, binary.LittleEndian.Uint64(info[48:])}
+					} else if held && (nr == unix.SYS_READ || nr == unix.SYS_PREAD64 || nr == unix.SYS_GETDENTS64) && strings.HasPrefix(path, catalog.Root+"/") {
+						if !catalog.Heads[path] || nr == unix.SYS_GETDENTS64 {
+							forbid("non-head read/enumeration under F: %s syscall=%d", path, nr)
+						}
+						calls[tid] = scopeCall{nr, fd, 0}
+					}
+				}
 				if nr == unix.SYS_FLOCK && arg2 == unix.LOCK_UN && armed == nil {
 					released[[2]uint64{uint64(tid), fd}] = true
 				}
-				if nr == unix.SYS_CLOSE && events == 0 && armed == nil {
+				if mode != "scope" && nr == unix.SYS_CLOSE && events == 0 && armed == nil {
 					path, _ := os.Readlink(fmt.Sprintf("/proc/%d/fd/%d", tid, fd))
 					suffix := "/authority.lock"
 					eligible := released[[2]uint64{uint64(tid), fd}]
@@ -194,6 +255,32 @@ func traceCensusCloseChild(t *testing.T, mode string, inject bool) {
 					}
 				}
 			} else if info[0] == 2 { // syscall exit: kernel already closed it
+				if call, ok := calls[tid]; ok {
+					delete(calls, tid)
+					result := int64(binary.LittleEndian.Uint64(info[24:]))
+					if call.nr == unix.SYS_FLOCK && result == 0 {
+						if call.flags == unix.LOCK_UN {
+							if !held || opens != 5 || readBytes > 1421312 {
+								forbid("capture budget: held=%v opens=%d bytes=%d", held, opens, readBytes)
+							}
+							held = false
+						} else {
+							held, opens, readBytes = true, 0, 0
+							captures++
+						}
+					} else if call.nr == unix.SYS_OPENAT && result >= 0 {
+						path, _ := os.Readlink(fmt.Sprintf("/proc/%d/fd/%d", tid, result))
+						if !catalog.Heads[path] {
+							forbid("non-head open under F: %s", path)
+						}
+						if call.flags&unix.O_ACCMODE != unix.O_RDONLY || call.flags&(unix.O_NOFOLLOW|unix.O_CLOEXEC) != unix.O_NOFOLLOW|unix.O_CLOEXEC || call.flags&unix.O_CREAT != 0 {
+							forbid("wrong head open flags %d", call.flags)
+						}
+						opens++
+					} else if (call.nr == unix.SYS_READ || call.nr == unix.SYS_PREAD64) && result > 0 {
+						readBytes += result
+					}
+				}
 				if target, ok := pending[tid]; ok {
 					delete(pending, tid)
 					result := int64(binary.LittleEndian.Uint64(info[24:]))
@@ -226,6 +313,13 @@ func traceCensusCloseChild(t *testing.T, mode string, inject bool) {
 	b, e := os.ReadFile(log)
 	if e != nil {
 		t.Fatal(e)
+	}
+	if mode == "scope" {
+		if violation != "" || held || captures != 2 || exit != 0 {
+			t.Fatalf("capture trace: %s held=%v captures=%d child-exit=%d\n%s", violation, held, captures, exit, b)
+		}
+		t.Log("two real exclusive captures; exactly five read-only heads each; no history reads, directory scans or other flocks under F")
+		return
 	}
 	if events != 1 || exit != 0 {
 		t.Fatalf("close trace events=%d child-exit=%d\n%s", events, exit, b)

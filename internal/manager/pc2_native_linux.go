@@ -124,6 +124,18 @@ func censusNativeHistory(images []nativeCensusImage, history []pc2store.NativeOb
 			if e != nil {
 				return errNativeCensus
 			}
+			linked := false
+			for _, journal := range images {
+				if journal.observation.Role == "generation-journal" {
+					if _, e := genjournal.Verify(bytes.NewReader(journal.image.Bytes()), state.Floor); e != nil {
+						return errNativeCensus
+					}
+					linked = true
+				}
+			}
+			if !linked {
+				return errNativeCensus
+			}
 			for _, record := range state.OSRecords {
 				if record.Kind == "receipt" {
 					receipt, e := recordBody[Receipt](record)
@@ -140,7 +152,7 @@ func censusNativeHistory(images []nativeCensusImage, history []pc2store.NativeOb
 					if old.Bytes > int64(len(raw)) || "sha256:"+genjournal.Digest(raw[:old.Bytes]) != old.Digest {
 						return errNativeCensus
 					}
-					if _, e := genjournal.Verify(bytes.NewReader(raw), nativeCheckpoint(old.Floor)); e != nil {
+					if v, e := genjournal.Verify(bytes.NewReader(raw[:old.Bytes]), nativeCheckpoint(old.Floor)); e != nil || v.Tail != nativeCheckpoint(old.Tail) {
 						return errors.Join(errNativeCensus, e)
 					}
 				}
