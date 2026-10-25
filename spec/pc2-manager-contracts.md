@@ -12,6 +12,10 @@ independent. G4's schema 3, authority/2, ten participant roles, fourteen capacit
 rows, digest domains and read limits are unchanged here. This does not extend
 `gen-journal/1`, `qual-maint/1`, the effect store or the key service's S2 codecs.
 Every MUST below is a future implementation requirement, not evidence it ran.
+For the future manager consumer, G4's authority/2 is the explicit versioned
+successor to the authority/1 proposal in PC2 K2, not optional fields added to
+that closed proposal. This contract does not claim another owner's content
+approval, an implemented combined reader or a runtime dependency bump.
 
 ## 1. Negative obligations first
 
@@ -213,3 +217,200 @@ cleanup; the next common reservation may replenish future credit only after
 proven resolution. Retained materialized history stays charged permanently.
 An exact retry returns the retained result, never allocates a fresh slot,
 generation, reservation or duplicate active append.
+
+## 4. Journal-owned append lifetime (G5-A / S4)
+
+The current [AppendPrepared](../tools/genjournal/native_linux.go) invokes its
+[callback](../tools/genjournal/writer_linux.go) once before the append syscall.
+It neither owns F_auth nor spans later verification/finish. Do not use it for
+PC2, take F_auth before calling it, or release F_auth in a caller defer after
+the journal has unlocked. Other existing journal callers/codecs are unaffected.
+
+The proposed replacement for this adapter is a journal-owned
+`AppendPreparedLifetime` operation. Its prepared append binds the exact tail,
+canonical active line/hash, target, immutable effect and caller-owned effects
+exclusion. Its prepared activation guard is an opaque process-local capability
+from the authenticated manager/key-service preparation, not `func() error`,
+an FD, caller identity map or persisted "validated" flag. Reject nil, copied,
+foreign, reused, expired or wrong-process capabilities before append.
+
+### 4.1 Acquisition, consumption and reverse release
+
+1. Reserve all obligations under §3 before writer.pending or staging exists.
+   Prepare immutable inventories, qualified provenance, provider evidence and
+   candidate bytes outside short locks. Verity enablement, full class/history
+   scans and external preparation are not permitted in the final window.
+2. The manager owns effects before entering the journal. The journal publishes
+   its normal durable marker and owns exclusive **gate -> data**. Inside that
+   pair, it invokes the guard's acquire/check/consume transition, taking
+   **F_auth last**. The journal owns the resulting lifetime from the first
+   successful acquisition, including partially failed entry.
+3. Recheck exact prepared tail, transition/retirement reserve, all current
+   authority facts, independent floors, full G4 metadata/measurements and live
+   guards. Require the same creating successor, immediately removed predecessor,
+   T/owner/provision-effect, admitted plus provisioned binding, current pin,
+   incarnation/counter and still-valid original observation correlation.
+   No C/Store/enrollment/audit/implicit lock, RPC, provider, inventory scan,
+   account/service/operator call or F_pkg acquisition is allowed under F_auth.
+4. Durably consume the observation and sole credit into the exact A2 attempt,
+   activation hold and open guard/inventory extension before active write.
+   File-fsync and parent-fsync every required consumption object, and verify
+   exact identity/readback. No optional boolean substitutes for consumption.
+   The immutable participant already bound by the root stays unchanged; the
+   guard's bounded MetaRef may name only this one pre-funded normal extension.
+   Any later common root validates/folds its full retained census outside F_auth.
+5. The journal, still owning F_auth, does its single O_APPEND write, journal and
+   directory fsyncs, complete post-write chain/reserve verification and normal
+   writer finish. This includes final verification/sync, marker removal and its
+   parent fsync, then the exact retained outcome and linked normal-finish release
+   barriers. All new bytes/copies must fit their already committed tickets.
+6. Only after those steps may a clean original writer finish that same attempt.
+   Release **F_auth -> data -> gate**, then the caller releases effects. The
+   journal's unwind owns this order on **every controlled exit**, including
+   failed entry, validation, consume, write, sync, finish or cancellation. No
+   external callback/defer owns F_auth after journal return; no FD is exported,
+   duplicated, inherited or passed to a helper. Report release/cleanup failure,
+   preserve the hold and never turn a failed close into normal success.
+
+Capability operations may perform only the enumerated bounded local metadata,
+measurement and durability work. They cannot reacquire released evidence or
+silently move work to a helper. Diagnostic/response writes happen only after all
+locks are released. Process death is not a controlled unwind or abort proof:
+kernel lock release leaves the same durable attempt/hold for §5 recovery.
+
+### 4.2 Unchanged deadline and outcome partition
+
+The **one 1000 ms CLOCK_BOOTTIME budget** still starts before journal marker
+staging and ends only after normal finish and all added local durability work.
+Guard acquisition, consumption, F_auth wait, all sync/verification, linked
+normal release and final checks spend that same remaining budget. No new timer
+at guard entry, per-file budget, helper restart or 500 ms classification-margin
+extension is permitted. The **250 ms** reader and original
+**send-start+2000 ms** observation bound also remain unchanged. Stuck I/O cannot
+be interrupted by cooperative checks; inability to qualify latency keeps PC2
+closed, not entitled to a longer timeout.
+
+| Observed boundary | Required classification and retained state |
+|---|---|
+| No active write started | Proven no active append; return the actual pre-write refusal and preserve marker/consumed obligation if created. No automatic marker clear, slot return or re-preparation under locks |
+| Active write may have started; exact durability not proved | Unknown write, including short write, fsync/deadline error or lost reply. Preserve exact attempt/hold, credit and bytes; no duplicate append, account removal or clean-abort claim |
+| Exact active append verified durable; any later marker/release/finish/ack fails | Known append with uncertain cleanup, even if the marker vanished. Preserve the same hold/result and reconcile retained-active once; never downgrade to absent or append twice |
+| Exact append and complete normal finish proven within original budgets | Return that one outcome after reverse release; separate promotion/admission gates remain |
+
+Retain the real existing journal/manager error codes and the two distinct
+post-write outcomes from [PC2 §5](activation-order.md#5-crashes-uncertainty-and-refusals).
+This document adds no public error literal or new journal result wire codec.
+The absorption-versus-RPC-correlation joint decision remains open: before
+durable consumption, disconnect/uncertainty requires a fresh unlocked query;
+this API does not grant new completion authority after consumption/source death.
+Retain the required valid consumed-attempt completion and failure controls.
+
+## 5. Root coordinator, participants and release consumption
+
+Proposed manager entry point:
+`/opt/swarma/libexec/swarma-user-manager pc2-reconcile`, no path/command options.
+It is **not implemented or installed**. Require real and effective UID 0,
+protected executable/configuration and independently authorized maintenance;
+forwarded sudo/caller environment or request fields confer no authority. Root
+execution is the existing trusted maintenance boundary, not a grant to make
+the key daemon or an ordinary RPC client root.
+
+Proposed bounded stdin selector, canonical CCJ-1, <=4096 bytes, depth <=16:
+`{version:"pc2-reconcile/1",manager_id:ID,recovery_id:ID|null,hold_id:D}`.
+It selects retained owner evidence; it cannot supply a new floor, outcome,
+intent, proof, alternate directory or origin. Initial recovery IDs are created
+and durably recorded by the authorized coordinator, not minted by callers.
+Null requests a new independently authorized session for that exact hold only
+if no prior recovery session exists; otherwise require and resume the retained
+ID. A non-null unknown ID, unowned selector, unknown hold or missing required
+ledger refuses. Ordinary management entry points do not call this recovery path
+implicitly.
+
+### 5.1 Protected state and writer privileges
+
+Installation publishes the root/role-to-directory mapping in protected deployment
+configuration. The manager's PC2 directory is `<root>/lib/user-manager/pc2/`.
+Its parents/subdirectories are root-owned 0750, group the dedicated key-service
+read group; files root-owned 0640, regular/single-link/no alias or write-granting
+ACL. This narrows neither the separate generation directory's required 0755/0644
+layout nor the key service's private 0700/0600 ownership.
+
+| Owner location / role | Permitted writer and retained content |
+|---|---|
+| pc2/package-fence.json | Root deployment/package publisher (§2), exact current publication with retained old revisions |
+| pc2/guard.json | Root manager normal-flight code or authorized root recovery coordinator; exact G4 pc2-recovery-guard/1 veto/consumption endpoint |
+| pc2/inventory/, pc2/attempts/, pc2/holds/, pc2/recovery/, pc2/capacity/ | Root manager/coordinator writes immutable digest-named G4 objects and class inventories; retain complete histories and original C0/Q0 evidence |
+| pc2/staging/ | Only the authorized owner of the already reserved prospective copy; partial/orphan files remain charged and closed |
+| Existing generations/ and effect store | Existing root manager/journal ownership and unchanged codecs; PC2 references exact protected intent/reservation rather than inventing a lifecycle event |
+| Key-service participants, root/floor/intent and private stores | Their authenticated owning installers/coordinator, according to G4; a manager selector does not grant these writers' privileges |
+
+Digest filenames are the checked 64 lowercase hash digits plus `.json`, resolved
+by fixed role under retained protected directory descriptors, never a received
+path. Runtime files are not repository artifacts. Guard/current endpoints use
+atomic replace plus file/parent sync and exact readback; all referenced immutable
+objects precede their publication. Initial explicit clear/empty histories require
+independent genesis authority; missing files never mean clear. Existing codecs
+and G4 phase/member/null unions remain exact.
+
+The manager publishes prepare/install ownership for manager_inventory,
+recovery_history and its package publication only. The root-policy owner must
+provide the protected pin/policy installer; enrollment, high-water, approval,
+message/native/migration/payload owners must provide their complete original
+bytes, authorization and immutable identities. Common transaction installation
+is of those exact prepared participants, including all ten G4 roles, not a
+service-generated substitute for root/provider authority. Permission to install
+another participant, service stop/start/old-instance fencing and read-only
+descriptor sync semantics remain platform/owner decisions (§7). No chmod,
+service-root conversion or extra RPC under F_auth is an authorized shortcut.
+
+### 5.2 Recovery order and manager's direct consumption barrier
+
+Before recovery, obtain independently qualified old/restored-writer exclusion
+and reserve all new recovery/guard/census/staging copies. Preserve package
+maintenance and admission holds where applicable. Prepare custody/provider
+evidence **outside all locks**. Exclude key-service serving instances and open
+its offline lifetime state exclusion before effects/journal locks; no RPC to
+acquire a live daemon's private mutex. Acquire **effects -> gate -> data ->
+C_Store -> C_enrollment -> audit -> F_auth** as applicable to repair, with all
+private serialization before terminal F_auth. Ordinary manager append takes
+no C/audit. No participant acquires a predecessor lock from F_auth.
+
+Resume the **same** retained recovery ID and A2 hold/origin:
+
+1. Durable root-owned `open` ledger/guard precedes any repair/cleanup; bind exact
+   original intents, hold and expected root/attempt. Unknown/unattributable
+   evidence closes recovery, never invents a C0/authority/activation origin.
+2. Prove actual journal outcome and complete/verify exact participants, root,
+   counters/incarnation and independent floors; sync repaired files/parents.
+   Append a linked exact `resolved` record; resolution alone does not release.
+3. Append/file-sync/parent-sync `release-prepared`, binding that resolution,
+   hold, post-repair roots and journal checkpoint. Only then perform owning
+   marker/intent cleanup and sync every affected parent. No history deletion.
+4. Revalidate no old flights and exact linked continuity under F_auth; append
+   and file-sync `released`, install/file-sync the linked guard, and sync every
+   other affected parent, including the guard's. Sync the released record's
+   ledger directory **last**. Any error/death preserves that hold, including
+   after marker unlink.
+
+The manager itself must consume a release synchronously before dependent use.
+Outside short locks prepare the full immutable recovery-history/ancestry proof
+against the independent baseline and retain exact directory/object descriptors.
+Under its forward-ordered F_auth window, use bounded **direct** file/directory
+sync on the current linked resolution/release-prepared/released objects, owning
+cleanup endpoints and required parents, then revalidate exact links, current
+guard/root/floor/intent and no later open state. Earlier history is covered by
+that exact fully validated immutable participant, not an under-F history walk.
+Use only G4's fixed metadata set/retained directories; no C, daemon RPC or new
+read schema in normal consumption. A readable released phase, apparent marker
+absence or another process's success reply is insufficient.
+
+Qualify each principal's actual descriptor sync privileges and filesystem
+barriers within the original window; if unavailable, direct consumption stays
+unavailable. Do not add write permission for the unprivileged reader as a fix.
+An original live writer with no prior error may complete only its exact normal
+flight in this same linked protocol. Restarted/dead/errored writers transfer to
+root recovery even when IDs match. Absence requires stopped old writer, no
+remaining write/fsync and a qualified filesystem recovery barrier, not PID or
+timer evidence. Root recovery may block indefinitely on storage/authority loss;
+affected issuance stays suppressed and withdrawal completion cannot be promised
+within a finite crash-recovery deadline.
