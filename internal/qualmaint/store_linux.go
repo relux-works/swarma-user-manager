@@ -219,11 +219,18 @@ func (w *Writer) PutObject(b []byte) (Ref, error) {
 			return err
 		}
 		if err = s.step("object.install", func() error {
+			if err := s.sameObjectInode(f, name); err != nil {
+				return err
+			}
 			return unix.Renameat2(int(s.objects.Fd()), name, int(s.objects.Fd()), r.SHA256, unix.RENAME_NOREPLACE)
 		}); err != nil {
 			return err
 		}
 		if err = s.step("objects.sync", func() error { return s.syncFile(s.objects) }); err != nil {
+			return err
+		}
+		if err := s.sameObjectInode(f, r.SHA256); err != nil {
+			s.poisoned = true
 			return err
 		}
 		actual, err := s.readObject(r, false)
@@ -238,6 +245,17 @@ func (w *Writer) PutObject(b []byte) (Ref, error) {
 	}
 	return r, nil
 }
+
+// sameObjectInode keeps the fsynced publisher descriptor bound to the installed
+// name; matching bytes on a replacement inode do not prove that inode was synced.
+func (s *Store) sameObjectInode(f *os.File, name string) error {
+	var held, named unix.Stat_t
+	if metadata(f, s.owner, s.gid, false, false, s.fixture) != nil || unix.Fstat(int(f.Fd()), &held) != nil || unix.Fstatat(int(s.objects.Fd()), name, &named, unix.AT_SYMLINK_NOFOLLOW) != nil || held.Dev != named.Dev || held.Ino != named.Ino || held.Mode&unix.S_IFMT != named.Mode&unix.S_IFMT {
+		return ErrIO
+	}
+	return nil
+}
+
 func emptyCheckpoint() Checkpoint { return Checkpoint{0, Zero} }
 
 // Reserve establishes the remaining content budget for an open recovery attempt

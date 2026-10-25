@@ -596,3 +596,49 @@ func TestQualMaintStoreReferenceRefusals(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// A substituted temporary/installed inode with identical bytes is not the inode
+// the publisher fsynced. Both substitutions must refuse without acknowledgement;
+// existing no-fault publication is the nearby valid control.
+func TestQualMaintObjectInstallIdentity(t *testing.T) {
+	for _, point := range []string{"object.install.before", "object.install.after"} {
+		t.Run(point, func(t *testing.T) {
+			s, root := fixture(t)
+			w := writer(t, s)
+			payload := []byte("same bytes, different inode")
+			applied := false
+			s.fault = func(stage string) error {
+				if stage != point {
+					return nil
+				}
+				applied = true
+				dir := filepath.Join(root, "lib/user-manager/qualification-maintenance/objects")
+				name := Digest(payload)
+				if point == "object.install.before" {
+					entries, err := os.ReadDir(dir)
+					if err != nil || len(entries) != 1 {
+						t.Fatal("owned plant setup", err)
+					}
+					name = entries[0].Name()
+				}
+				path := filepath.Join(dir, name)
+				if err := os.Rename(path, filepath.Join(dir, ".tmp-ffffffffffffffffffffffff")); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, payload, 0600); err != nil {
+					t.Fatal(err)
+				}
+				return nil
+			}
+			got, err := w.PutObject(payload)
+			wantError(t, err, ErrIO)
+			if !applied || got != (Ref{}) {
+				t.Fatal("unapplied plant or acknowledgement")
+			}
+			b, err := os.ReadFile(journalPath(root))
+			if err != nil || len(b) != 0 {
+				t.Fatal("publication gained journal authority")
+			}
+		})
+	}
+}
