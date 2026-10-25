@@ -60,7 +60,10 @@ func recoveryPathPin(t *testing.T, root *pc2store.ReadDirectory, rel string) *pc
 	}
 	return recoveryPin(t, d, parts[len(parts)-1], 0640, 65536)
 }
-func newRecoveryFixture(t *testing.T, disposition string) *recoveryFixture {
+func newRecoveryFixture(t *testing.T, disposition string, extra ...pc2state.Object) *recoveryFixture {
+	return newRecoveryFixtureKind(t, disposition, "activation", extra...)
+}
+func newRecoveryFixtureKind(t *testing.T, disposition, kind string, extra ...pc2state.Object) *recoveryFixture {
 	t.Helper()
 	root := t.TempDir()
 	censusDir(t, root, 0700)
@@ -124,6 +127,16 @@ func newRecoveryFixture(t *testing.T, disposition string) *recoveryFixture {
 	if e != nil {
 		t.Fatal(e)
 	}
+	if kind == "authority" {
+		pre, e = os.ReadFile("../pc2state/testdata/transaction.json")
+		if e != nil {
+			t.Fatal(e)
+		}
+		hold, e = pc2state.NewHold("authority", pre)
+		if e != nil {
+			t.Fatal(e)
+		}
+	}
 	id := strings.Repeat("3", 32)
 	hd := digestCensus(hold.Bytes())
 	view, e := genjournal.Verify(strings.NewReader(string(journal)), genjournal.Floor{Seq: 0, Hash: genjournal.ZeroHash})
@@ -143,8 +156,13 @@ func newRecoveryFixture(t *testing.T, disposition string) *recoveryFixture {
 	if e != nil {
 		t.Fatal(e)
 	}
+	storedAttempt := attempt
+	if kind == "authority" {
+		attempt = pc2state.Object{}
+		storedAttempt = recoveryObject(t, pc2state.CapacityInventory, censusClass{Version: string(pc2state.CapacityInventory), Owner: "manager", Kind: "attempts", Objects: []censusRow{}})
+	}
 	cl := recoveryClosure{hold: hold, attempt: attempt, origin: string(pre), objects: map[string]pc2state.Object{}, evidence: map[string]string{digestCensus(proof): string(proof)}}
-	for _, o := range []pc2state.Object{pending, attempt, hold, inventory} {
+	for _, o := range []pc2state.Object{storedAttempt, hold, inventory} {
 		cl.objects[digestCensus(o.Bytes())] = o
 	}
 	outcome := genjournal.DurableCleanupUncertain
@@ -154,6 +172,9 @@ func newRecoveryFixture(t *testing.T, disposition string) *recoveryFixture {
 	cl.accepted = recoveryAccepted{id: id, hold: hd, root: digestCensus(rootRaw), floor: digestCensus(floorRaw), intent: digestCensus(intentRaw), inventory: digestCensus(invRaw), proof: digestCensus(proof), marker: digestCensus([]byte("fixture-exact-owned-marker")), origin: digestCensus(pre), exclusion: "independent-owned-fixture", outcome: outcome, disposition: disposition, checkpoint: view.Tail, journal: string(journal), originalIntent: string(original)}
 	hm, _ := treeCensus(hold.Bytes())
 	guardMap := map[string]any{"version": string(pc2state.RecoveryGuard), "revision": int64(1), "previous_digest": nil, "inventory": recoveryRef(inventory), "phase": "open", "holds": []any{map[string]any{"kind": hm["kind"], "origin_id": hm["origin_id"], "hold_id": hd}}, "attempt": recoveryRef(attempt), "resolution": nil, "release_prepared": nil, "released": nil, "source_root_digest": cl.accepted.root}
+	if kind == "authority" {
+		guardMap["attempt"] = nil
+	}
 	initial := recoveryObject(t, pc2state.RecoveryGuard, guardMap)
 	censusWrite(t, filepath.Join(root, "auth/guard.json"), initial.Bytes(), 0640)
 	var prev any
@@ -182,7 +203,7 @@ func newRecoveryFixture(t *testing.T, disposition string) *recoveryFixture {
 		cl.guards = append(cl.guards, recoveryObject(t, pc2state.RecoveryGuard, guardMap))
 	}
 	f.c = recoveryContext{closure: cl, markerParent: f.generations, guardParent: f.auth}
-	f.installFunding(t, []pc2state.Object{attempt, hold, inventory})
+	f.installFunding(t, append([]pc2state.Object{storedAttempt, hold, inventory}, extra...))
 	f.refresh(t)
 	return f
 }
@@ -303,7 +324,7 @@ func (f *recoveryFixture) refresh(t *testing.T) {
 		t.Fatal(e)
 	}
 	lock := recoveryPin(t, f.fence, "authority.lock", 0640, 0)
-	f.c.fence, e = f.fence.PrepareRecoveryFence(lock.Image().Identity, time.Now().Add(10*time.Second))
+	f.c.fence, e = f.fence.PrepareRecoveryFence(lock.Image().Identity, time.Now().Add(120*time.Second))
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -329,7 +350,7 @@ func (f *recoveryFixture) run(t *testing.T) {
 func (f *recoveryFixture) releaseContext(t *testing.T) recoveryReleaseContext {
 	t.Helper()
 	f.refresh(t)
-	c := recoveryReleaseContext{closure: f.c.closure, cleanup: f.generations, fence: f.c.fence, locks: f.c.locks}
+	c := recoveryReleaseContext{batch: f.c.batch, closure: f.c.closure, cleanup: f.generations, fence: f.c.fence, locks: f.c.locks}
 	names := map[string]string{"root": "root.json", "guard": "guard.json", "floor": "floor.json", "intent": "intent.json"}
 	for i, role := range releaseMetadataRoles {
 		var pin *pc2store.RecoveryFile
@@ -341,6 +362,10 @@ func (f *recoveryFixture) releaseContext(t *testing.T) recoveryReleaseContext {
 			case "inventory":
 				loc = f.locations[2]
 			case "attempt":
+				if f.c.closure.attempt.Kind() == "" {
+					c.metadata = append(c.metadata, releaseFile{role, nil})
+					continue
+				}
 				loc = f.locations[0]
 			case "resolution":
 				loc = f.locations[5]

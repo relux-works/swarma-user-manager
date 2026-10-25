@@ -44,12 +44,19 @@ func checkRecoveryClosure(c recoveryClosure) error {
 	if a.disposition != "absent" && a.disposition != "durable" {
 		return ErrRecoveryUnavailable
 	}
-	if a.outcome == genjournal.UnknownWrite {
+	switch a.outcome {
+	case genjournal.NoWrite:
+		if a.disposition != "absent" {
+			return ErrRecoveryUnavailable
+		}
+	case genjournal.DurableCleanupUncertain, genjournal.CleanAppend:
+		if a.disposition != "durable" {
+			return ErrRecoveryUnavailable
+		}
+	default:
 		return ErrRecoveryUnavailable
 	}
-	if (a.outcome == genjournal.DurableCleanupUncertain || a.outcome == genjournal.CleanAppend) && a.disposition != "durable" {
-		return ErrRecoveryUnavailable
-	}
+
 	view, e := genjournal.Verify(bytes.NewReader([]byte(a.journal)), genjournal.Floor{Seq: 0, Hash: genjournal.ZeroHash})
 	if e != nil || view.Tail != a.checkpoint {
 		return ErrRecoveryUnavailable
@@ -141,6 +148,54 @@ func checkRecoveryClosure(c recoveryClosure) error {
 				return ErrRecoveryUnavailable
 			}
 		}
+	}
+	return nil
+}
+
+// Derive vetoes from the complete prepared store, never the caller's selected
+// guard list or semantic-object map. Every other retained hold stays charged.
+func checkRecoveryRetained(c recoveryClosure, objects []pc2state.Object) error {
+	foundHold, foundAttempt, foundInventory := false, c.attempt.Kind() == "", false
+	for _, o := range objects {
+		switch o.Kind() {
+		case pc2state.Hold:
+			if o != c.hold {
+				return ErrRecoveryUnavailable
+			}
+			foundHold = true
+		case pc2state.ActivationAttempt:
+			if o == c.attempt {
+				foundAttempt = true
+			}
+			m, _ := treeCensus(o.Bytes())
+			if m["disposition"] == "pending" {
+				pre, e := pc2state.AttemptPreimage(o)
+				if e != nil || string(pre) != c.origin {
+					return ErrRecoveryUnavailable
+				}
+			}
+		case pc2state.ManagerInventory:
+			if digestCensus(o.Bytes()) == c.accepted.inventory {
+				foundInventory = true
+			}
+		case pc2state.RecoveryRecord:
+			m, _ := treeCensus(o.Bytes())
+			if m["recovery_id"] != c.accepted.id {
+				return ErrRecoveryUnavailable
+			}
+			found := false
+			for _, r := range c.records {
+				if o == r {
+					found = true
+				}
+			}
+			if !found {
+				return ErrRecoveryUnavailable
+			}
+		}
+	}
+	if !foundHold || !foundAttempt || !foundInventory {
+		return ErrRecoveryUnavailable
 	}
 	return nil
 }

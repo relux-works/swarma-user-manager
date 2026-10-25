@@ -191,3 +191,68 @@ func TestManagerNormalReleaseWindow(t *testing.T) {
 		}
 	}
 }
+
+// Claim: four journal diagnostics remain distinct; a zero/unbound transcript,
+// unknown/foreign outcome and durable-to-absent substitution cannot resolve.
+func TestManagerRecoveryOutcomePartition(t *testing.T) {
+	for _, disposition := range []string{"absent", "durable"} {
+		t.Run(disposition, func(t *testing.T) {
+			f := newRecoveryFixture(t, disposition)
+			c := f.c.closure
+			if e := checkRecoveryClosure(c); e != nil {
+				t.Fatal("positive", e)
+			}
+			if disposition == "durable" {
+				c.accepted.outcome = genjournal.CleanAppend
+				if e := checkRecoveryClosure(c); e != nil {
+					t.Fatal("clean outcome", e)
+				}
+			}
+			for _, outcome := range []genjournal.AppendOutcome{genjournal.UnknownWrite, 255} {
+				c.accepted.outcome = outcome
+				if checkRecoveryClosure(c) == nil {
+					t.Fatal("unknown/foreign resolved")
+				}
+			}
+			c = f.c.closure
+			c.accepted.exclusion = ""
+			if checkRecoveryClosure(c) == nil {
+				t.Fatal("unbound NoWrite/enum became proof")
+			}
+			c = f.c.closure
+			if disposition == "durable" {
+				c.accepted.disposition = "absent"
+				if checkRecoveryClosure(c) == nil {
+					t.Fatal("durable downgraded")
+				}
+			}
+		})
+	}
+}
+
+// Claim: a genuine, funded authority hold in the complete installed store vetoes
+// recovery even when omitted from both the selected guard and semantic map.
+func TestManagerRecoveryAllAuthorityHolds(t *testing.T) {
+	control := newRecoveryFixture(t, "durable")
+	if _, e := prepareRecovery(&control.c); e != nil {
+		t.Fatal("valid control", e)
+	}
+	origin, e := os.ReadFile("../pc2state/testdata/transaction.json")
+	if e != nil {
+		t.Fatal(e)
+	}
+	hold, e := pc2state.NewHold("authority", origin)
+	if e != nil {
+		t.Fatal(e)
+	}
+	f := newRecoveryFixture(t, "durable", hold)
+	if _, listed := f.c.closure.objects[digestCensus(hold.Bytes())]; listed {
+		t.Fatal("negative setup lists authority hold")
+	}
+	if p, e := prepareRecovery(&f.c); p != nil || !errors.Is(e, ErrRecoveryUnavailable) {
+		t.Fatal("unlisted retained authority bypass", p, e)
+	}
+	if _, e := os.Stat(filepath.Join(f.root, "generations/writer.pending")); e != nil {
+		t.Fatal("refusal cleaned marker", e)
+	}
+}

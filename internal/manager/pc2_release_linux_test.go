@@ -3,6 +3,7 @@
 package manager
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"os"
@@ -101,5 +102,24 @@ func TestManagerRecoveryFinalReadSet(t *testing.T) {
 	c.participants = c.participants[:9]
 	if _, e := prepareRecoveryRelease(&c); !errors.Is(e, ErrRecoveryUnavailable) {
 		t.Fatal("missing role accepted", e)
+	}
+}
+
+// Claim: genuine authority recovery uses its authority-TX origin and null
+// attempt union, retaining the same charged hold through direct consumption.
+func TestManagerRecoveryAuthorityLifecycle(t *testing.T) {
+	f := newRecoveryFixtureKind(t, "durable", "authority")
+	f.run(t)
+	c := f.releaseContext(t)
+	if c.metadata[6].file != nil {
+		t.Fatal("authority fabricated A2")
+	}
+	p, e := prepareRecoveryRelease(&c)
+	if e != nil {
+		t.Fatal(e)
+	}
+	r, e := consumeRecoveryRelease(context.Background(), p)
+	if e != nil || r.Hold != f.c.closure.accepted.hold {
+		t.Fatal(r, e)
 	}
 }

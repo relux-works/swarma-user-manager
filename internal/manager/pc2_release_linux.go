@@ -19,6 +19,7 @@ type releaseFile struct {
 	file *pc2store.RecoveryFile
 }
 type recoveryReleaseContext struct {
+	batch                  *pc2store.RecoveryBatch
 	closure                recoveryClosure
 	metadata, participants []releaseFile
 	parents                []*pc2store.ReadDirectory
@@ -39,9 +40,15 @@ func prepareRecoveryRelease(c *recoveryReleaseContext) (*preparedRecoveryRelease
 	if c == nil || checkRecoveryClosure(c.closure) != nil || len(c.metadata) != 12 || len(c.participants) != 10 || len(c.parents) < 1 || len(c.parents) > 24 || len(c.locks) != 3 || c.fence == nil || c.ledger == nil || c.cleanup == nil {
 		return nil, ErrRecoveryUnavailable
 	}
+	if c.batch == nil || checkRecoveryRetained(c.closure, c.batch.RetainedObjects()) != nil {
+		return nil, ErrRecoveryUnavailable
+	}
 	ids := map[[2]uint64]bool{}
 	var total int64
 	for i, f := range c.metadata {
+		if i == 6 && c.closure.attempt.Kind() == "" && f.role == "attempt" && f.file == nil {
+			continue
+		}
 		if f.role != releaseMetadataRoles[i] || f.file == nil || f.file.Image().Length() > releaseMetadataCaps[i] || f.file.Compare(releaseMetadataCaps[i]) != nil || ids[[2]uint64{f.file.Image().Identity.Device, f.file.Image().Identity.Inode}] {
 			return nil, ErrRecoveryUnavailable
 		}
@@ -58,6 +65,9 @@ func prepareRecoveryRelease(c *recoveryReleaseContext) (*preparedRecoveryRelease
 		ids[[2]uint64{f.file.Image().Identity.Device, f.file.Image().Identity.Inode}] = true
 	}
 	want := map[int]string{0: c.closure.accepted.root, 4: digestCensus(c.closure.guards[3].Bytes()), 5: c.closure.accepted.inventory, 6: digestCensus(c.closure.attempt.Bytes()), 7: digestCensus(c.closure.records[1].Bytes()), 8: digestCensus(c.closure.records[2].Bytes()), 9: digestCensus(c.closure.records[3].Bytes()), 10: c.closure.accepted.floor, 11: c.closure.accepted.intent}
+	if c.closure.attempt.Kind() == "" {
+		delete(want, 6)
+	}
 	for i, d := range want {
 		if c.metadata[i].file.Image().Digest != d {
 			return nil, ErrRecoveryUnavailable
@@ -108,59 +118,72 @@ func consumeRecoveryRelease(ctx context.Context, p *preparedRecoveryRelease) (ob
 		}
 		releases = append(releases, release)
 	}
-	err = c.fence.Run(func(w *pc2store.RecoveryFence) error {
-		if e := ctx.Err(); e != nil {
-			return e
-		}
-		if e := w.Check(); e != nil {
-			return e
-		}
-		// This is the exact existing final set: 12 metadata files and ten prepared
-		// participant identities (zero participant content reads). Native verity,
-		// real principals and custody are deliberately not qualified by fixtures.
-		for _, f := range c.metadata {
-			if e := f.file.Sync(); e != nil {
-				return e
-			}
-		}
-		for _, f := range c.participants {
-			if e := f.file.Check(); e != nil {
-				return e
-			}
-		}
-		if e := c.cleanup.SyncRecoveryDirectory(); e != nil {
-			return e
-		}
-		if e := c.cleanup.RecoveryAbsent("writer.pending"); e != nil {
-			return e
-		}
-		for _, d := range c.parents {
-			if e := d.SyncRecoveryDirectory(); e != nil {
-				return e
-			}
-		}
-		// Read each metadata body once under F: its tighter cap and the original
-		// total budget remain binding. No index, history walk, RPC or C acquisition.
-		for i, f := range c.metadata {
-			if e := f.file.Compare(releaseMetadataCaps[i]); e != nil {
-				return e
-			}
-		}
-		if e := c.ledger.SyncRecoveryDirectory(); e != nil {
-			return e
-		}
-		for _, f := range c.metadata {
-			if e := f.file.Check(); e != nil {
-				return e
-			}
-		}
-		if e := ctx.Err(); e != nil {
-			return e
-		}
-		return w.Check()
-	})
+	err = c.fence.Run(func(w *pc2store.RecoveryFence) error { return consumeRecoveryReleaseWindow(ctx, w, c) })
 	if err == nil {
 		observation = recoveryReleaseObservation{c.closure.accepted.id, c.closure.accepted.hold, c.closure.accepted.proof}
 	}
 	return observation, err
+}
+
+func consumeRecoveryReleaseWindow(ctx context.Context, w *pc2store.RecoveryFence, c *recoveryReleaseContext) error {
+
+	if e := ctx.Err(); e != nil {
+		return e
+	}
+	if e := w.Check(); e != nil {
+		return e
+	}
+	// This is the exact existing final set: 12 metadata files and ten prepared
+	// participant identities (zero participant content reads). Native verity,
+	// real principals and custody are deliberately not qualified by fixtures.
+	for _, f := range c.metadata {
+		if f.file == nil {
+			continue
+		}
+		if e := f.file.Sync(); e != nil {
+			return e
+		}
+	}
+	for _, f := range c.participants {
+		if e := f.file.Check(); e != nil {
+			return e
+		}
+	}
+	if e := c.cleanup.SyncRecoveryDirectory(); e != nil {
+		return e
+	}
+	if e := c.cleanup.RecoveryAbsent("writer.pending"); e != nil {
+		return e
+	}
+	for _, d := range c.parents {
+		if e := d.SyncRecoveryDirectory(); e != nil {
+			return e
+		}
+	}
+	// Read each metadata body once under F: its tighter cap and the original
+	// total budget remain binding. No index, history walk, RPC or C acquisition.
+	for i, f := range c.metadata {
+		if f.file == nil {
+			continue
+		}
+		if e := f.file.Compare(releaseMetadataCaps[i]); e != nil {
+			return e
+		}
+	}
+	if e := c.ledger.SyncRecoveryDirectory(); e != nil {
+		return e
+	}
+	for _, f := range c.metadata {
+		if f.file == nil {
+			continue
+		}
+		if e := f.file.Check(); e != nil {
+			return e
+		}
+	}
+	if e := ctx.Err(); e != nil {
+		return e
+	}
+	return w.Check()
+
 }

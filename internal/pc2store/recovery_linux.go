@@ -26,9 +26,10 @@ type recoveryOutput struct {
 // OUTSIDE F; Materialize/PublishPhase never lock or inspect the owner index.
 // This legacy fixture profile has no production opener/currentness provider.
 type RecoveryBatch struct {
-	store   *Store
-	outputs []recoveryOutput
-	head    Head
+	store    *Store
+	outputs  []recoveryOutput
+	head     Head
+	retained []pc2state.Object
 }
 
 func PrepareRecoveryOutputs(root *ReadDirectory, base SnapshotBaseline, outputs []RecoveryOutput) (out *RecoveryBatch, err error) {
@@ -81,6 +82,20 @@ func PrepareRecoveryOutputs(root *ReadDirectory, base SnapshotBaseline, outputs 
 	}
 	if e = s.recoveryClosure(root, f, states, all, seen); e != nil {
 		return nil, e
+	}
+	for ticket, st := range states {
+		if st.installed != nil {
+			a, _ := f.find(ticket)
+			raw, _, e := s.read(st.installed.To, a.MaxBytes)
+			if e != nil {
+				return nil, e
+			}
+			o, e := pc2state.Decode(st.installed.Codec, raw)
+			if e != nil {
+				return nil, e
+			}
+			batch.retained = append(batch.retained, o)
+		}
 	}
 	// Reserve the complete remaining association/install metadata frontier before
 	// any new association or pathname. Retained copies never replenish it.
@@ -242,6 +257,11 @@ func (b *RecoveryBatch) materialize(i int) error {
 // caller owns the real recovery F and prior repair/cleanup barriers. No early
 // release receipt, index lock/read/scan or generic deferred-sync mode exists.
 func (b *RecoveryBatch) PublishPhase(phase int, endpoint *ReadDirectory, expected FileImage) (next FileImage, err error) {
+	defer func() {
+		if err != nil {
+			next = FileImage{}
+		}
+	}()
 	if phase < 0 || phase > 3 {
 		return next, ErrUnavailable
 	}
@@ -347,4 +367,13 @@ func (b *RecoveryBatch) CheckPrefix(phase int) error {
 		}
 	}
 	return nil
+}
+
+// RetainedObjects copies the complete prepared installed object set. It is
+// mechanical evidence against the exact fixture baseline, never a census grant.
+func (b *RecoveryBatch) RetainedObjects() []pc2state.Object {
+	if b == nil {
+		return nil
+	}
+	return append([]pc2state.Object(nil), b.retained...)
 }

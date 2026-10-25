@@ -46,6 +46,9 @@ func prepareRecovery(c *recoveryContext) (*preparedRecovery, error) {
 	if c == nil || checkRecoveryClosure(c.closure) != nil || c.batch == nil || c.fence == nil || len(c.locks) != 3 || len(c.heads) != 3 || len(c.repairs) == 0 || len(c.repairs) > 10 || len(c.repairParents) == 0 || len(c.repairParents) > 10 || c.markerParent == nil || c.guardParent == nil {
 		return nil, ErrRecoveryUnavailable
 	}
+	if checkRecoveryRetained(c.closure, c.batch.RetainedObjects()) != nil {
+		return nil, ErrRecoveryUnavailable
+	}
 	for i := 0; i < 4; i++ {
 		if c.batch.Object(i*2) != c.closure.records[i] || c.batch.Object(i*2+1) != c.closure.guards[i] {
 			return nil, ErrRecoveryUnavailable
@@ -78,7 +81,7 @@ func prepareRecovery(c *recoveryContext) (*preparedRecovery, error) {
 		hm, _ := treeCensus(c.closure.hold.Bytes())
 		holds := gm["holds"].([]any)
 		first, _ := treeCensus(c.closure.guards[0].Bytes())
-		if gm["phase"] != "open" || len(holds) != 1 || gm["source_root_digest"] != c.closure.accepted.root || holds[0].(map[string]any)["hold_id"] != c.closure.accepted.hold || holds[0].(map[string]any)["origin_id"] != hm["origin_id"] || first["previous_digest"] != c.guard.Digest || first["revision"].(int64) != gm["revision"].(int64)+1 {
+		if gm["inventory"].(map[string]any)["digest"] != c.closure.accepted.inventory || gm["phase"] != "open" || len(holds) != 1 || gm["source_root_digest"] != c.closure.accepted.root || holds[0].(map[string]any)["hold_id"] != c.closure.accepted.hold || holds[0].(map[string]any)["origin_id"] != hm["origin_id"] || first["previous_digest"] != c.guard.Digest || first["revision"].(int64) != gm["revision"].(int64)+1 {
 			return nil, ErrRecoveryUnavailable
 		}
 	} else if c.batch.CheckPrefix(phase) != nil {
