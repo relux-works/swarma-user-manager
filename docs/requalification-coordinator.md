@@ -175,8 +175,8 @@ test or command identity changed when reusing the other fifteen exact results.
 
 ## Tools and narrow checks
 
-Run on Linux with the pinned Go 1.26.10 toolchain, serialized through the host's
-`heavy-slot` when shared. The exact package scope is:
+Run on Linux with the pinned Go 1.26.10 toolchain. Run heavy suites serialized
+on shared hosts with `GOMAXPROCS=2` and `-p 1`. The exact package scope is:
 
 ```sh
 env -u LINUXOS_ROOT_QUALIFICATION CGO_ENABLED=1 GORACE=atexit_sleep_ms=0 GOMAXPROCS=2 go test -p 1 ./internal/updateproof ./internal/qualmaint ./internal/qualreconcile -count=1 -timeout=90s
