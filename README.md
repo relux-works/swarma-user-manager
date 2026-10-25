@@ -303,7 +303,7 @@ gates remain PENDING, with no accepting adapter or activation implied.
 | Pinned registrar CCJ-1 / coreutils | Validate example bytes with `ccj.Parse` / `ccj.Marshal` from the `go.mod` pin; `sha256sum vectors/qual-maint/*.jsonl`; `wc -c vectors/qual-maint/*.jsonl` | Canonical-byte verdict, SHA-256 and byte counts including LF; expected identities in the vector README; framing only; semantic journal/host qualification is separate |
 | Go (serialized on shared hosts) | `env GOMAXPROCS=2 go test -p 1 ./internal/updateproof ./cmd/swarma-user-manager -count=1` | Narrow verdicts and owned fixtures; task-local untracked logs |
 | Go journal layer | `env GOMAXPROCS=2 go test -p 1 ./internal/qualmaint -count=1 -timeout=60s`; `env GOMAXPROCS=2 go build -p 1 ./internal/qualmaint` | Local codec/replay/store verdicts and Go-owned temporary fault fixtures; task-local untracked logs/coverage; no root qualification |
-| [Linux Go CI](.github/workflows/linux-ci.yml) | Pull requests and pushes to `main`; hosted Ubuntu 24.04, pinned Go 1.26.10. Reproduce with `go mod verify`, `go build ./...`, `go vet ./...`, `test -z "$(gofmt -l .)"`, then `env -u LINUXOS_ROOT_QUALIFICATION CGO_ENABLED=1 GOMAXPROCS=2 go test -p 1 -count=1 -timeout=20m ./...` | GitHub step logs or task-local untracked logs; Go-owned temporary fixtures; full check scope, without root qualification |
+| [Linux Go CI](.github/workflows/linux-ci.yml) | Pull requests and pushes to `main`; hosted Ubuntu 24.04, pinned Go 1.26.10. Reproduce with `go mod verify`, `go build ./...`, `go vet ./...`, `test -z "$(gofmt -l .)"`, then `env -u LINUXOS_ROOT_QUALIFICATION CGO_ENABLED=1 GOMAXPROCS=2 go test -v -p 1 -count=1 -timeout=20m -skip '^(TestPeerTemporaryFileInventory|TestPeerPOSIXSharedMemory|TestPeerUnixSocketUID|TestPeerProcessStopAndAbsence|TestPeerSystemVSharedMemory)$' ./...` | GitHub step logs or task-local untracked logs; Go-owned temporary fixtures; unprivileged check scope; five peer exclusions printed and runtime skips visible |
 | Go retained sessions / refusing coordinator | `env -u LINUXOS_ROOT_QUALIFICATION CGO_ENABLED=1 GORACE=atexit_sleep_ms=0 GOMAXPROCS=2 go test -p 1 ./internal/updateproof ./internal/qualmaint ./internal/qualreconcile -count=1 -timeout=90s`; race/build variants in the [narrow checks](docs/requalification-coordinator.md#tools-and-narrow-checks) | Owned native-lock, child, error-cut and preflight verdicts; task-local untracked logs/overlays; no integration qualification |
 | `dpkg` | Native held pinned descriptor with fixed `--audit`; owned lock/audit fixture: `go test ./internal/updateproof -run '^TestReconcileOwnedDpkgAuditExclusion$' -count=1` | Clean means exit zero and empty stdout/stderr; fixture uses only an owned empty database |
 | `systemctl` | Native held pinned descriptor with fixed `--no-block start swarma-user-manager-update-reconcile.service` | Bounded enqueue acknowledgement; root deployment remains pending |
@@ -315,23 +315,23 @@ entry points and their retained artifacts. `TestReviewNativeXZDecoder` uses
 `/usr/bin/xz --compress --stdout` only to create its owned package fixture.
 
 The Linux workflow has read-only repository permissions and no privileged setup
-or credentials retained by checkout. Its formatting check currently identifies
-four existing reviewer fixtures: `internal/linuxbackend/testdata/review_systemd_guard_test.go`
-and `internal/linuxos/review_mail_policy_test.go`, `review_mail_reference_test.go`,
-`review_shadow_primary_test.go`. These remain unchanged; the formatting gate is
-red until their formatting is resolved separately.
+or credentials retained by checkout. Its header marks the repository-specific
+Go version, test flags/packages, qualification variable and peer exclusions for
+reuse as a public module template. The four reviewer fixtures previously found
+by the formatting gate now have formatting-only changes.
 
-Full Linux tests also require the existing distinct `platform-test-a` and
-`platform-test-b` NSS identities and sudo-to-peer Python access described in the
+The five sudo-dependent peer fixtures are explicitly excluded by an anchored
+`-skip` list. The preceding report step prints every excluded name; verbose test
+output shows existing runtime skips. These peer fixtures run during review on a
+prepared host with the distinct `platform-test-a` and `platform-test-b` identities
+and sudo-to-peer Python access described in the
 [primitive tools contract](internal/linuxos/README.md#tools-and-evidence).
-The workflow does not provision those host-specific prerequisites or skip their
-tests, so local results on a prepared host do not establish stock-runner success.
-Root qualification stays opt-in and is explicitly unset by the CI command;
+Root qualification remains opt-in and is explicitly unset by the CI command;
 native root/open-inode/namespace qualification remains outside this check.
+Local results do not establish success on the unverified hosted Ubuntu 24.04 runner.
+Restricted local validation also found sudo use in `TestPeerReceiptObservation`
+and `TestReviewMqueueOwnedObject`, beyond the five authorized exclusions. The
+current list leaves these tests active; CI acceptance is blocked until the
+exclusion policy covers them. Their test code remains unchanged.
 
-The optional race step is omitted after local measurement put the manager
-package within about twelve seconds of the 20-minute package timeout. The
-workflow keeps the normal test command and its existing budget; the race result
-does not establish sufficient timing margin on the unverified hosted runner.
-The same full race run exited nonzero on existing journal reader/writer deadline
-assertions; those assertions and their budgets remain unchanged.
+The optional race build exceeded the 20-minute test target and tripped existing journal deadline assertions (no data race reported); tracked separately.
