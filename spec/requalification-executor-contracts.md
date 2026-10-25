@@ -875,7 +875,14 @@ cannot all be delegated back to an owner as an unspecified service.
 | Curator recipient/transport authority | Separate curator-role capability/receipt codec and authority with the same association/durability/retry guarantees | Curator pending/unknown delivery holds acceptance/readiness; one receipt never counts twice |
 | Qualification/provider and verifier/decoder owners | Actual Capture/CheckAll/provider/IPC/executable identities, complete lock/wait/failure and descendant/drain graphs, reservation/generation snapshot guarantees and full-Q publication/currency contracts | Unreviewed call stays refusing, no accepting replacement adapter or direct-child-only bound |
 | CLI/output-transport and platform supervision owners | Per-stage stdout/stderr/journal sink and lease mapping, independent bounded backpressure failure and containment, without mistaking drained output for durable acceptance | Blocked output grants no success, fence receipt or overlapping retry |
-| Profile/capacity and deployment owners (Q4/Q5) | Confirm existing encodings/source pins/hard limits and userdb provider-class compatibility against supported profile, concrete finite operation/freshness values and reserves; evidence-preserving migration, disposable-root crash/package/unit qualification and independent admission/boot guards | Unsupported provider/projection or saturation refuses; no empty-inventory substitute, increased bound, migration, activation or codec change implied |
+| Profile/capacity and deployment owners (Q4/Q5) | A3e-U7 is decided below; supported classes remain those representable by the current closed codec. Confirm existing encodings/source pins/hard limits and userdb provider-class compatibility against supported profile, concrete finite operation/freshness values and reserves; evidence-preserving migration, disposable-root crash/package/unit qualification and independent admission/boot guards | Unsupported provider/projection or saturation refuses; no empty-inventory substitute, increased bound, migration, activation or codec change implied |
+
+**A3e-U7 — decided.** The owner's decision is that unsupported provider
+classes, non-enumerating providers and records with keys outside the current
+closed codec are an explicit unsupported-profile refusal. The codec is not
+widened; supported classes remain those representable today. Qualification of
+supported provider classes/builds and their complete record projections remains
+required; this decision grants no runtime admission or codec extension.
 
 Open questions are requests for precise artifacts, not approval by implication:
 
@@ -908,9 +915,9 @@ Open questions are requests for precise artifacts, not approval by implication:
    contexts, with unchanged consumer state/invocation controls and full GetAll
    graph. A `Successful` observation or `CommandContext` alone does not answer
    this; shared-Q ordinary-boot guard integration remains a separate gate.
-7. Which supported profile/budgets and owner-approved disposable qualification
-   procedure close Q4/Q5, including userdb provider classes unable to supply a
-   complete closed projection? Existing owner-confirmed native age/skew/P7
+7. Given the decided A3e-U7 refusal boundary, which supported profile/budgets
+   and owner-approved disposable qualification procedure close the remaining
+   Q4/Q5 evidence gates? Existing owner-confirmed native age/skew/P7
    values are preserved; this document chooses no new timeout, larger limit
    or topology.
 
