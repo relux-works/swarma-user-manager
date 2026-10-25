@@ -24,12 +24,12 @@ organize the existing requirements; they do not qualify or activate the profile.
 
 | Provider schema group | Owning sections in this profile |
 |---|---|
-| Versioned identity and dependency graph | [Trust and preparation](#1-trust-and-preparation), [pre-pin identity and scope](#2-linux-pre-pin-window), [version and closed record](#41-version-and-closed-record) |
+| Versioned identity and dependency graph | [Trust and preparation](#1-trust-and-preparation), [pre-pin identity and scope](#2-linux-pre-pin-window), [version and closed record](#41-version-and-closed-record), [protected mapping of slash-bearing native names](#protected-enrolled-name-mapping) |
 | Canonical timing meanings | [Linux pre-pin window](#2-linux-pre-pin-window), [macOS binding](#3-mandatory-macos-equivalent) |
 | Uncertainty coverage | [Linux pre-pin window](#2-linux-pre-pin-window) |
 | Preparation authenticity and bounded ownership | [Trust and preparation](#1-trust-and-preparation) |
 | Final admission, durable use and recovery | [Linux pre-pin window](#2-linux-pre-pin-window), [versioned use transition](#4-proposed-qual-maint2-use-transition), [serialized burn, act and completion](#42-serialized-burn-act-and-completion), [crash cuts](#5-crash-cuts-and-recovery) |
-| Enforcement and per-platform qualification | [Linux pre-pin window](#2-linux-pre-pin-window), [mandatory macOS equivalent](#3-mandatory-macos-equivalent), [open gates](#7-open-gates-and-document-validation) |
+| Enforcement and per-platform qualification | [Linux pre-pin window](#2-linux-pre-pin-window), [mandatory macOS equivalent](#3-mandatory-macos-equivalent), [open gates](#7-open-gates-and-document-validation), [protected mapping of slash-bearing native names](#protected-enrolled-name-mapping) |
 | Paired controls and composition | [Pre-pin scope and distinct later windows](#2-linux-pre-pin-window), [later executable controls](#6-later-executable-controls), [open gates](#7-open-gates-and-document-validation) |
 
 ## 1. Trust and preparation
@@ -252,6 +252,38 @@ No separate use journal is needed by this design. If native implementation prove
 one unavoidable, a distinct owner decision on its format/custody/restore protocol
 is required before proceeding.
 
+#### Protected enrolled-name mapping
+
+This profile's protected enrollment fixes the following versioned, bidirectional
+mapping. Its native names contain `/`, which the provider's
+[pinned enrolled-ID validator](https://github.com/relux-works/swarma-credential-broker/blob/b38aeda82fb563503960836c771bcc94e8103810/timeconf/receipt.go#L103)
+forbids: enrolled names are 1–128 ASCII bytes matching
+`[A-Za-z0-9._:-]{1,128}`. The provider applies that check to both
+[handoff fields](https://github.com/relux-works/swarma-credential-broker/blob/b38aeda82fb563503960836c771bcc94e8103810/timeconf/handoff_linux.go#L158).
+Both enrolled values below satisfy it; alphabet validity alone does not enroll
+a name or authorize use.
+
+| Native name | Enrolled name | Provider field |
+|---|---|---|
+| `executor-pre-pin/1` | `executor-pre-pin:1` | `WindowExpected.Window.Profile` and handoff `window.profile`; sequence remains 1 |
+| `qual-maint/2` | `qual-maint:2` | `WindowExpected.TransitionVersion` and handoff `transition_version` |
+
+Use these same exact pairs in preparation, independently derived
+`WindowExpected.Window` / `TransitionVersion`, and handoff encoding/decoding.
+Encode through the listed forward mapping; decode only a listed enrolled value,
+map it back through that same pair, and compare with the independently protected
+native intent/version. Keep native journal records and window plans unchanged:
+`executor-pre-pin/1` and `qual-maint/2` retain their native spelling. Do not rewrite
+authenticated handoff bytes, operation digests or H when interpreting the mapping.
+
+This is a closed table, not a general `/`-to-`:` substitution or version parser.
+Only the listed pair for each field maps in either direction. Literal slashes in
+enrolled fields, wrong versions such as `qual-maint:3` or `executor-pre-pin:2`,
+field swaps and all unlisted names refuse, even if the provider alphabet accepts
+them. A mapping change needs a separately reviewed protected enrollment version;
+request metadata or receipt contents cannot choose or extend it. Linux and macOS
+bindings use this same mapping without changing their separate qualification gaps.
+
 ### 4.2 Serialized burn, act and completion
 
 The use key is `(protected deployment, original operation_digest, enrolled window)`.
@@ -380,6 +412,7 @@ failure, a skipped plant or rejection of every valid control is insufficient.
 | `ExecutorWindowOriginalsAndPureCheck` | Substituted/missing originals, requester-selected validator/anchor, provider/witness/clock callback or I/O inside VerifyWindow refuses or fails the dependency gate. | Enrolled original-reader/witness preparation and exact bounded copies pass local validation. Plant omitted original validation or a callback reachable by the pure check. |
 | `ExecutorWindowConsumedTime` | Keep journal floor 140; consume 200±1 to provider W=201, then fail before/after burn. Fresh [170,172] returns no receipt/H, no act and W remains 201; missing witness/history refuses even [210,212]. | Confirmed history and fresh [210,212] with authority, original budget and unused key may produce one handoff/use; plant restoring W from journal 140. |
 | `ExecutorWindowMacParity` | Sleep-excluding clock, fake BOOTTIME/systemd binding, unqualified native durability or suspended late act cannot satisfy the macOS profile. | Version-qualified continuous clock/boot/provider profile, native journal/act and writer fencing run the same invariant controls. Plant replacement by an awake-only clock or bypass of a pending parity row. |
+| `ExecutorWindowEnrolledNames` | Literal `executor-pre-pin/1` or `qual-maint/2` in enrolled fields fails the provider identifier check. Alphabet-valid wrong versions (`executor-pre-pin:2`, `qual-maint:3`), field swaps and unlisted names refuse the protected mapping in both directions, with no prepared authority, burn or pin. | The two listed colon names pass the provider identifier check and round-trip through their exact protected pairs, with sequence 1 and native records unchanged; this alone grants no authority. Plant general slash substitution or alphabet-only admission and require the unlisted-name/version assertion to fail. |
 
 Use the [real-codec tagged fixture and dependency boundary](requalification-executor-contracts.md#later-implementation-tests)
 for synthetic settlement/receipt positives and the lower-interval vector.
