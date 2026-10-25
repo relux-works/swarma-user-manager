@@ -41,32 +41,83 @@ func (s *Store) step(stage string, fn func() error) error {
 	}
 	return nil
 }
-func (s *Store) readObject(r Ref, durable bool) ([]byte, error) {
+
+// openObject leaves the verified descriptor open on success. Receipt paths retain
+// it through their final identity check; read-only integrity callers close it.
+func (s *Store) openObject(r Ref, durable bool) (b []byte, held *os.File, err error) {
 	if !r.valid() {
-		return nil, ErrRecord
+		return nil, nil, ErrRecord
 	}
 	f, err := openAt(s.objects, r.SHA256, false, unix.O_RDONLY)
 	if err != nil {
-		return nil, ErrMissing
+		return nil, nil, ErrMissing
 	}
-	defer f.Close()
+	defer func() {
+		if held == nil {
+			f.Close()
+		}
+	}()
 	if metadata(f, s.owner, s.gid, false, false, s.fixture) != nil {
-		return nil, ErrEvidence
+		return nil, nil, ErrEvidence
 	}
-	b, err := io.ReadAll(io.LimitReader(f, r.Size+1))
+	b, err = io.ReadAll(io.LimitReader(f, r.Size+1))
 	if err != nil || int64(len(b)) != r.Size || Digest(b) != r.SHA256 {
-		return nil, ErrEvidence
+		return nil, nil, ErrEvidence
 	}
 	if durable {
 		if err = s.step("reference.sync", func() error { return s.syncFile(f) }); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	}
-	var a, c unix.Stat_t
-	if unix.Fstat(int(f.Fd()), &a) != nil || unix.Fstatat(int(s.objects.Fd()), r.SHA256, &c, unix.AT_SYMLINK_NOFOLLOW) != nil || a.Dev != c.Dev || a.Ino != c.Ino {
-		return nil, ErrEvidence
+	if err = s.sameObjectInode(f, r.SHA256); err != nil {
+		if durable {
+			s.poisoned = true
+			return nil, nil, ErrIO
+		}
+		return nil, nil, ErrEvidence
 	}
-	return b, nil
+	return b, f, nil
+}
+func (s *Store) readObject(r Ref, durable bool) ([]byte, error) {
+	b, f, err := s.openObject(r, durable)
+	if f != nil {
+		defer f.Close()
+	}
+	return b, err
+}
+
+// objectCustody retains the actual synced descriptors, once per digest, until
+// the enclosing operation returns. Reopening matching bytes is not custody.
+type objectCustody map[string]*os.File
+
+func (held objectCustody) close() {
+	for _, f := range held {
+		f.Close()
+	}
+}
+func (held objectCustody) check(s *Store) error {
+	for name, f := range held {
+		if err := s.sameObjectInode(f, name); err != nil {
+			s.poisoned = true
+			return ErrIO
+		}
+	}
+	return nil
+}
+func (held objectCustody) syncReference(s *Store, r Ref) error {
+	if f, ok := held[r.SHA256]; ok {
+		st, err := f.Stat()
+		if err != nil || st.Size() != r.Size {
+			return ErrEvidence
+		}
+		return held.check(s)
+	}
+	_, f, err := s.openObject(r, true)
+	if err != nil {
+		return err
+	}
+	held[r.SHA256] = f
+	return nil
 }
 func (s *Store) load(ctx context.Context, floor Checkpoint) ([]byte, History, error) {
 	raw, err := io.ReadAll(io.NewSectionReader(s.journal, 0, int64(JournalBytes)+1))
@@ -148,6 +199,8 @@ func (w *Writer) PutObject(b []byte) (Ref, error) {
 	if !r.valid() {
 		return Ref{}, ErrSaturated
 	}
+	held := objectCustody{}
+	defer held.close()
 	err := w.local(func() error {
 		s := w.store
 		_, h, err := s.load(w.ctx, emptyCheckpoint())
@@ -161,14 +214,20 @@ func (w *Writer) PutObject(b []byte) (Ref, error) {
 		// A preexisting name is never overwritten, even if its bytes are wrong.
 		var st unix.Stat_t
 		if err = unix.Fstatat(int(s.objects.Fd()), r.SHA256, &st, unix.AT_SYMLINK_NOFOLLOW); err == nil {
-			old, e := s.readObject(r, true)
+			old, f, e := s.openObject(r, true)
+			if f != nil {
+				held[r.SHA256] = f
+			}
 			if e != nil || !bytes.Equal(old, b) {
 				if e != nil {
 					return e
 				}
 				return ErrEvidence
 			}
-			return s.step("objects.sync", func() error { return s.syncFile(s.objects) })
+			if err := s.step("objects.sync", func() error { return s.syncFile(s.objects) }); err != nil {
+				return err
+			}
+			return held.check(s) // Existing-object receipt retains the synced inode.
 		} else if !errors.Is(err, unix.ENOENT) {
 			return ErrIO
 		}
@@ -198,7 +257,7 @@ func (w *Writer) PutObject(b []byte) (Ref, error) {
 			}
 			return err
 		}
-		defer f.Close()
+		held[r.SHA256] = f
 		if metadata(f, s.owner, s.gid, false, false, s.fixture) != nil {
 			s.poisoned = true
 			return ErrIO
@@ -238,7 +297,7 @@ func (w *Writer) PutObject(b []byte) (Ref, error) {
 			s.poisoned = true
 			return ErrIO
 		}
-		return nil
+		return held.check(s)
 	})
 	if err != nil {
 		return Ref{}, err
@@ -300,6 +359,8 @@ func (w *Writer) Append(expected Checkpoint, e Entry, plan Budget) (Checkpoint, 
 		return Checkpoint{}, ErrSaturated
 	}
 	var receipt Checkpoint
+	held := objectCustody{}
+	defer held.close()
 	err = w.local(func() error {
 		s := w.store
 		raw, h, err := s.load(w.ctx, expected)
@@ -337,11 +398,14 @@ func (w *Writer) Append(expected Checkpoint, e Entry, plan Budget) (Checkpoint, 
 			if w.ctx.Err() != nil {
 				return ErrLease
 			}
-			if _, err = s.readObject(r, true); err != nil {
+			if err = held.syncReference(s, r); err != nil {
 				return err
 			}
 		}
 		if err = s.step("references.directory.sync", func() error { return s.syncFile(s.objects) }); err != nil {
+			return err
+		}
+		if err = held.check(s); err != nil {
 			return err
 		}
 		if err = s.check(); err != nil {
@@ -356,6 +420,9 @@ func (w *Writer) Append(expected Checkpoint, e Entry, plan Budget) (Checkpoint, 
 			return ErrChain
 		}
 		if err = s.step("journal.write", func() error {
+			if err := held.check(s); err != nil {
+				return err
+			}
 			n, e := s.write(s.journal, line)
 			if e != nil {
 				return e
@@ -383,6 +450,9 @@ func (w *Writer) Append(expected Checkpoint, e Entry, plan Budget) (Checkpoint, 
 			}
 			return s.check()
 		}); err != nil {
+			return err
+		}
+		if err = held.check(s); err != nil {
 			return err
 		}
 		if e.Phase == "intent" {

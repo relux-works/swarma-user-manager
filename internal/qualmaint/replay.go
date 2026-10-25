@@ -121,6 +121,9 @@ func ReplayContext(ctx context.Context, r io.Reader, retained Checkpoint) (Histo
 			return fail(ErrLease)
 		}
 		line, err := reader.ReadSlice('\n')
+		if ctx.Err() != nil {
+			return fail(ErrLease)
+		}
 		if len(line) == 0 && err == io.EOF {
 			break
 		}
@@ -242,6 +245,9 @@ func ReplayContext(ctx context.Context, r io.Reader, retained Checkpoint) (Histo
 	if !matched {
 		return fail(ErrChain)
 	}
+	if ctx.Err() != nil {
+		return fail(ErrLease)
+	}
 	return h, nil
 }
 
@@ -261,6 +267,9 @@ func verifyReferences(ctx context.Context, h History, read func(Ref) ([]byte, er
 				return ErrLease
 			}
 			b, err := read(r)
+			if ctx.Err() != nil {
+				return ErrLease
+			}
 			if err != nil {
 				return err
 			}
@@ -268,6 +277,9 @@ func verifyReferences(ctx context.Context, h History, read func(Ref) ([]byte, er
 				return ErrEvidence
 			}
 		}
+	}
+	if ctx.Err() != nil {
+		return ErrLease
 	}
 	return nil
 }
@@ -309,6 +321,9 @@ func VerifyContext(ctx context.Context, raw []byte, retained Checkpoint, read fu
 	}
 	if err = verifyReferences(ctx, h, read); err != nil {
 		return History{}, err
+	}
+	if ctx.Err() != nil {
+		return History{}, ErrLease
 	}
 	return h, nil
 }
