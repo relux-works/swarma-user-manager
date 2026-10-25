@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/sys/unix"
@@ -253,9 +254,12 @@ func lockFile(ctx context.Context, f *os.File) error {
 // between them no D is retained, permitting the later qualifier handoff. This
 // package never launches a child or acquires package/state/generation locks.
 type Writer struct {
-	store  *Store
-	ctx    context.Context
-	closed bool
+	mu      sync.Mutex
+	self    *Writer
+	session *DeploymentSession
+	store   *Store
+	ctx     context.Context
+	closed  bool
 }
 
 func (s *Store) Writer(ctx context.Context) (*Writer, error) {
@@ -282,9 +286,19 @@ func (s *Store) Writer(ctx context.Context) (*Writer, error) {
 		return fail(err)
 	}
 	s.remaining = Budget{}
-	return &Writer{store: s, ctx: ctx}, nil
+	w := &Writer{store: s, ctx: ctx}
+	w.self = w
+	return w, nil
 }
 func (w *Writer) Close() error {
+	if w == nil || w.self != w {
+		return ErrLease
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.session != nil {
+		return ErrLease
+	}
 	if w.closed {
 		return nil
 	}
@@ -298,7 +312,12 @@ func (w *Writer) Close() error {
 	return nil
 }
 func (w *Writer) local(fn func() error) error {
-	if w.closed || w.ctx.Err() != nil {
+	if w == nil || w.self != w {
+		return ErrLease
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.closed || w.ctx.Err() != nil || w.session != nil {
 		return ErrLease
 	}
 	s := w.store
@@ -309,13 +328,20 @@ func (w *Writer) local(fn func() error) error {
 		return err
 	}
 	defer unix.Flock(int(s.deployment.Fd()), unix.LOCK_UN)
+	return w.checkedLocal(w.ctx, fn)
+}
+func (w *Writer) checkedLocal(ctx context.Context, fn func() error) error {
+	if w.closed || w.ctx.Err() != nil || ctx.Err() != nil {
+		return ErrLease
+	}
+	s := w.store
 	if err := s.check(); err != nil {
 		return err
 	}
 	if err := fn(); err != nil {
 		return err
 	}
-	if w.ctx.Err() != nil {
+	if ctx.Err() != nil || w.ctx.Err() != nil {
 		s.poisoned = true
 		return ErrLease
 	}

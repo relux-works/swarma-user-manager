@@ -139,7 +139,7 @@ func (s *Store) load(ctx context.Context, floor Checkpoint) ([]byte, History, er
 
 // Read returns structural history and direct-object integrity only. It does not
 // issue a durability receipt, authenticate evidence or authorize admission.
-func (w *Writer) Read(floor Checkpoint) (History, error) {
+func (w localWriter) read(floor Checkpoint) (History, error) {
 	var h History
 	err := w.local(func() error { _, v, err := w.store.load(w.ctx, floor); h = v; return err })
 	if err != nil {
@@ -194,7 +194,7 @@ func (s *Store) usage(ctx context.Context) (int64, int, error) {
 // PutObject publishes exact bounded bytes without replacement. The owning codec
 // and authority validation must precede use by the future reconciler; the store
 // is an opaque content store and does not reinterpret A3b or transport formats.
-func (w *Writer) PutObject(b []byte) (Ref, error) {
+func (w localWriter) putObject(b []byte) (Ref, error) {
 	r := Ref{Digest(b), int64(len(b))}
 	if !r.valid() {
 		return Ref{}, ErrSaturated
@@ -320,7 +320,7 @@ func emptyCheckpoint() Checkpoint { return Checkpoint{0, Zero} }
 // Reserve establishes the remaining content budget for an open recovery attempt
 // under W and D. It never repairs history or infers qualification. Callers must
 // use the protected immutable plan; neither this budget nor a hash grants trust.
-func (w *Writer) Reserve(b Budget) error {
+func (w localWriter) reserve(b Budget) error {
 	if !b.valid() {
 		return ErrSaturated
 	}
@@ -350,7 +350,7 @@ func (w *Writer) Reserve(b Budget) error {
 // the future reconciler must validate those before calling it. No RPC callback
 // can run inside this operation. A returned checkpoint follows both fsyncs and
 // exact reread; any uncertain write/sync poisons the handle until close/recovery.
-func (w *Writer) Append(expected Checkpoint, e Entry, plan Budget) (Checkpoint, error) {
+func (w localWriter) append(expected Checkpoint, e Entry, plan Budget) (Checkpoint, error) {
 	line, err := Encode(e)
 	if err != nil {
 		return Checkpoint{}, err
