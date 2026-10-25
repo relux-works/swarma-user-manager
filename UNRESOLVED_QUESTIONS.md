@@ -315,6 +315,31 @@ unchanged committed facts may finish once within the original budgets despite
 Keymaker death; restart publication waits for F and obligation reconciliation.
 No stale-instance-only fixture or setup failure discharges these subcases.
 
+## PC2 manager contract publication gates
+
+The [manager-side PC2 contracts](spec/pc2-manager-contracts.md) publish our
+package-fence identity, capacity/credit, append-lifetime and root/release
+consumption requirements. They map the key service's four prerequisites in
+[§7](spec/pc2-manager-contracts.md#7-publication-ownership-and-remaining-decisions).
+These are specification obligations, not authenticated runtime providers or an
+implemented journal guard/coordinator. Production bump remains refused; the
+three joint PC2 gates above remain open.
+
+| Open question | Owner / remaining artifact |
+|---|---|
+| MC-Q1 — Real F_pkg publication origin/currentness | Deployment/package and platform owners: admit actual native-writer database/mount/profile participation, protected publication/head custody, lock-conflict qualification and replacement exclusion; F_auth remains distinct |
+| MC-Q2 / G5-B — Complete census and credit | Manager and key-service capacity owners: complete authenticated five-plus-nine class inventories, pending ownership and pre-funded once-only conversion with all materialized/staged/native/integrity copies in the same 256 MiB |
+| MC-Q3 / G5-A — Journal-owned lifetime | Generation-journal and manager owners: replace the PC2 use of prewrite AppendPrepared callback with journal-owned acquire/consume/append/verify/finish and F_auth-before-data/gate release on every exit, inside the original 1000 ms |
+| MC-Q4 / G5-C — Root participants/recovery and direct sync | Platform, root-policy and participant owners: authorize exact installers, old/restored-writer exclusion, offline root coordinator and principal-specific direct sync privileges/latency. No new service root privilege or RPC under F_auth |
+| MC-Q5 / Q2 / G2 / G5-E — C0 and independent floors | Deployment/bootstrap and independent restore-custody owners: original C0/Q0 authorization, independently current per-transaction commit/floor transition, C0 unknown-outcome recovery and old-writer exclusion; no authority from empty/lost files or C0 hold origin |
+| MC-Q6 — Three joint PC2 gates | Manager and key-service protocol owners: settle observation absorption/RPC correlation, independent restore custody and potentially indefinite withdrawal-completion blocking; no deadline/TTL or local epoch substitution |
+| MC-Q7 / G5-D — External message authority | Message/provider owners: publish original cumulative/restore/time/scope/WC1 evidence and continuity/privilege interfaces; manager supplies no synthetic provider, persisted receipt authority or automatic witness activation |
+
+The [twelve negative obligations](spec/pc2-manager-contracts.md#1-negative-obligations-first)
+include authentic valid controls and planned narrowing mutations. All native
+execution, crash cuts, immutable-filesystem G6 and unchanged-budget qualification
+remain PENDING. Existing journal/effect/qualification codecs are unchanged.
+
 ## Self-service host qualification publication gates
 
 The [protocol](spec/host-qualification-protocol.md#9-open-decisions-and-activation-gates)

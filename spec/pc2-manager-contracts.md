@@ -178,6 +178,16 @@ does not prove a missing file never existed. Prepare exact canonical G4 class
 inventory bytes, all five rows, manager inventory revision/previous digest and
 the independent accepted baseline. No absent file means empty history.
 
+Derive pending ownership from the complete retained attempt dispositions,
+guard/hold/recovery links, native pending intent/effect/marker state and the
+committed reservation, not a caller-supplied slot count. The prepared capability
+binds the reservation digest, manager installation ID, immutable effect/ordinal
+and exact attempt ID once consumed. Return zero in-use only after all such
+obligations are conclusively resolved and committed credit is unspent; return
+one for the exact retained pending owner. Unattributable, conflicting or
+incomplete ownership is unavailable, never zero. A pending authority/recovery
+veto cannot be bypassed because no activation attempt is visible.
+
 The consumer gets exact G4 bytes plus a process-local prepared capability bound
 to their independently authenticated owner, deployment, baseline, guard and
 committed reservation. It validates the complete fourteen-row reservation and

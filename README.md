@@ -201,6 +201,14 @@ commitments and cross-process qualification remain pending. A provision/confirm
 observation alone cannot enable bump. Host qualification never authorizes
 account ownership or cleanup.
 
+The [PC2 manager contracts](spec/pc2-manager-contracts.md) specify protected
+native package-fence publication, the complete manager capacity census and
+once-only slot conversion, journal-owned append lifetime, root recovery and
+direct release consumption. They preserve C0/floor authority as an independent
+owner input and map the key service's four prerequisites to our publications.
+These are specifications only; the [owned publication gates](UNRESOLVED_QUESTIONS.md#pc2-manager-contract-publication-gates)
+and all implementation/native qualification remain open.
+
 The [account-directory contract](spec/station-effect-receipts.md#64-qualified-local-account-directory-and-nss-configuration)
 selects `files` and bounded `systemd`. The implementation compares protected
 local databases with independent NSS observations for `files`. The
@@ -341,3 +349,11 @@ accounts, intentionally. The gate does not analyse or intercept arbitrary sudo
 calls; prepared-host review remains necessary. Test budgets are unchanged.
 
 The optional race build exceeded the 20-minute test target and tripped existing journal deadline assertions (no data race reported); tracked separately.
+
+### PC2 specification tools
+
+| Tool | Purpose / exact entry point | Output |
+|---|---|---|
+| Git | `git diff --check`; `git verify-commit <sha>`; read-only clone of the pinned public G4 source | Bounded diff/signature evidence and reference files in task-local untracked scratch |
+| Python 3 | `python3 <task-local-doc-checker.py>` per [PC2 document checks](spec/pc2-manager-contracts.md#8-documentation-validation-and-limits) | Link/contract-coverage and malformed-document control logs; no native/runtime proof |
+| GitHub CLI | `gh pr view 35 --repo relux-works/swarma-keymaker` | Original public prerequisite text in task-local untracked scratch; no repository publication |
