@@ -216,7 +216,10 @@ manager preparer or production wiring; activation remains closed.
 
 The [PC2 manager state codec contract](spec/pc2-manager-state.md) defines the
 pure `internal/pc2state` representations and immutable A2/hold identity checks.
-These codecs provide no production writer, store, census or admission.
+The adjacent `internal/pc2store` supplies fixture-funded protected file/index
+mechanics, lineage-specific immutable copies and exact-head publication/recovery.
+Production opening/initialization, complete census, committed credit and admission
+remain disabled.
 
 The [account-directory contract](spec/station-effect-receipts.md#64-qualified-local-account-directory-and-nss-configuration)
 selects `files` and bounded `systemd`. The implementation compares protected
@@ -389,6 +392,9 @@ The optional race build exceeded the 20-minute test target and tripped existing 
 For the pure manager codecs, run `go test ./internal/pc2state` and
 `go vet ./internal/pc2state`. The tests use committed public fixtures and report
 to the terminal; task-local validation logs stay outside the tracked tree.
+For retained storage, run `go test -p 1 ./internal/pc2store`,
+`go test -race -p 1 ./internal/pc2store` and `go vet ./internal/pc2store`. These
+use unprivileged real-file fixtures; process-death tests are not power-loss proof.
 
 | Tool | Purpose / exact entry point | Output |
 |---|---|---|

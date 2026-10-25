@@ -367,10 +367,10 @@ These are specification obligations, not authenticated runtime providers or an
 implemented journal guard/coordinator. Production bump remains refused; the
 three joint PC2 gates above remain open.
 
-The [manager state codec contract](spec/pc2-manager-state.md) implements only
-representation and immutable identity checks. MC-Q2 still requires durable
-state, complete owner indexing/census and the cross-owner reservation API;
-MC-Q3 still requires journal-owned lifetime integration. Codec/vector success
+The [manager state codec contract](spec/pc2-manager-state.md) implements
+pure representation/identity plus fixture-only retained storage mechanics. MC-Q2
+still requires qualified durable state, complete owner indexing/census and the
+cross-owner reservation API; MC-Q3 still requires journal-owned lifetime integration. Codec/vector success
 does not resolve these gates or the MC-Q4/5/6 authority and recovery decisions.
 
 | Open question | Owner / remaining artifact |
@@ -382,6 +382,14 @@ does not resolve these gates or the MC-Q4/5/6 authority and recovery decisions.
 | MC-Q5 / Q2 / G2 / G5-E — C0 and independent floors | Deployment/bootstrap and independent restore-custody owners: original C0/Q0 authorization, independently current per-transaction commit/floor transition, C0 unknown-outcome recovery and old-writer exclusion; no authority from empty/lost files or C0 hold origin |
 | MC-Q6 — Three joint PC2 gates | Manager and key-service protocol owners: settle observation absorption/RPC correlation, independent restore custody and potentially indefinite withdrawal-completion blocking; no deadline/TTL or local epoch substitution |
 | MC-Q7 / G5-D — External message authority | Message/provider owners: publish original cumulative/restore/time/scope/WC1 evidence and continuity/privilege interfaces; manager supplies no synthetic provider, persisted receipt authority or automatic witness activation |
+
+The [protected retained-store mechanics](spec/pc2-manager-state.md#protected-retained-storage-and-owner-index)
+now support private prefunded fixtures with lineage-specific copies and bounded
+append-only ownership/publication records. Production opening and initialization
+remain disabled: C0/installer authority, initial metadata frontier, qualified
+allocation/zero-length profile, independent current custody/all-writer exclusion,
+native filesystem/privilege qualification and both joint spend anchors are still
+required. Fixture accounting is not committed cross-owner credit or G5-B acceptance.
 
 The [twelve negative obligations](spec/pc2-manager-contracts.md#1-negative-obligations-first)
 include authentic valid controls and planned narrowing mutations. All native

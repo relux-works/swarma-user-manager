@@ -376,8 +376,14 @@ layout nor the key service's private 0700/0600 ownership.
 | Key-service participants, root/floor/intent and private stores | Their authenticated owning installers/coordinator, according to G4; a manager selector does not grant these writers' privileges |
 
 Digest filenames are the checked 64 lowercase hash digits plus `.json`, resolved
-by fixed role under retained protected directory descriptors, never a received
-path. Runtime files are not repository artifacts. Guard/current endpoints use
+beneath a checked 32-lowercase-hex copy-lineage directory under each fixed
+role, using retained protected directory descriptors, never a received path.
+Separate same-role copies with equal bytes have distinct lineage locations and
+charges; original-lineage retry alone is idempotent. Lineage directory overhead
+and both staging/destination namespaces must be prospectively funded. The
+[retained-storage mechanics](pc2-manager-state.md#protected-retained-storage-and-owner-index)
+implement this rule with fixture funding only; production opening is disabled. Runtime files are not repository artifacts.
+Guard/current endpoints use
 atomic replace plus file/parent sync and exact readback; all referenced immutable
 objects precede their publication. Initial explicit clear/empty histories require
 independent genesis authority; missing files never mean clear. Existing codecs
