@@ -3,6 +3,7 @@ package qualmaint
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"io"
 	"reflect"
 )
@@ -93,8 +94,17 @@ func covers(next, old []Transaction) bool {
 // immutable transitions and exact accepted retries. It does not resolve external
 // evidence or prove recorder chronology; those obligations belong to integration.
 func Replay(r io.Reader, retained Checkpoint) (History, error) {
+	return ReplayContext(context.Background(), r, retained)
+}
+
+// ReplayContext additionally bounds local work by the caller's context. It
+// returns no partial history on expiry, including during unresolved-set scans.
+func ReplayContext(ctx context.Context, r io.Reader, retained Checkpoint) (History, error) {
 	h := History{Checkpoint: Checkpoint{0, Zero}}
 	fail := func(err error) (History, error) { return History{}, err }
+	if ctx == nil || ctx.Err() != nil {
+		return fail(ErrLease)
+	}
 	if !retained.valid() {
 		return fail(ErrChain)
 	}
@@ -107,6 +117,9 @@ func Replay(r io.Reader, retained Checkpoint) (History, error) {
 	matched := retained.Seq == 0
 	var initial *Entry
 	for {
+		if ctx.Err() != nil {
+			return fail(ErrLease)
+		}
 		line, err := reader.ReadSlice('\n')
 		if len(line) == 0 && err == io.EOF {
 			break
@@ -159,6 +172,9 @@ func Replay(r io.Reader, retained Checkpoint) (History, error) {
 				// A new endpoint must retain every unresolved failed transaction, even
 				// when no retry_of shorthand is supplied. It cannot silently discard work.
 				for id, t := range terminal {
+					if ctx.Err() != nil {
+						return fail(ErrLease)
+					}
 					if t.Phase == "accepted" {
 						continue
 					}
@@ -233,11 +249,17 @@ func Replay(r io.Reader, retained Checkpoint) (History, error) {
 // size. This is an integrity check, not the owning evidence codec's semantic or
 // authority validator. Missing authentic objects in the published vectors fail.
 func VerifyReferences(h History, read func(Ref) ([]byte, error)) error {
+	return verifyReferences(context.Background(), h, read)
+}
+func verifyReferences(ctx context.Context, h History, read func(Ref) ([]byte, error)) error {
 	if read == nil {
 		return ErrMissing
 	}
 	for _, e := range h.Entries {
 		for _, r := range references(e) {
+			if ctx.Err() != nil {
+				return ErrLease
+			}
 			b, err := read(r)
 			if err != nil {
 				return err
@@ -276,11 +298,16 @@ func references(e Entry) []Ref {
 // Verify combines bounded whole-chain replay with direct-object integrity.
 // It deliberately exposes no readiness or accepted-frontier mutation API.
 func Verify(raw []byte, retained Checkpoint, read func(Ref) ([]byte, error)) (History, error) {
-	h, err := Replay(bytes.NewReader(raw), retained)
+	return VerifyContext(context.Background(), raw, retained, read)
+}
+
+// VerifyContext is the deadline-aware integrity verifier used under store leases.
+func VerifyContext(ctx context.Context, raw []byte, retained Checkpoint, read func(Ref) ([]byte, error)) (History, error) {
+	h, err := ReplayContext(ctx, bytes.NewReader(raw), retained)
 	if err != nil {
 		return History{}, err
 	}
-	if err = VerifyReferences(h, read); err != nil {
+	if err = verifyReferences(ctx, h, read); err != nil {
 		return History{}, err
 	}
 	return h, nil

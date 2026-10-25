@@ -2,6 +2,7 @@ package qualmaint
 
 import (
 	"bytes"
+	"context"
 	"testing"
 )
 
@@ -43,6 +44,7 @@ func TestQualMaintChain(t *testing.T) {
 		"tamper":            bytes.Replace(valid, []byte(`"candidate_inputs":"2`), []byte(`"candidate_inputs":"3`), 1),
 		"wrong-predecessor": append(mustLine(t, i), wire(t, vector(t, "accepted"), func(m map[string]any) { m["prev"] = Digest([]byte("another predecessor")) })...),
 		"sequence-reuse":    append(mustLine(t, i), mustLine(t, i)...),
+		"sequence-gap":      append(mustLine(t, i), wire(t, vector(t, "accepted"), func(m map[string]any) { m["seq"] = 3 })...),
 		"truncated-tail":    valid[:len(valid)-1], "corrupt-tail": append(append([]byte{}, valid...), []byte("garbage\n")...),
 	}
 	for n, b := range cases {
@@ -58,7 +60,7 @@ func TestQualMaintChain(t *testing.T) {
 			}
 		})
 	}
-	for _, floor := range []Checkpoint{{3, good.Checkpoint.SHA256}, {2, Zero}} {
+	for _, floor := range []Checkpoint{{3, good.Checkpoint.SHA256}, {2, Digest([]byte("wrong checkpoint"))}} {
 		_, err := Replay(bytes.NewReader(valid), floor)
 		wantError(t, err, ErrChain)
 	}
@@ -221,5 +223,32 @@ func TestQualMaintObjectMismatch(t *testing.T) {
 	_, err = Verify(chain(t, e), empty, func(Ref) ([]byte, error) { return payload, nil })
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+// Deadline expiry rejects the whole replay instead of returning an earlier
+// prefix. The same bounded chain with a live context is the valid control.
+func TestQualMaintReplayDeadline(t *testing.T) {
+	b := chain(t, sample(t, "intent"))
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	h, err := ReplayContext(ctx, bytes.NewReader(b), empty)
+	wantError(t, err, ErrLease)
+	if len(h.Entries) != 0 {
+		t.Fatal("partial replay")
+	}
+	if _, err = ReplayContext(context.Background(), bytes.NewReader(b), empty); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Published predecessor/checkpoint constants are independent of this package's
+// chain-building helper: hashing without LF cannot make both sides agree.
+func TestQualMaintPublishedChain(t *testing.T) {
+	raw := append(append([]byte{}, vector(t, "intent")...), vector(t, "accepted")...)
+	floor := Checkpoint{2, "551046db704954fdeff00a3deb8b47bbc32a0b6b484ed23b8de10a7a0003019f"}
+	h, err := Replay(bytes.NewReader(raw), floor)
+	if err != nil || h.Checkpoint != floor || h.Entries[1].Prev != "d3480ee51fe047ec1d68696878a00d6340500e3a98ec2712dbb175b6b85997a4" {
+		t.Fatal("published line identity", err)
 	}
 }

@@ -4,6 +4,7 @@ package qualmaint
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
@@ -67,7 +68,7 @@ func (s *Store) readObject(r Ref, durable bool) ([]byte, error) {
 	}
 	return b, nil
 }
-func (s *Store) load(floor Checkpoint) ([]byte, History, error) {
+func (s *Store) load(ctx context.Context, floor Checkpoint) ([]byte, History, error) {
 	raw, err := io.ReadAll(io.NewSectionReader(s.journal, 0, int64(JournalBytes)+1))
 	if err != nil {
 		return nil, History{}, ErrIO
@@ -75,7 +76,7 @@ func (s *Store) load(floor Checkpoint) ([]byte, History, error) {
 	if int64(len(raw)) > s.limits.journal {
 		return nil, History{}, ErrSaturated
 	}
-	h, err := Verify(raw, floor, func(r Ref) ([]byte, error) { return s.readObject(r, false) })
+	h, err := VerifyContext(ctx, raw, floor, func(r Ref) ([]byte, error) { return s.readObject(r, false) })
 	if err != nil {
 		return nil, History{}, err
 	}
@@ -89,13 +90,13 @@ func (s *Store) load(floor Checkpoint) ([]byte, History, error) {
 // issue a durability receipt, authenticate evidence or authorize admission.
 func (w *Writer) Read(floor Checkpoint) (History, error) {
 	var h History
-	err := w.local(func() error { _, v, err := w.store.load(floor); h = v; return err })
+	err := w.local(func() error { _, v, err := w.store.load(w.ctx, floor); h = v; return err })
 	if err != nil {
 		return History{}, err
 	}
 	return h, nil
 }
-func (s *Store) usage() (int64, int, error) {
+func (s *Store) usage(ctx context.Context) (int64, int, error) {
 	fd, err := unix.Openat(int(s.objects.Fd()), ".", unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
 	if err != nil {
 		return 0, 0, ErrIO
@@ -111,6 +112,9 @@ func (s *Store) usage() (int64, int, error) {
 	}
 	var total int64
 	for _, name := range names {
+		if ctx.Err() != nil {
+			return 0, 0, ErrLease
+		}
 		temporary := strings.HasPrefix(name, ".tmp-") && len(name) == 29
 		if !digestOK(name) && !temporary {
 			return 0, 0, ErrEvidence
@@ -146,11 +150,11 @@ func (w *Writer) PutObject(b []byte) (Ref, error) {
 	}
 	err := w.local(func() error {
 		s := w.store
-		_, h, err := s.load(emptyCheckpoint())
+		_, h, err := s.load(w.ctx, emptyCheckpoint())
 		if err != nil {
 			return err
 		}
-		total, count, err := s.usage()
+		total, count, err := s.usage(w.ctx)
 		if err != nil {
 			return err
 		}
@@ -245,11 +249,11 @@ func (w *Writer) Reserve(b Budget) error {
 	}
 	return w.local(func() error {
 		s := w.store
-		raw, h, err := s.load(emptyCheckpoint())
+		raw, h, err := s.load(w.ctx, emptyCheckpoint())
 		if err != nil {
 			return err
 		}
-		total, count, err := s.usage()
+		total, count, err := s.usage(w.ctx)
 		if err != nil {
 			return err
 		}
@@ -280,7 +284,7 @@ func (w *Writer) Append(expected Checkpoint, e Entry, plan Budget) (Checkpoint, 
 	var receipt Checkpoint
 	err = w.local(func() error {
 		s := w.store
-		raw, h, err := s.load(expected)
+		raw, h, err := s.load(w.ctx, expected)
 		if err != nil {
 			return err
 		}
@@ -288,11 +292,11 @@ func (w *Writer) Append(expected Checkpoint, e Entry, plan Budget) (Checkpoint, 
 			return ErrChain
 		}
 		proposed := io.MultiReader(bytes.NewReader(raw), bytes.NewReader(line))
-		next, err := Replay(proposed, expected)
+		next, err := ReplayContext(w.ctx, proposed, expected)
 		if err != nil {
 			return err
 		}
-		total, count, err := s.usage()
+		total, count, err := s.usage(w.ctx)
 		if err != nil {
 			return err
 		}
@@ -312,6 +316,9 @@ func (w *Writer) Append(expected Checkpoint, e Entry, plan Budget) (Checkpoint, 
 			return ErrSaturated
 		}
 		for _, r := range references(e) {
+			if w.ctx.Err() != nil {
+				return ErrLease
+			}
 			if _, err = s.readObject(r, true); err != nil {
 				return err
 			}
@@ -323,7 +330,7 @@ func (w *Writer) Append(expected Checkpoint, e Entry, plan Budget) (Checkpoint, 
 			return err
 		}
 		// Compare the exact prior bytes again immediately before appending.
-		again, _, err := s.load(expected)
+		again, _, err := s.load(w.ctx, expected)
 		if err != nil {
 			return err
 		}
@@ -349,7 +356,7 @@ func (w *Writer) Append(expected Checkpoint, e Entry, plan Budget) (Checkpoint, 
 			return err
 		}
 		if err = s.step("journal.reread", func() error {
-			actual, loaded, e := s.load(expected)
+			actual, loaded, e := s.load(w.ctx, expected)
 			if e != nil {
 				return e
 			}

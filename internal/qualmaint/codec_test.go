@@ -134,9 +134,12 @@ func TestQualMaintAssociation(t *testing.T) {
 		t.Run(n, func(t *testing.T) {
 			e := sample(t, "intent")
 			change(&e)
-			if _, err := Encode(e); err == nil {
-				t.Fatal("accepted invalid association")
+			_, err := Encode(e)
+			want := error(ErrID)
+			if n == "foreign-link" {
+				want = ErrRecord
 			}
+			wantError(t, err, want)
 		})
 	}
 	agg := ID{"a", "aggregate", 2}
@@ -185,5 +188,41 @@ func TestQualMaintSaturation(t *testing.T) {
 	e.Transactions[63].Invocations = append(e.Transactions[63].Invocations, ID{"b", "invocation", 257})
 	if _, err := Encode(e); err != ErrSaturated {
 		t.Fatal(err)
+	}
+}
+
+// The closed local relationships reject unknown enums, missing proof fields and
+// malformed identities; unchanged vectors are the nearby valid controls.
+func TestQualMaintEntryConstraints(t *testing.T) {
+	cases := map[string]struct {
+		phase  string
+		change func(*Entry)
+	}{
+		"format":              {"intent", func(e *Entry) { e.Format = "qual-maint/2" }},
+		"boot":                {"intent", func(e *Entry) { e.BootID = "00000000-0000-0000-0000-000000000000" }},
+		"zero-input":          {"intent", func(e *Entry) { e.CandidateInputs = Zero }},
+		"reason":              {"intent", func(e *Entry) { e.Reason = "unbounded-message" }},
+		"phase":               {"intent", func(e *Entry) { e.Phase = "done" }},
+		"intent-proof":        {"intent", func(e *Entry) { r := e.OldState; e.InitialQ = &r }},
+		"accepted-step":       {"accepted", func(e *Entry) { e.Step = 4 }},
+		"accepted-no-unit":    {"accepted", func(e *Entry) { e.Unit = nil }},
+		"accepted-no-initial": {"accepted", func(e *Entry) { e.InitialQ = nil }},
+		"wrong-unit-boot":     {"accepted", func(e *Entry) { e.Unit.BootID = "22222222-2222-2222-2222-222222222222" }},
+		"one-recipient":       {"interrupted", func(e *Entry) { e.Notification.Owner = Recipient{nil, "none"} }},
+		"fake-receipt":        {"interrupted", func(e *Entry) { e.Notification.Owner.State = "delivered" }},
+		"no-incident":         {"interrupted", func(e *Entry) { e.Notification.Incident = nil }},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			e := sample(t, tc.phase)
+			tc.change(&e)
+			_, err := Encode(e)
+			wantError(t, err, ErrRecord)
+		})
+	}
+	for _, phase := range []string{"intent", "accepted", "interrupted"} {
+		if _, err := Encode(sample(t, phase)); err != nil {
+			t.Fatal(err)
+		}
 	}
 }

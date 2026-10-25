@@ -319,5 +319,9 @@ func (w *Writer) local(fn func() error) error {
 		s.poisoned = true
 		return ErrLease
 	}
-	return s.check()
+	if err := s.check(); err != nil {
+		s.poisoned = true
+		return err
+	}
+	return nil
 }

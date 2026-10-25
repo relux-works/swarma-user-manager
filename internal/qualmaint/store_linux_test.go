@@ -5,6 +5,7 @@ package qualmaint
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"errors"
 	"io"
 	"os"
@@ -139,6 +140,20 @@ func TestQualMaintProtectedStoreRefusals(t *testing.T) {
 		"journal-hardlink": func(t *testing.T, s *Store, r string) {
 			if err := os.Link(journalPath(r), filepath.Join(r, "extra")); err != nil {
 				t.Fatal(err)
+			}
+		},
+		"journal-acl": func(t *testing.T, s *Store, r string) {
+			acl := make([]byte, 4+5*8)
+			binary.LittleEndian.PutUint32(acl, 2)
+			entries := [][3]uint32{{1, 6, 0xffffffff}, {2, 0, uint32(os.Getuid() + 1)}, {4, 0, 0xffffffff}, {16, 0, 0xffffffff}, {32, 0, 0xffffffff}}
+			for i, e := range entries {
+				off := 4 + i*8
+				binary.LittleEndian.PutUint16(acl[off:], uint16(e[0]))
+				binary.LittleEndian.PutUint16(acl[off+2:], uint16(e[1]))
+				binary.LittleEndian.PutUint32(acl[off+4:], e[2])
+			}
+			if err := unix.Fsetxattr(int(s.journal.Fd()), "system.posix_acl_access", acl, 0); err != nil {
+				t.Fatal("owned ACL plant unavailable", err)
 			}
 		},
 		"journal-mode": func(t *testing.T, s *Store, r string) {
@@ -482,7 +497,7 @@ func TestQualMaintObjectCrashCuts(t *testing.T) {
 				if _, err = next.PutObject([]byte("owned fault publication")); err != nil {
 					t.Fatal(err)
 				}
-				total, count, err := fresh.usage()
+				total, count, err := fresh.usage(context.Background())
 				if err != nil || total == 0 || count == 0 {
 					t.Fatal("orphan not counted", total, count, err)
 				}
@@ -537,5 +552,47 @@ func TestQualMaintFsyncOrder(t *testing.T) {
 	appendEntry(t, w, empty, i, Budget{})
 	if !same(events, []string{"write", "journal", "parent"}) {
 		t.Fatal("missing or reordered actual sync", events)
+	}
+}
+
+// Missing or size-mismatched direct references never produce a journal append;
+// intact content references and the exact expected checkpoint do append.
+func TestQualMaintStoreReferenceRefusals(t *testing.T) {
+	for _, kind := range []string{"missing", "size"} {
+		t.Run(kind, func(t *testing.T) {
+			s, root := fixture(t)
+			w := writer(t, s)
+			e := contentEntry(t, w, "intent")
+			want := error(ErrEvidence)
+			if kind == "missing" {
+				p := filepath.Join(root, "lib/user-manager/qualification-maintenance/objects", e.OldState.SHA256)
+				if err := os.Remove(p); err != nil {
+					t.Fatal(err)
+				}
+				want = ErrMissing
+			} else {
+				e.OldState.Size++
+			}
+			_, err := w.Append(empty, e, Budget{})
+			wantError(t, err, want)
+			b, err := os.ReadFile(journalPath(root))
+			if err != nil || len(b) != 0 {
+				t.Fatal("reference failure appended", err)
+			}
+		})
+	}
+	s, root := fixture(t)
+	w := writer(t, s)
+	e := contentEntry(t, w, "intent")
+	cp := appendEntry(t, w, empty, e, Budget{})
+	before, _ := os.ReadFile(journalPath(root))
+	_, err := w.Append(empty, e, Budget{})
+	wantError(t, err, ErrChain)
+	after, _ := os.ReadFile(journalPath(root))
+	if !bytes.Equal(before, after) {
+		t.Fatal("stale append")
+	}
+	if _, err = w.Read(cp); err != nil {
+		t.Fatal(err)
 	}
 }

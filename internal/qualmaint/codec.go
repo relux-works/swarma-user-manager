@@ -200,6 +200,10 @@ func validateSet(groups []Transaction, links []Link) error {
 	if count > 256 {
 		return ErrSaturated
 	}
+	return validateLinks(links, positions)
+}
+
+func validateLinks(links []Link, positions map[ID]int) error {
 	var previous Link
 	for i, l := range links {
 		pos, ok := positions[l.Invocation]
