@@ -469,7 +469,7 @@ func newCensusFixture(t *testing.T, opt censusOptions) *censusFixture {
 		p.identity = image.Identity
 		rec := map[string]any{"version": "pc2-owner-transition/1", "sequence": head.Sequence + 1, "previous": head.Digest, "event": "associate", "ticket": p.ticket, "content_digest": digestCensus(p.raw), "bytes": int64(len(p.raw)), "codec": p.codec, "from": "", "to": "staging/" + p.copyID + "/" + name, "storage_id": "", "identity": map[string]any{"device": int64(0), "inode": int64(0), "mount": int64(0)}}
 		raw := censusWire(t, rec)
-		head = pc2store.Head{head.Sequence + 1, digestCensus(raw)}
+		head = pc2store.Head{Sequence: head.Sequence + 1, Digest: digestCensus(raw)}
 		p.order = head.Sequence
 		appendRecord(raw)
 		if p.staged {
@@ -487,7 +487,7 @@ func newCensusFixture(t *testing.T, opt censusOptions) *censusFixture {
 		}
 		rec["storage_id"] = sid
 		raw = censusWire(t, rec)
-		head = pc2store.Head{head.Sequence + 1, digestCensus(raw)}
+		head = pc2store.Head{Sequence: head.Sequence + 1, Digest: digestCensus(raw)}
 		appendRecord(raw)
 		if i == invPos {
 			c.targets = append(c.targets, pc2store.HeadTarget{Directory: auth, Name: "root.json", Cap: 1048576}, pc2store.HeadTarget{}, pc2store.HeadTarget{Directory: d, Name: name, Cap: 65536})
@@ -524,7 +524,7 @@ func newCensusFixture(t *testing.T, opt censusOptions) *censusFixture {
 		if _, e := pc2store.DecodeNativeObservation(raw); e != nil {
 			t.Fatal("observation", e)
 		}
-		head = pc2store.Head{n.Sequence, digestCensus(raw)}
+		head = pc2store.Head{Sequence: n.Sequence, Digest: digestCensus(raw)}
 		appendRecord(raw)
 		f.native = append(f.native, n)
 	}
