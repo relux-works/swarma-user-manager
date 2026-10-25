@@ -423,3 +423,25 @@ and the exact prospective head bound. These checks also support `-race`.
 | Git | `git diff --check`; `git verify-commit <sha>`; read-only clone of the pinned public G4 source | Bounded diff/signature evidence and reference files in task-local untracked scratch |
 | Python 3 | `python3 <task-local-doc-checker.py>` per [PC2 document checks](spec/pc2-manager-contracts.md#8-documentation-validation-and-limits) | Link/contract-coverage and malformed-document control logs; no native/runtime proof |
 | GitHub CLI | `gh pr view 35 --repo relux-works/swarma-keymaker` | Original public prerequisite text in task-local untracked scratch; no repository publication |
+
+### PC2 fixture recovery tools
+
+Recovery state/storage and direct release-barrier mechanics are fixture-only.
+Production recovery/release preparation and the normal-finish adapter refuse;
+these APIs supply neither coordinator/custody authority nor new credit. See
+[fixture recovery mechanics](spec/pc2-manager-state.md#fixture-recovery-mechanics).
+
+Run focused checks with Go 1.26.10:
+
+```sh
+go test -p 1 -count=1 -timeout=600s ./internal/manager ./internal/pc2store ./internal/pc2state -run '^(TestManager(Recovery|NormalReleaseWindow)|TestPC2(Recovery|StoreCloseDiscipline))'
+go test -race -p 1 -count=1 -timeout=600s ./internal/manager ./internal/pc2store ./internal/pc2state -run '^(TestManager(Recovery|NormalReleaseWindow)|TestPC2(Recovery|StoreCloseDiscipline))'
+go vet ./internal/manager ./internal/pc2store ./internal/pc2state
+```
+
+Linux/amd64 syscall probes use only owned child PIDs and real file operations.
+They require parent-child ptrace access; absence is an unverified check, never a
+passing qualification. Traces and child logs use task-local temporary directories
+under `TMPDIR`. Shared hosts must use their existing heavy-slot wrapper for all
+Go tests/builds, race, syscall probes and mutants. No CLI is installed by these
+fixtures, and no repository-wide test run is required for this scope.

@@ -778,3 +778,56 @@ loss or the all-writer currentness protocol. Those qualification gates and both
 spending anchors above remain open. See the README's PC2 commands; test results
 and actual killed/surviving mutants are reported per candidate, not inferred
 from this specification.
+
+## Fixture recovery mechanics
+
+`CheckRecoveryHistory` and `CheckRecoveryGuards` validate the unchanged G4
+one-session prefix, genuine hold preimage, adjacent phases/full predecessors,
+stable root and immutable known checkpoint/outcome. Manager preparation also
+binds retained evidence bodies and the original intent/A2 or authority-TX origin.
+Every installed hold from the complete prepared store is considered, including
+an authority hold omitted from both the guard and selected semantic map.
+
+The storage profile remains explicitly fixture-only. Preparation reserves and
+associates eight exact original allocations for four record/guard pairs, verifies
+complete physical closure and creates the funded lineage directories outside F.
+Only the finite prepared publisher runs under F. It installs immutable objects,
+atomically replaces the exact held guard endpoint, syncs the other affected
+parents and syncs the phase record's lineage directory last. Partial/foreign
+files are retained and refused, never overwritten. The physical owner index is
+updated after F; its local acknowledgement supplies no independent acceptance.
+A new consumer preparation is required before any subsequent release use.
+
+The private coordinator verifies and syncs already owner-repaired native bytes;
+it supplies no participant repair implementation. Durable open precedes this
+verification, resolution precedes durable release preparation, and only then may
+the owning exact marker be removed and its parent synced. Retry keeps the same
+session, original allocation and spent histories. Released never clears the
+hold or returns unspent credit. Owned descriptions close through checked paths,
+with primary and cleanup failures retained and no clean result on late failure.
+
+Direct fixture consumption pins the existing final set outside F: twelve
+metadata roles (eleven when authority recovery has no A2) and ten participant
+identities. Under F it directly syncs linked metadata and cleanup parents,
+compares each bounded metadata body once, syncs the exact released lineage
+last and rechecks identities. It returns only an in-process diagnostic.
+No owner-index lock/read, scan, RPC, extra schema or new credit is admitted.
+Tests combine a source call-graph guard with owned-child syscall traces; syscall
+traces alone cannot establish absence of an uncontended Go mutex.
+
+These mechanics neither implement the ten participant semantic validators and
+verity measurements nor qualify real principals, installed paths, independent
+custody/currentness, stopped/restored-writer exclusion, storage barriers or
+native latency. Fixture participant files and opaque root/floor/intent inputs
+are controlled test data, not substitutes for those authorities. Instrumented
+fixtures use an explicit 120-second window to observe syscalls; this does not
+qualify or extend any production 250/1000/2000 ms deadline. Installation,
+reservation anchoring, real outcome/exclusion providers and MC-Q4/Q5 remain
+closed. Both spending anchors, pre-A2 recovery, ResolveAndFoldOccupied and
+retirement/replacement remain outside this slice.
+
+The normal-finish adapter always refuses. It requires a separately reviewed
+combined Q3 v2 change covering marker prebinding and proof-bound pre-cleanup;
+existing post-unlink Finish cannot supply that ordering. No journal API or wire
+format changes here. AppendProof remains a by-value diagnostic bound to its
+original live pair/window; ordinary value copies are not distinguishable tokens.

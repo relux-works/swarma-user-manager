@@ -46,7 +46,17 @@ func TestManagerRecoveryCurrency(t *testing.T) {
 			}
 			ctx := context.Background()
 			switch name {
-			case "root", "guard", "floor", "intent":
+			case "root":
+				b, e := os.ReadFile(filepath.Join(f.root, "auth/root.json"))
+				if e != nil {
+					t.Fatal(e)
+				}
+				changed := bytes.ReplaceAll(b, []byte(`"revision":1`), []byte(`"revision":2`))
+				if bytes.Equal(b, changed) || len(b) != len(changed) {
+					t.Fatal("equal-length valid root control not applied")
+				}
+				censusWrite(t, filepath.Join(f.root, "auth/root.json"), changed, 0640)
+			case "guard", "floor", "intent":
 				censusWrite(t, filepath.Join(f.root, "auth", name+".json"), []byte(`{"changed":true}`), 0640)
 			case "same-bytes-inode":
 				b, e := os.ReadFile(filepath.Join(f.root, "auth/root.json"))
