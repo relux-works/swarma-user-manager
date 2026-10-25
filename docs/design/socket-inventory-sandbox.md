@@ -53,9 +53,12 @@ The unit allowlist becomes `AF_UNIX AF_NETLINK`. systemd's setting admits a
 family, not one netlink protocol: by itself it also admits creation attempts for
 route, generic, usersock, audit and other netlink protocols/types, subject to
 kernel permissions. Before our filter is installed, that wider family allowance
-already applies to executable/loader initialization. After installation, the
-additional argument checks described below restrict new netlink sockets, across
-all synchronized threads and inherited children. Neither layer permits a new
+applies during executable/loader/runtime initialization, invocation verification
+and argument/environment handling in [the entry point](../../cmd/swarma-user-manager/main.go).
+These steps belong to the trusted startup closure. After successful installation,
+the additional argument checks described below restrict new netlink sockets
+across all synchronized threads. Later fork/exec children inherit the filter;
+services started independently by PID 1 do not inherit it. Neither layer permits a new
 IPv4/IPv6 socket. The [systemd 259 execution contract](https://www.freedesktop.org/software/systemd/man/259/systemd.exec.html#RestrictAddressFamilies=)
 also warns that inherited sockets, socketpair and io_uring need separate controls;
 retain descriptor hygiene, the process's socketpair checks and the unit's
@@ -65,6 +68,13 @@ A protocol exception is **not** a kernel-enforced read-only UNIX-query channel.
 `NETLINK_SOCK_DIAG` dispatches by the family inside the message; the
 [Linux v6.12 dispatcher](https://github.com/torvalds/linux/blob/v6.12/net/core/sock_diag.c)
 also exposes supported socket-destroy requests subject to capability checks.
+The proposed root unit sets no `CapabilityBoundingSet` and no `PrivateUsers`.
+`NoNewPrivileges` and `RestrictNamespaces` do not drop existing capabilities.
+Where `CAP_NET_ADMIN` is held in the network namespace's owning user namespace,
+the diagnostic protocol's supported capability-gated destroy operations are not
+excluded by that gate. Record the actual effective capabilities and user/network
+namespaces during supported-host qualification. Dropping capabilities would be
+a separate reviewed profile change, including inventory-completeness checks.
 The existing collector sends only a fixed AF_UNIX dump request. Classic seccomp
 cannot inspect a pointed-to netlink message to enforce that payload restriction.
 Thus trusted, pinned qualifier/collector code remains responsible for its fixed
@@ -274,13 +284,14 @@ request and changed no service, account, namespace or firewall. This proves the
 process-filter conflict on this host. It does not prove systemd enforcement,
 root inventory completeness, arm64 behavior or a passing populated-account Q.
 
-Run a matching isolated probe via the shared-host slot with Go 1.26.10:
+Run a matching isolated probe with Go 1.26.10, setting `TASK_SCRATCH` to the
+directory containing the probe overlay. Shared hosts should serialize heavy
+runs using their approved scheduling mechanism.
 
 ```sh
 env GOTOOLCHAIN=local GOMAXPROCS=2 CGO_ENABLED=1 \
-  /home/agent/keeper/ops/bin/heavy-slot --label architect -- \
   go test -v -count=1 -run '^TestD1SocketSandboxProbe$' \
-  -overlay <task-scratch>/probe-overlay.json ./internal/linuxos
+  -overlay "$TASK_SCRATCH/probe-overlay.json" ./internal/linuxos
 ```
 
 The scratch source/overlay and exact command/output are retained in task evidence;
@@ -342,9 +353,16 @@ or accept stale evidence to obtain a passing run.
 ## Decisions still required
 
 - Profile owner: accept the whole local SOCK_DIAG protocol surface for the
-  qualifier and its inherited native children, plus broader AF_NETLINK creation
-  during pre-filter initialization, while relying on pinned code for the fixed
-  UNIX request; otherwise
+  qualifier and its inherited native children, including supported destroy
+  operations where `CAP_NET_ADMIN` is held in the network namespace's owning
+  user namespace. The proposed root unit sets no `CapabilityBoundingSet` and no
+  `PrivateUsers`; `NoNewPrivileges` and `RestrictNamespaces` do not drop existing
+  capabilities, so that capability gate does not exclude these operations when
+  the capability is held. Accept broader AF_NETLINK creation during pre-filter
+  executable/loader/runtime initialization, invocation verification and
+  argument/environment handling, while relying on pinned code for the fixed
+  UNIX request. Dropping capabilities requires a separate reviewed profile
+  change and inventory-completeness qualification. Otherwise,
   require B's independent authenticated helper. Neither choice is approved here.
 - Platform maintainers: define the supported amd64/arm64 kernel/configuration
   matrix and execute the populated-reservation root/unit qualification above.
