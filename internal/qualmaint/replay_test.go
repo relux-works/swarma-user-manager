@@ -41,7 +41,7 @@ func TestQualMaintChain(t *testing.T) {
 	good := replay(t, valid)
 	cases := map[string][]byte{
 		"tamper":            bytes.Replace(valid, []byte(`"candidate_inputs":"2`), []byte(`"candidate_inputs":"3`), 1),
-		"wrong-predecessor": append(mustLine(t, i), wire(t, vector(t, "accepted"), func(m map[string]any) { m["prev"] = Zero })...),
+		"wrong-predecessor": append(mustLine(t, i), wire(t, vector(t, "accepted"), func(m map[string]any) { m["prev"] = Digest([]byte("another predecessor")) })...),
 		"sequence-reuse":    append(mustLine(t, i), mustLine(t, i)...),
 		"truncated-tail":    valid[:len(valid)-1], "corrupt-tail": append(append([]byte{}, valid...), []byte("garbage\n")...),
 	}
