@@ -125,7 +125,7 @@ func TestManagerCensusHistory(t *testing.T) {
 // Claim: changes after C1 or unlocked validation refuse, even for individually
 // valid replacement encodings; growth/substitution pass through the real bridge.
 func TestManagerCensusCurrency(t *testing.T) {
-	for _, which := range []string{"root", "index", "growth", "substitution", "orphan"} {
+	for _, which := range []string{"root", "index", "growth", "substitution", "orphan", "commitment"} {
 		t.Run(which, func(t *testing.T) {
 			f := newCensusFixture(t, censusOptions{})
 			censusValid(t, f.c)
@@ -166,6 +166,8 @@ func TestManagerCensusCurrency(t *testing.T) {
 					}
 				case "orphan":
 					censusWrite(t, filepath.Join(f.root, "effects/.write-"+strings.Repeat("f", 32)), []byte("retained"), 0600)
+				case "commitment":
+					f.c.commit += " "
 				}
 			}
 			e := censusRefuses(t, f.c)

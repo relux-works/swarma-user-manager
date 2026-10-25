@@ -368,7 +368,7 @@ func prepareManagerCensus(c *censusContext) (prepared *PreparedCensus, err error
 		}
 		return bad(e)
 	}
-	if digestCensus([]byte(c.commit)) != c.commitDigest || original.commitDigest != c.commitDigest || original.baseline != c.baseline {
+	if digestCensus([]byte(c.commit)) != c.commitDigest || original.commit != c.commit || original.commitDigest != c.commitDigest || original.baseline != c.baseline {
 		return bad(nil)
 	}
 	evidence := censusEvidence{"pc2-census-evidence/1", proof.Installation, c.commitDigest, c.baseline.Head, append([]string(nil), proof.Heads...), []string{}, held, snapshot.Envelope(), bounds, verdict, owner}
