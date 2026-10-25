@@ -9,6 +9,16 @@ func CheckRecoveryHistory(records []Object, hold Object, origin []byte) error {
 	if len(records) < 1 || len(records) > 4 || CheckHoldOrigin(hold, origin) != nil {
 		return ErrInvalid
 	}
+	hm, _ := object(hold, Hold)
+	activation := hm["kind"] == "activation"
+	var prepared any
+	if activation {
+		preimage, err := parse(origin, limit(ActivationAttempt))
+		if err != nil {
+			return err
+		}
+		prepared = preimage["prepared_tail"]
+	}
 	h, err := Digest(hold)
 	if err != nil {
 		return err
@@ -25,7 +35,7 @@ func CheckRecoveryHistory(records []Object, hold Object, origin []byte) error {
 			return ErrInvalid
 		}
 		if i == 0 {
-			if m["previous_digest"] != nil {
+			if m["previous_digest"] != nil || (activation && !reflect.DeepEqual(m["journal"], prepared)) {
 				return ErrInvalid
 			}
 			first = m
@@ -36,16 +46,16 @@ func CheckRecoveryHistory(records []Object, hold Object, origin []byte) error {
 			if i == 1 {
 				resolved = m
 			}
-			if m["outcome"] != resolved["outcome"] || !reflect.DeepEqual(m["journal"], resolved["journal"]) {
+			if m["outcome"] != resolved["outcome"] || m["evidence_digest"] != resolved["evidence_digest"] || !reflect.DeepEqual(m["journal"], resolved["journal"]) {
 				return ErrInvalid
 			}
 		}
-		// Open retains the prepared checkpoint; an absent resolution cannot move
-		// it backwards. Durable resolution must name a positive checkpoint.
+		// Activation open retains the genuine prepared checkpoint. Resolution
+		// cannot move backwards; authority TX recovery may retain checkpoint zero.
 		if i == 1 {
 			p := previous["journal"].(map[string]any)
 			n := m["journal"].(map[string]any)
-			if n["seq"].(int64) < p["seq"].(int64) || (n["seq"] == p["seq"] && n["hash"] != p["hash"]) || (m["outcome"] == "durable" && n["seq"] == int64(0)) {
+			if n["seq"].(int64) < p["seq"].(int64) || (n["seq"] == p["seq"] && n["hash"] != p["hash"]) || (activation && m["outcome"] == "durable" && n["seq"] == int64(0)) {
 				return ErrInvalid
 			}
 		}
