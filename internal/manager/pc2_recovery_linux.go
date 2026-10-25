@@ -9,6 +9,7 @@ import (
 
 	"github.com/relux-works/swarma-user-manager/internal/pc2state"
 	"github.com/relux-works/swarma-user-manager/internal/pc2store"
+	"github.com/relux-works/swarma-user-manager/tools/genjournal"
 )
 
 type recoveryHead struct {
@@ -88,6 +89,23 @@ func prepareRecovery(c *recoveryContext) (*preparedRecovery, error) {
 		return nil, ErrRecoveryUnavailable
 	}
 	if (c.marker != nil && (c.marker.Image().Digest != c.closure.accepted.marker || phase == 3)) || (c.marker == nil && phase < 2) {
+		return nil, ErrRecoveryUnavailable
+	}
+	// Bind the actual named journal and its retained repair description to the
+	// same complete accepted proof checked above. A fresh pin of contradictory
+	// bytes cannot certify an absent/durable outcome. This read is outside F;
+	// the existing repair Compare revalidates the exact image inside F.
+	journal, e := c.markerParent.Read("journal", 0644, genjournal.MaxFile)
+	if e != nil || string(journal.Bytes()) != c.closure.accepted.journal {
+		return nil, ErrRecoveryUnavailable
+	}
+	journalPins := 0
+	for _, f := range c.repairs {
+		if f.InRecoveryDirectory(c.markerParent) && f.Image() == journal {
+			journalPins++
+		}
+	}
+	if journalPins != 1 {
 		return nil, ErrRecoveryUnavailable
 	}
 	local := *c

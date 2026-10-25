@@ -76,6 +76,29 @@ func prepareRecoveryRelease(c *recoveryReleaseContext) (*preparedRecoveryRelease
 	if !c.metadata[9].file.InRecoveryDirectory(c.ledger) {
 		return nil, ErrRecoveryUnavailable
 	}
+	// Validate coverage from the retained metadata descriptions, not a supplied
+	// parent count. The released record's parent is the terminal ledger barrier;
+	// every other exact metadata parent must be in the earlier barrier set.
+	for _, d := range c.parents {
+		if d == nil {
+			return nil, ErrRecoveryUnavailable
+		}
+	}
+	for _, f := range c.metadata {
+		if f.file == nil || f.file.InRecoveryDirectory(c.ledger) {
+			continue
+		}
+		covered := false
+		for _, d := range c.parents {
+			if f.file.InRecoveryDirectory(d) {
+				covered = true
+				break
+			}
+		}
+		if !covered {
+			return nil, ErrRecoveryUnavailable
+		}
+	}
 	if c.cleanup.RecoveryAbsent("writer.pending") != nil {
 		return nil, ErrRecoveryUnavailable
 	}

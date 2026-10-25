@@ -392,5 +392,15 @@ func (f *recoveryFixture) releaseContext(t *testing.T) recoveryReleaseContext {
 	recoveryDir := censusChild(t, f.pc2, "recovery")
 	c.ledger = censusChild(t, recoveryDir, strings.Split(f.locations[9], "/")[1])
 	c.parents = []*pc2store.ReadDirectory{f.pc2, f.auth, f.generations}
+	// Include the actual immutable metadata-copy parents, independently of the
+	// final released ledger. Ancestor directories do not replace these barriers.
+	for _, index := range []int{0, 2, 5, 7} {
+		if index == 0 && f.c.closure.attempt.Kind() == "" {
+			continue
+		}
+		parts := strings.Split(f.locations[index], "/")
+		d := censusChild(t, censusChild(t, f.pc2, parts[0]), parts[1])
+		c.parents = append(c.parents, d)
+	}
 	return c
 }
