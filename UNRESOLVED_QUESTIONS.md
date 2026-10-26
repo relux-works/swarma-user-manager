@@ -463,3 +463,14 @@ all other executor contract requirements remain unchanged.
   Unsupported observation stays unknown and admission remains closed. No
   activation or capability restoration is authorized; old Q versions 1/2 refuse
   rather than upgrading implicitly.
+
+## First worker launcher, stop and observation selection
+
+The [first-run selection](docs/design/first-run-launch-stop.md) reuses helper
+§§4.6–4.7/7; it does not lift station v0's no-launcher fence. Before that path
+can run, publish its launcher result/exec-failure handoff, observe wire and
+retention/coverage bounds, stop absence evidence/bounds and production claim,
+profile and SC-Q4 adapters. The selected broker v0 station-UID allowlist lease
+uses no binding; cleanup/reuse obligations remain explicit. Installer/native
+qualification, Q2-B representation/production authority, independent G17 custody
+and D1 integration remain gates; macOS requires its own native qualification.

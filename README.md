@@ -30,6 +30,12 @@ of CAP_NET_ADMIN, executable-bound audit and effective-capabilities Q evidence.
 The fixed-triple filter, unit profile and version-3 Q capability evidence are
 implemented. Installed root/audit and full populated-account qualification remain pending.
 
+The [first-worker launch/stop selection](docs/design/first-run-launch-stop.md)
+maps the existing dispatcher-only launcher, account-wide stop and effect
+observation contracts to one non-federated run. It selects a broker v0 allowlist
+lease with no binding, lists the small publication deltas and keeps installer,
+production-evidence and native-qualification gates explicit.
+
 ## Principles
 
 - [A3 package-update requalification](spec/upgrade-requalification.md) specifies the sole signed-apt-chain automatic re-pin exception. Its evidence recorder, chain verifier and state reconciler are implemented for review; time/deployment integration, automatic pinning, containment/notification and root qualification remain pending; station admission stays closed until that slice is landed and qualified. It does not implement A1p's separate administrator command.
