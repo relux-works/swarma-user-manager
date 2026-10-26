@@ -10,8 +10,9 @@ One run qualifies one host against one exact versioned platform tuple/profile,
 collecting evidence into a report acceptable to the protocol. Class equality
 permits test selection reuse, never another host's results. A report grants no
 admission, activation, account creation, launcher access or cleanup authority.
-Root changes are limited to the owner-approved inventory and declared steps;
-verification ends with admission closed. Public signing/submission is a later,
+Root changes are limited to the owner-approved inventory and declared steps,
+subject to the common privileged-entry gate below; verification ends with
+admission closed. Public signing/submission is a later,
 separately gated part of the protocol, not implied by a local passing report.
 
 Kit maintainers own orchestration, report encoding and evidence binding.
@@ -33,6 +34,18 @@ An outer shell's successful diagnostic print cannot mean a failed child passed.
 
 Use **survey → generate/review → stage → apply → verify → stop**, following
 the [protocol phase boundaries](../../spec/host-qualification-protocol.md#3-phases-and-handoffs).
+
+Before each privileged entry, require the same gate: every root operation is an
+announced owner step in an announced mini-incident window, bound to the exact
+host, platform tuple, reviewed effects inventory and window. This covers A4-3
+root staging, A4-4 installation/audit/native fixtures and any privileged evidence
+collection discovered during survey. Record `needs root` and wait for this gate;
+discovery does not authorize privileged collection.
+Missing or changed announcement or approval, an expired window or loss of the
+approved exception stops privileged work fail-closed, with admission closed.
+A prior report or acceptance of an earlier slice cannot replace this gate.
+Recovery requires a separate owner decision.
+
 Authenticate the bootstrap before execution and a protected root-owned archive
 copy before extraction. Execute only protected root-stage code/data, never an
 agent-writable source. Refuse stage collisions and unsafe ancestry/links; no
@@ -85,7 +98,7 @@ evidence digest. These report outcomes are separate from guarantee statuses:
 
 | Outcome | Meaning and limit |
 |---|---|
-| `pass` | The check ran and met its exact expected assertion within the recorded scope. An expected-red negative case needs its intended refusal and unchanged-state assertions; neither exit zero nor any nonzero alone proves it. |
+| `pass` | The check ran and met its exact expected assertion within the recorded scope. An expected-red negative case needs its intended refusal, required invariants and the declared partial-effect state; neither exit zero nor any nonzero alone proves it. |
 | `refuse` | An attempted check or validation rejected the required contract. Retain the reason and partial effects; never relabel a refusal as success. |
 | `not run` | No valid execution completed: omitted, interrupted, blocked prerequisite or unsupported selection. Retain the cause and affected obligations, not a fabricated exit. |
 | `needs root` | A declared privileged observation remains unexecuted; permission denial is not absence. A root check that actually fails is `refuse`, not deferred success. |
@@ -102,13 +115,15 @@ unchanged until independent verification, trust and publication gates pass.
 These are future work units, not implementation or evidence delivered here.
 Each gets narrow executable positive/negative checks and a bounded control that
 demonstrates its gate detects the claimed violation, before acceptance.
+Slice acceptance supplies no root authority; every privileged step also needs
+the common privileged-entry gate above.
 
 | Slice | Reviewable result | Negative obligations / nearby valid control |
 |---|---|---|
 | A4-1: report/catalogue contract | Closed report schema, finite bounds, version compatibility and C1–C7 fixtures, agreed with platform-test maintainers | Refuse unknown versions, missing/duplicate guarantees, wrong tuple/dependencies and false proof; accept the matching complete inert fixture without probing a host. |
 | A4-2: survey and review bundle | Read-only survey plus reproducible payload/reference delta, immutable pins and bounded owner-line rendering | Refuse guessed protected facts, incomplete added/changed/removed inventories, drift and oversized lines; an unchanged approved fixture yields the exact bundle, without host writes. |
-| A4-3: protected stage | Authenticated root copy/extraction and executable-source protection, with phase/real-exit accounting | Tampered archives, unsafe entries/ancestry, collisions or writable execution sources stop before product changes; valid protected staging succeeds. Inject child failure to catch a misleading outer exit zero. |
-| A4-4: Linux user-manager adapter | Declared installation/upgrade, explicit audit step, initial → pin → boot → verify and separate recovery procedure | Refuse old Q, retained CAP_NET_ADMIN, stale/failed issuer, incomplete inventory/audit, drift and interrupted writes; fresh native bound evidence is the valid control. Preserve state/fences and original refusal, without automatic rollback. |
+| A4-3: protected stage | Common privileged-entry gate before authenticated root copy/extraction and executable-source protection, with phase/real-exit accounting | Missing gate authority, tampered archives, unsafe entries/ancestry, collisions or writable execution sources stop before product changes; valid protected staging in the approved announced window succeeds. Inject child failure to catch a misleading outer exit zero. |
+| A4-4: Linux user-manager adapter | Common privileged-entry gate for installation/upgrade, explicit audit step and native fixtures; initial → pin → boot → verify and separate recovery procedure | Missing gate authority, old Q, retained CAP_NET_ADMIN, stale/failed issuer, incomplete inventory/audit, drift and interrupted writes refuse; fresh native bound evidence within its approved announced step/window is the valid control. Preserve state/fences and original refusal, without automatic rollback. |
 | A4-5: offline evaluation and report assembly | Deterministic per-check outcomes, complete guarantee map and sanitized evidence bundle | Refuse missing/replaced evidence, skipped-root promotion, cross-host/boot aggregation and hidden weaker scope; matching complete scoped evidence evaluates reproducibly without host access. |
 | A4-6: attestation/export handoff | Separate signer/verifier and consented submission bundle, only after protocol publication decisions are confirmed | Refuse foreign subject, replay, revoked/stale authority, tampered claims and private-data export; independently verified fresh consented data is the control. No automatic matrix write or admission. |
 
@@ -133,8 +148,9 @@ are required for that profile? Which exact macOS profile/collector obligations
 must remain pending? These answers select coverage, not kit-maintainer guesses.
 
 For the owner: select the first exact host/profile and accepted reference,
-approved installation/test effects, quiet-window/exclusion procedure and separate
-recovery authority. Confirm trust/enrollment, signer custody, freshness/revocation
+approved installation/test effects, announced owner steps and mini-incident
+window, with the common privileged-entry gate, exclusion and separate recovery
+decision. Confirm trust/enrollment, signer custody, freshness/revocation
 and disclosure/retention choices through the existing
 [publication decision register](../../UNRESOLVED_QUESTIONS.md#self-service-host-qualification-publication-gates).
 Its Q1–Q8 curator selections remain subject to owner confirmation; this plan
