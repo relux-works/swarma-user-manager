@@ -23,6 +23,10 @@ is an empty format proposal with no qualified rows. Signing/enrollment, catalog,
 expiry/revocation and publication policy remain explicit activation gates; this
 documentation supplies no generic installer or submission command.
 
+Hosts holding a v1/v2 local qualification record need explicit owner
+requalification through the [reviewed installer and pin procedure](docs/linux-backend.md#owner-qualification-procedure)
+to issue `station-qualification/3`; a unit restart does not convert old records.
+
 The [socket inventory sandbox design](docs/design/socket-inventory-sandbox.md)
 traces the former AF_UNIX-only qualification conflict and its hardened fix. It
 compares a protocol exception, an isolated helper and proc scans. D1 is decided by owner decision: the exact diagnostic exception, removal
@@ -369,6 +373,7 @@ identity helper is changed by this specification.
 | Tool | Purpose / exact entry point | Output |
 |---|---|---|
 | Git / Python 3 (specification review) | `git diff --check`; `git verify-commit <sha>`; `python3 <task-local-checker.py>` as described in the [A3e documentation checks](spec/requalification-executor-contracts.md#9-documentation-validation-and-tools) | Whitespace/signature and local link/contract-fixture logs in task-local untracked scratch; document controls prove no runtime qualification |
+| util-linux `setpriv` / `env` (owner qualification) | `/usr/bin/setpriv --bounding-set=-net_admin --inh-caps=-all --ambient-caps=-all -- /usr/bin/env -i /opt/swarma/libexec/swarma-user-manager qualify` inside the [reviewed owner procedure](docs/linux-backend.md#owner-qualification-procedure) | Fresh protected initial Q and inputs digest; owner root execution required; documentation checks do not run it |
 | Pinned registrar CCJ-1 / coreutils | Validate example bytes with `ccj.Parse` / `ccj.Marshal` from the `go.mod` pin; `sha256sum vectors/qual-maint/*.jsonl`; `wc -c vectors/qual-maint/*.jsonl` | Canonical-byte verdict, SHA-256 and byte counts including LF; expected identities in the vector README; framing only; semantic journal/host qualification is separate |
 | Go (serialized on shared hosts) | `env GOMAXPROCS=2 go test -p 1 ./internal/updateproof ./cmd/swarma-user-manager -count=1` | Narrow verdicts and owned fixtures; task-local untracked logs |
 | Go journal layer | `env GOMAXPROCS=2 go test -p 1 ./internal/qualmaint -count=1 -timeout=60s`; `env GOMAXPROCS=2 go build -p 1 ./internal/qualmaint` | Local codec/replay/store verdicts and Go-owned temporary fault fixtures; task-local untracked logs/coverage; no root qualification |

@@ -552,8 +552,9 @@ registrar CCJ-1 implementation, no trailing LF and no second canonicalizer:
 I = {format:"station-qualification-inputs/1",policy_digest,binary_digest,
      backend_digest,skeleton_digest,nss_configuration:{passwd,group,shadow},
      nss_modules,station_range:{uid_min,uid_max,gid_min,gid_max}}
-Q = {format:"station-qualification/2",inputs:I,inputs_digest,station_names,
-     checks,boot_id,issued_at_unix_ms,issuer:{mode,invocation_id}}
+Q = {format:"station-qualification/3",inputs:I,inputs_digest,station_names,
+     checks,boot_id,issued_at_unix_ms,effective_capabilities,
+     issuer:{mode,invocation_id}}
 nss_modules entry = {name,implementation_digest,configuration_digest,
                      uid_ranges,gid_ranges}
 uid_ranges / gid_ranges entry = {min,max}
@@ -566,14 +567,19 @@ each check = {result,reason}
 All objects are closed. Reject unknown/duplicate members, omitted fields,
 noncanonical bytes, unknown format, invalid types, overflow and exceeded finite
 bounds from the reviewed policy. Digests are lowercase 64-hex SHA-256 strings.
-The previous `station-qualification/1` record is not accepted under this
-input-pin contract; no silent reinterpretation or boot fallback is allowed.
+The legacy `station-qualification/1` and `station-qualification/2` records are
+rejected with `qualification_required`, including by boot acquisition. They are
+not converted or reinterpreted. A host holding either version needs explicit
+owner requalification through the [reviewed installer flow](../docs/linux-backend.md#owner-qualification-procedure),
+not a qualification-unit restart or a pin inferred from installed state.
 
-This amendment retains `station-qualification/2` only as a pre-deployment schema:
-there are no deployed `/2` issuers or `/2` records yet. Review must confirm that
-premise before accepting the in-place amendment. If a deployed `/2` record is
-found, allocate `/3` for this schema and explicitly reject the earlier schema;
-never silently reinterpret a record without `issuer`.
+`effective_capabilities` is the issuer's actual kernel CapEff mask as exactly
+16 lowercase hexadecimal digits, with `CAP_NET_ADMIN` (bit 12) absent. It is
+mandatory for initial and boot records, outside stable I. The issuer samples
+it before checks and before publication, requiring agreement across its bounded
+kernel task enumeration; read error, mismatch or drift refuses publication.
+The owning codec rejects missing/null/malformed evidence or `CAP_NET_ADMIN`.
+See the [implemented v3 record contract](../docs/linux-backend.md#production-qualification).
 
 `issuer` is mandatory and closed. `issuer.mode` is exactly `initial` or `boot`.
 For `initial`, `issuer.invocation_id` is the empty string. An initial record is

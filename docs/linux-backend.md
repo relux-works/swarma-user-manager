@@ -836,6 +836,27 @@ qualification, two-field pin, unit boot-mode qualification and verify passed
 unconfigured, so admission start was not exercised. This result does not prove
 reboot/failure/drift campaigns or qualification of changed inputs.
 
+For a host holding `station-qualification/1` or `station-qualification/2`,
+the v3 reader refuses the old record with `qualification_required`, including
+boot acquisition. Restarting the qualification unit does not migrate it.
+The owner must explicitly requalify through the reviewed installer flow; old
+records are not converted, relabeled or reused as capability evidence.
+
+Use the reviewed root kit's separate stage → owner audit setup → apply → verify
+steps, following the [phase boundaries](../spec/host-qualification-protocol.md#3-phases-and-handoffs).
+Review the matching binary, unit and deployment pins before apply. During the
+upgrade, preserve the existing generation journal, effects and lock identities.
+Archive old qualification evidence for diagnostics only. Install the reviewed candidate
+P0 (`qualified:false`, zero `qualification_digest`, `no_launcher:true`), then run
+fresh capability-restricted initial qualification as in step 4 below. Validate
+the complete v3 initial record and pin only `qualified:true` and
+`qualification_digest` to its fresh **inputs digest**, as in step 5; the full
+record hash is not the policy pin. Then run the boot unit and verify the latest
+current-boot invocation, matching pin, required `effective_capabilities` and all
+eleven checks before clearing maintenance. Keep admission closed and external
+writer exclusion throughout; on refusal retain recovery evidence and stop.
+Rollback is a separate owner action, never an automatic conversion or fallback.
+
 For a future reviewed run, use a trusted root shell with a clean environment
 and admission stopped throughout steps 1–6.
 Both reviewed `files` and bounded `files systemd` hosts use this flow. For a
@@ -896,10 +917,12 @@ Provider failures, unknown records, closure mismatch and missing files refuse.
    root:root 0600 canonical marker `{format:"station-maintenance/1",boot_id,
    admission_stopped:true}` at `/opt/swarma/lib/user-manager/maintenance.json`,
    using the current kernel boot UUID. Hold this operator exclusion until admission resumes.
-4. Run `/usr/bin/env -i /opt/swarma/libexec/swarma-user-manager qualify` from the
-   trusted root shell. Require exit 0 and one inputs digest; verify the protected
-   initial record and exact reviewed inputs. Each listed service root is scanned
-   live for launcher references; benign service-tree churn does not require repins.
+4. From the trusted root shell, run
+   `/usr/bin/setpriv --bounding-set=-net_admin --inh-caps=-all --ambient-caps=-all -- /usr/bin/env -i /opt/swarma/libexec/swarma-user-manager qualify`.
+   This excludes CAP_NET_ADMIN as required by the current profile. Require exit 0
+   and one inputs digest; verify the protected initial record and exact reviewed
+   inputs. Each listed service root is scanned live for launcher references;
+   benign service-tree churn does not require repins.
    Pinned binary/configuration/loader changes still require review and repinning.
    It cannot admit an account.
 5. Atomically install policy P changing only `qualified:true` and

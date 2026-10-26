@@ -10,7 +10,9 @@ Publication and local test results activate nothing.
 This specifies the journal required by [A3 §4](upgrade-requalification.md#4-requalification-and-durable-outcome).
 It records only package-update qualification attempts and their evidence. It
 neither creates generation events nor extends `gen-journal/1`, `station-effects/2`,
-`station-qualification/2`, the input/policy codecs or the A3b transaction recorder.
+`station-qualification/3`, the input/policy codecs or the A3b transaction recorder.
+The planned qualification integration consumes v3 through its owning codec,
+including the required `effective_capabilities` field.
 A3b reconciliation produces provisional evidence, not an accepted frontier.
 
 ## 1. Negative obligations before acceptance

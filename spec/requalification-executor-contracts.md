@@ -807,8 +807,10 @@ Source boundaries are [Issue and Pin](../internal/qualification/protocol.go),
 ### 7.3 Protected full Q and latest invocation
 
 Use the existing protected storage at the fixed installation's qualification
-directory and its owning `qualification` codec/limits. Validate full exact
-`station-qualification/2` bytes with the owning [Decode/Record.Validate codec](../internal/qualification/record.go), protected
+directory and its owning `qualification` codec/limits. This planned executor
+consumes full exact `station-qualification/3` bytes, including required
+`effective_capabilities`. Validate them with the owning
+[Decode/Record.Validate codec](../internal/qualification/record.go), protected
 retained descriptor identity and current policy/manifest/normalized inputs.
 Validate station-name coverage internally without copying account data into
 the maintenance store. Initial issuer is exactly `{mode:initial,invocation_id:""}`;

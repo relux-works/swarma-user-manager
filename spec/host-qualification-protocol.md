@@ -285,8 +285,10 @@ with fresh results; they cannot inherit passing evidence. Missing coverage stays
 ## 6. Signed qualification attestation
 
 This is a proposed **new public envelope**, separate from protected local
-`station-qualification/2`. Do not add signature, platform or matrix fields to
-that closed codec, its inputs, `station-effects/2` or the generation journal.
+`station-qualification/3`, including its required `effective_capabilities`.
+This planned protocol consumes that local record. Do not add signature, platform
+or matrix fields to that closed codec, its inputs, `station-effects/2` or the
+generation journal.
 The local Q and matching issuer are prerequisites, not a public certificate.
 Public guarantee claims also need the broader platform test catalog; Linux's
 local eleven checks do not establish every parity guarantee.

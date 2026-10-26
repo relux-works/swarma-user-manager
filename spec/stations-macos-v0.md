@@ -374,8 +374,9 @@ latest authenticated renewal. It grants neither OS-object ownership nor cleanup
 permission. A `qualified` boolean, plist on disk or zero exit from a manually
 run command is insufficient. No station/caller can invoke issuer authority.
 
-The existing `station-qualification/2` implementation has Linux-specific NSS,
-unit/cgroup and invocation bindings. It MUST NOT accept invented systemd data
+The existing `station-qualification/3` implementation requires
+`effective_capabilities` and has Linux-specific NSS, unit/cgroup and invocation
+bindings. It MUST NOT accept invented systemd data
 for macOS, nor may macOS invent a parallel permissive record. A jointly reviewed
 platform binding in the shared codec/protocol is REQUIRED before implementation:
 OpenDirectory configuration/providers, dyld closure, native boot identity,
