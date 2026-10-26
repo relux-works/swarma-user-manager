@@ -37,6 +37,11 @@ lease with no binding and an operator-prepared active account authorized by
 protected M0 dispatcher policy. It lists the small publication deltas and keeps
 installer, production-evidence and native-qualification gates explicit.
 
+The [M0 start-invalidation proposal](docs/design/m0-start-invalidation.md) selects
+receiver-owned fencing for policy removal versus physical start. Its protected
+control interface, native release/time mechanism and independent stop remain
+joint publication and qualification gates; M0 start stays closed.
+
 ## Principles
 
 - [A3 package-update requalification](spec/upgrade-requalification.md) specifies the sole signed-apt-chain automatic re-pin exception. Its evidence recorder, chain verifier and state reconciler are implemented for review; time/deployment integration, automatic pinning, containment/notification and root qualification remain pending; station admission stays closed until that slice is landed and qualified. It does not implement A1p's separate administrator command.

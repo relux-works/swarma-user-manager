@@ -483,3 +483,17 @@ gate only for selected PC2/bump/pre-active/replenishment; G17 only for a consumi
 PC2 or independently-current recovery/time path. Uncertain restore/floor evidence
 still refuses; installer, D1 and native gates remain, including macOS-native
 qualification. Setup caller configuration and cleanup obligations stay explicit.
+
+## M0 start invalidation versus physical release
+
+The [receiver interlock proposal](docs/design/m0-start-invalidation.md) recommends
+a durable original-execution start gate, protected close-before-publish removal
+and native release with local expiry enforcement. Existing generation/claim/
+controller fences do not supply this interlock. Publish the separate protected
+control/store and outcome contracts, all writers' exclusion and crash/restore
+handling, qualified native release/deadline mechanism and independently authorized
+narrowing stop. Preserve earliest original P7/M0/shorter completion deadlines;
+unknown or late whole-account absence retains fences, claim and cleanup debt.
+No helper/launcher request member or policy verifier is proposed. Linux and macOS
+remain closed until their native mechanisms and negative/control obligations are
+qualified; the proposal is not implementation or activation evidence.
