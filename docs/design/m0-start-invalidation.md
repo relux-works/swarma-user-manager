@@ -17,16 +17,17 @@ generation exclusion, then execs. Its writer fence does not order every policy
 revision against exec. A start receipt proves an attempt, not child execution.
 
 Recommend a **receiver-owned durable per-execution start gate**, installed through
-a protected control path and consumed once at a native stopped-child release
-barrier. Policy evaluation stays in the dispatcher. The receiver checks its own
+a protected control path and consumed once at the selected start boundary.
+Policy evaluation stays in the dispatcher. The receiver checks its own
 invalidation state and qualified validity limit, never caller policy or a grant.
-Native release with deadline enforcement is a required, currently unselected
-backend capability; a userspace clock check followed by exec is insufficient.
+Strict native release with deadline enforcement is Option B below; a userspace
+clock check followed by exec is insufficient for that guarantee. Option A offers
+a different bounded committed-start guarantee for joint M0 selection.
 
 | Option | Tradeoff and disposition |
 |---|---|
-| Receiver-owned gate plus protected control path; recommended | One owner serializes invalidation, one-start accounting and physical release. Requires a receiver control/store delta, crash reconciliation, native release/deadline enforcement and independent narrowing stop. No new public launch member. |
-| Shared protected fence store written by a privileged dispatcher adapter | Can avoid a separate control transport, but every writer must follow the same receiver exclusion, durability, retention and restore protocol. Root protection alone does not make a dispatcher file authoritative; a dispatcher-only mutex or rename cannot close the exec gap. Still needs the same native release/time capability. |
+| Receiver-owned gate plus protected control path; recommended | One owner serializes invalidation, one-start accounting and the selected start boundary. Requires a receiver control/store delta, crash reconciliation, qualified release/deadline behavior and independent narrowing stop. No new public launch member. |
+| Shared protected fence store written by a privileged dispatcher adapter | Can avoid a separate control transport, but every writer must follow the same receiver exclusion, durability, retention and restore protocol. Root protection alone does not make a dispatcher file authoritative; a dispatcher-only mutex or rename cannot close the exec gap. Still needs the selected release/time qualification. |
 | Retirement or controller-epoch change as revocation | Not selected: stop may preserve an active generation and current dispatcher. It changes unrelated semantics and still supplies no expiry check at physical start. |
 
 Neither of the first two options is proven deployable on a native tuple yet.
@@ -61,7 +62,8 @@ verifier enters the launcher.
 Policy removal uses **close before publish**: dispatcher durably records removal
 intent and closes its own admission, releases its lock, then requests receiver
 invalidation. Receiver durably closes the affected gate under the same local
-exclusion used for S and records its original stop obligation before acknowledging.
+exclusion used for the selected boundary (C under A, S under B) and records its
+original stop obligation before acknowledging.
 Only then may the protected installer publish/acknowledge completed policy
 removal. Define Rv as that durable receiver invalidation boundary, not the later
 reply or a local file unlink. All removal/replacement paths must participate.
@@ -79,14 +81,51 @@ Independent receiver stop authority/progress for this exact original generation
 must also be explicitly installed and qualified; existing ordinary dispatcher
 stop authority does not silently confer it on a new receiver component.
 
-## S: receipt, drop, exec and first child instruction
+## Joint choice: committed-start A or strict native-release B
 
-S is the **kernel-committed release of the already prepared execution to its
-first executor-image instruction**, not receipt persistence, permit creation,
-UID/GID drop or an earlier userspace decision to call exec. Loading the verified
-image while it remains non-runnable is preparation. Dynamic-loader, constructor,
-interpreter and executor instructions all count as child code for this boundary.
-No target-image instruction may run before S.
+**Option A — recommended for M0, subject to joint choice.** After the root
+receipt and verified UID/GID drop, a final receiver-owned committed-start
+authorization C is serialized with Rv by the protected execution gate. Recheck
+current validity and persist durable one-start accounting at C. Rv or expiry
+before C refuses. C before Rv/expiry makes the original execution, including its
+still-preparatory child and **every resumer**, an in-flight stop obligation.
+Qualify a bounded C-to-exec-or-abort interval and the maximum residual interval
+during which worker code may run after expiry. Independent stop must cover that
+residual interval during dispatcher failure and finish within the earliest
+original P7 / M0 / shorter qualified deadline. No later resume after confirmed
+absence, deadline reset, new child/effect or restored debit is permitted.
+
+This explicitly permits worker code to run for at most the qualified residual
+interval after expiry, with stop completed within the original deadline; it is
+**not equivalent to strict native S**. A timer setting alone proves neither bound.
+Missing interval, independent-stop or time qualification keeps M0 closed.
+
+**Option B — strict native release.** No native release S at or after expiry,
+or after Rv wins its shared exclusion. Counterexample to treating A as B:
+C precedes expiry E, but scheduler/storage delay puts S after E; target code can
+act before a stop that still meets P7. For removal, releasing exclusion after C
+allows C → Rv → S. Holding exclusion through S orders removal but does not stop
+time advancing; P7 cannot undo an intervening effect. B therefore retains the
+native release/deadline composition gate. Linux ptrace exec-stop and EXITKILL
+are possible barrier/failure-policy building blocks, not proof of this composition
+or of durable one-start accounting and expiry-safe resume.
+
+S means the **committed handoff that makes the prepared child runnable**, not a
+CPU-time promise about when its first instruction executes. A separates C from S;
+B enforces validity at S. This remains a **joint choice with the dispatcher;
+owner decision if it changes the product guarantee**. Neither option is selected
+or qualified by this note. Common authority, original-effect, lock, stop/absence
+and deadline rules remain; the native-S procedure, platform atomic-release gates
+and strict S race/`ExpiryAtNativeS` obligations below describe B. Under A, compare
+Rv with C instead; a committed delayed S remains in scope for stop. A needs controls
+for C-before-expiry/delayed-S with bounded stop, Rv-before-C refusal, and blocked
+late resumers after confirmed absence, including dispatcher-failure crash cuts.
+
+## Option B detail: receipt, drop, exec and native S
+
+Loading the verified image while it remains non-runnable is preparation.
+Dynamic-loader, constructor, interpreter and executor instructions all count as
+child code. No target-image instruction may run before the committed handoff S.
 
 1. Persist the immutable original launch intent and reserve the one-start debit
    before any side effect. Prepare external evidence, containment, verified
@@ -132,7 +171,8 @@ start-gate lock` where those domains are needed; the start-gate lock is terminal
 Never acquire an earlier domain while holding it. Invalidation may close the
 local gate alone, then release it before later generation/stop work. Generation
 writers and stop/emergency paths must close the affected gate before a conflicting
-transition, using the same rank, so final generation validity lasts through S.
+transition, using the same rank, so final generation validity lasts through the
+selected boundary (C under A, S under B).
 All participants, including recovery and native release, must honor the gate;
 an advisory mutex with an unfenced child or second resumer is insufficient.
 
@@ -179,9 +219,12 @@ and confirmed stop within 270 seconds of detection, with total at most 300
 seconds from removal/original expiry. Keep each component bound as well as the
 earliest applicable absolute completion deadline and any shorter qualified bound.
 Do not rename the M0 envelope as the existing P7 clock or reset an old P7 event.
+For removal at t=0 and detection at t=20, P7 gives t=320, M0's post-detection
+stop bound t=290 and total bound t=300: **t=290 is the earliest ceiling** (or an
+earlier outstanding P7/shorter deadline). The <=30-second detection bound also holds.
 
-Receiver start validity is checked at S; the later stop-completion budget is
-**not** permission to start after expiry. Scheduling, invalidation propagation,
+Under B, receiver start validity is checked at S; the later stop-completion
+budget is **not** permission to start after expiry. Scheduling, invalidation propagation,
 recovery, grace, late-launch reconciliation and the full quiet period must fit
 the original applicable completion limits. Retry/restart never resets them.
 Unknown or late absence retains all fences/obligations and reports uncertainty
