@@ -110,18 +110,32 @@ evidence under current fences; it cannot authorize another physical start.
 Helper §2/Appendix A and station-v0 §2 own their respective envelopes/codes;
 station-only draft codes are not silently standardized for later APIs.
 
-### Original P7 deadline
+### Original M0 envelope and outstanding P7 deadlines
 
-On policy expiry/revocation, close new launches immediately and retain the
-[original P7 event and absolute deadline](../../spec/requalification-executor-contracts.md#63-original-p7-event-and-response):
-completion is due within **300 seconds of original detection, or the shorter
-selected-profile bound**. Fresh authorized owned-run stop and observation stay
-available. Admission/recovery wait, grace and quiet-period verification all fit
-inside that same deadline; retry/restart never resets it. Unknown clock
-continuity or unknown/late whole-account absence retains fences, claim and
-cleanup obligations and reports missed compliance; a held fence is not a
+Planned launch-policy removal or expiry is not a security revocation or an
+EIC-10-05 P7 trigger. Close new launches at once; stop already-started work within
+the [original M0 envelope](m0-start-invalidation.md#clocks-and-completion), at most
+**300 seconds from the original removal/expiry event**, retaining its component
+bounds. Credential material continues per the broker's own protected policy until
+the worker stops; lease and delivered-token debts remain separate.
+
+Where a real P7 event is already outstanding, preserve its
+[original detection event and absolute deadline](../../spec/requalification-executor-contracts.md#63-original-p7-event-and-response):
+at most **300 seconds from original detection, or the shorter selected-profile
+bound**. Use the earliest of that deadline and the original M0 envelope, including
+any shorter qualified bound. Fresh authorized owned-run stop and observation
+stay available. Admission/recovery wait, grace and quiet-period verification all
+fit inside the applicable original deadline; retry/restart never resets it.
+Unknown clock continuity or unknown/late whole-account absence retains fences,
+claim and cleanup obligations and reports missed compliance; a held fence is not a
 completed response. Deadline/clock and native completion qualification remain
 required; no helper wire field is added.
+
+Real EIC-10-05 security revocation of the tuple remains a **closed gate for M0**;
+the canary claims no EIC-10-05 conformance. On a real security event the operator
+stops the worker and replaces the broker policy. Issuance between detection and
+the Replace commit is a named window, not a fence. An automatic event-to-fence
+join is post-M0 broker work.
 
 ## Production evidence and SC-Q4 ordering
 
@@ -213,7 +227,7 @@ Each uses the real selected path and asserts retained post-failure evidence.
 | Generation/claim/epoch | Stale generation, cancelled claim, old daemon writer or late completion never signals a reused identity or creates a replacement | Current claim/epoch with clean UID and latest receipt; terminal old-stop replay does not signal the successor |
 | FD3/profile/drop | Mutable/partial plan, wrong profile/body/executable digest, inherited privileged handle or failed drop prevents executor entry; persisted receipt remains reconcilable | Maximum admitted immutable plan, exact pins, verified drop and only 0–2/FD3 reach the approved executor |
 | Stop/absence | Escaped child, hidden/unreadable process, stale receipt, UID reuse or partial scan yields no completed absence receipt; claim stays held | Known latest execution with setsid/double-fork children reaches verified zero UID processes through the qualified quiet period |
-| P7DeadlineRetryOriginal | A retry/restart that resets the original deadline, or unknown/late absence, cannot claim compliance; retain fences/claim/cleanup and report the miss | Fresh authorized owned-run stop confirms whole-account absence including admission/recovery wait, grace and quiet verification within the original <=300 s/shorter-profile deadline |
+| M0DeadlineRetryOriginal | Planned policy removal/expiry cannot create a P7 trigger. Retry/restart cannot reset the original M0 envelope or an already-outstanding real P7 deadline; unknown/late absence retains fences/claim/cleanup and reports the miss | Fresh authorized owned-run stop confirms whole-account absence including admission/recovery wait, grace and quiet verification within the original M0 <=300 s/shorter-profile envelope and any earlier outstanding original P7 deadline |
 | Observe/retry | Other principal, changed args, missing/expired/restored/conflicting evidence cannot become `not_recorded`, renewed authority or duplicate start | Original principal reads the same effect after launch-policy expiry; complete authoritative no-intent coverage alone permits `not_recorded` |
 | SC-Q4 / broker cleanup | Stale snapshot version, wrong peer/generation/subset or original deadline expiry suppresses release. Revocation/emergency stop or a separate stop fence, even with active generation, blocks affected dispatch releases; 250 ms cannot renew authority. Unconfirmed lease cleanup cannot discharge reuse obligations | Current peer/generation/versions and permitted operation through durable audit/result/actual release inside original and journal bounds; authorized owned-run cancel remains available under its intact narrowing prerequisites; confirmed lease cleanup retains delivered-token limits |
 | ConditionalPC2Applicability | Selected PC2/bump/pre-active/replenishment without Q2-B authority, or selected consuming PC2/independently-current recovery/time without G17, stays closed; unrelated ordinary M0 must not acquire those prerequisites | Ordinary pre-created M0 account with no such consumer meets actual M0 gates without Q2-B/G17; selected consumers additionally provide their qualified authority |

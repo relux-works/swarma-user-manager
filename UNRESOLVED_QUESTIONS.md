@@ -475,10 +475,18 @@ registration → UID allowlist and exact UID/generation launch policy installati
 dispatch starts only that existing generation. Signature authenticates; separate
 dispatcher-published/operator-installed protected policy authorizes. No helper
 grant fields, broker binding, automatic generation join or UID reuse is selected.
-Policy expiry/revocation closes launches immediately; fresh authorized owned-run
-stop/observe remain available within the original P7 <=300 s/shorter-profile
-deadline, never reset by retry/restart. SC-Q4 rechecks exact versions, stop and
-revocation state and original deadline through actual release. Q2-B/PC2 is a
+Planned policy removal/expiry closes launches at once; started runs stop within
+the original M0 <=300 s/shorter-profile envelope from that removal/expiry event,
+and any earlier already-outstanding original P7 deadline. This is not an
+EIC-10-05 security revocation or P7 trigger. Fresh authorized owned-run stop/observe
+remain available; retry/restart resets neither deadline. Real tuple security
+revocation remains closed for M0, with no EIC-10-05 conformance claim: the operator
+stops the worker and replaces the broker policy; issuance between detection and
+the Replace commit is a named window, not a fence. Automatic event-to-fence joining
+is post-M0 broker work. Planned removal/expiry leaves credential material under
+the broker's protected policy until worker stop; lease and token debts are separate.
+SC-Q4 rechecks exact versions, stop and revocation state and original deadline
+through actual release. Q2-B/PC2 is a
 gate only for selected PC2/bump/pre-active/replenishment; G17 only for a consuming
 PC2 or independently-current recovery/time path. Uncertain restore/floor evidence
 still refuses; installer, D1 and native gates remain, including macOS-native
@@ -492,8 +500,9 @@ and native release with local expiry enforcement. Existing generation/claim/
 controller fences do not supply this interlock. Publish the separate protected
 control/store and outcome contracts, all writers' exclusion and crash/restore
 handling, qualified native release/deadline mechanism and independently authorized
-narrowing stop. Preserve earliest original P7/M0/shorter completion deadlines;
-unknown or late whole-account absence retains fences, claim and cleanup debt.
+narrowing stop. Preserve the original M0 envelope and any earlier already-outstanding
+original P7/shorter qualified deadline; planned removal/expiry creates no P7 trigger.
+Unknown or late whole-account absence retains fences, claim and cleanup debt.
 No helper/launcher request member or policy verifier is proposed. Linux and macOS
 remain closed until their native mechanisms and negative/control obligations are
 qualified; the proposal is not implementation or activation evidence.

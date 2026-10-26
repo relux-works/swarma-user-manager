@@ -85,11 +85,12 @@ stop authority does not silently confer it on a new receiver component.
 ## Selected M0 committed-start A; full-acceptance direction B
 
 **Option A — selected for M0 by the content curator; owner may override.** This
-retains M0's accepted guarantee: policy revocation/expiry closes new starts
-immediately, and already-started runs are stopped within the original P7 bound
-of at most 300 seconds and any earlier applicable M0/qualified deadline. A start
-committed before Rv or expiry is already started for this purpose, with its stop
-obligation. M0 has no guarantee that all worker instructions cease at expiry.
+retains M0's accepted guarantee: planned policy removal/expiry closes new starts
+at once; started runs stop within the original M0 envelope of at most 300 seconds
+from the original removal/expiry event and any earlier outstanding P7 deadline
+or shorter qualified bound. A start committed before Rv or expiry is already
+started for this purpose, with its stop obligation. M0 has no guarantee that all
+worker instructions cease at expiry.
 
 After the root receipt and verified UID/GID drop, a final receiver-owned
 committed-start authorization C is serialized with Rv by the protected execution gate. Recheck
@@ -98,8 +99,8 @@ before C refuses. C before Rv/expiry makes the original execution, including its
 still-preparatory child and **every resumer**, an in-flight stop obligation.
 Qualify a bounded C-to-exec-or-abort interval and the maximum residual interval
 during which worker code may run after expiry. Independent stop must cover that
-residual interval during dispatcher failure and finish within the earliest
-original P7 / M0 / shorter qualified deadline. The qualified residual interval
+residual interval during dispatcher failure and finish within the original M0
+envelope and any earlier outstanding P7/shorter qualified deadline. The qualified residual interval
 fits inside that same original stop deadline; it creates no separate new deadline.
 No later resume after confirmed absence, deadline reset, new child/effect or
 restored debit is permitted.
@@ -118,10 +119,11 @@ Missing interval, independent-stop or time qualification keeps M0 closed.
 not a prerequisite for M0 under selected A. No native release S at or after expiry,
 or after Rv wins its shared exclusion. Counterexample to treating A as B:
 C precedes expiry E, but scheduler/storage delay puts S after E; target code can
-act before a stop that still meets P7. For removal, releasing exclusion after C
-allows C → Rv → S. Holding exclusion through S orders removal but does not stop
-time advancing; P7 cannot undo an intervening effect. B therefore retains the
-native release/deadline composition gate. Linux ptrace exec-stop and EXITKILL
+act before a stop that still meets the M0 envelope. For removal, releasing
+exclusion after C allows C → Rv → S. Holding exclusion through S orders removal
+but does not stop time advancing; a later stop cannot undo an intervening effect.
+B therefore retains the native release/deadline composition gate. Linux ptrace
+exec-stop and EXITKILL
 are possible barrier/failure-policy building blocks, not proof of this composition
 or of durable one-start accounting and expiry-safe resume.
 
@@ -228,18 +230,28 @@ can advance reconciliation/stop, never reopen the start gate or release debt.
 
 ## Clocks and completion
 
-Keep separate immutable clocks: the [original P7 detection event and absolute
-deadline](../../spec/requalification-executor-contracts.md#63-original-p7-event-and-response),
-and the dispatcher's proposed M0 removal/original-expiry-to-absence envelope.
-P7 is at most 300 seconds from **original detection**, or its shorter profile
-bound; it does not start at removal. M0 proposes detection within 30 seconds
-and confirmed stop within 270 seconds of detection, with total at most 300
+Planned policy removal/expiry is not a security revocation or an EIC-10-05 P7
+trigger. Its own original event starts the proposed M0
+removal/original-expiry-to-absence envelope. Keep any already-outstanding real
+[P7 detection event and absolute deadline](../../spec/requalification-executor-contracts.md#63-original-p7-event-and-response)
+separate: at most 300 seconds from **original detection**, or its shorter profile
+bound; planned removal does not start that clock. M0 proposes detection within
+30 seconds and confirmed stop within 270 seconds of detection, with total at most 300
 seconds from removal/original expiry. Keep each component bound as well as the
 earliest applicable absolute completion deadline and any shorter qualified bound.
 Do not rename the M0 envelope as the existing P7 clock or reset an old P7 event.
-For removal at t=0 and detection at t=20, P7 gives t=320, M0's post-detection
-stop bound t=290 and total bound t=300: **t=290 is the earliest ceiling** (or an
-earlier outstanding P7/shorter deadline). The <=30-second detection bound also holds.
+For removal at t=0 and M0 detection at t=20, M0's post-detection stop bound is
+t=290 and total bound t=300: **t=290 is the earliest ceiling**. An independently
+outstanding real P7 deadline at t=320 cannot extend it; an earlier outstanding
+P7/shorter deadline wins. The <=30-second detection bound also holds.
+
+Real EIC-10-05 security revocation of the tuple remains a **closed gate for M0**.
+The canary claims no EIC-10-05 conformance: on a real security event the operator
+stops the worker and replaces the broker policy. Issuance between detection and
+the Replace commit is a named window, not a fence; the automatic event-to-fence
+join is post-M0 broker work. Planned removal/expiry leaves credential material
+under the broker's own protected policy until worker stop; lease and token debts
+are tracked separately.
 
 Under B, receiver start validity is checked at S; the later stop-completion
 budget is **not** permission to start after expiry. Scheduling, invalidation propagation,
