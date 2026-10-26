@@ -446,8 +446,8 @@ unit, admits exactly `socket(AF_NETLINK, SOCK_RAW|SOCK_CLOEXEC,
 NETLINK_SOCK_DIAG)` in the process filter, removes CAP_NET_ADMIN through
 CapabilityBoundingSet, adds the qualifier-executable-bound audit rule and records
 actual effective capabilities in Q. B and C are rejected alternatives, not
-fallbacks. The design names the exact planned executor §7.1 exception; that
-contract is unchanged here and must be updated in the implementation PR.
+fallbacks. The implementation adds the exact named executor §7.1 exception;
+all other executor contract requirements remain unchanged.
 
 - Root/owner configuration must install and verify the audit rule; the daemon
   does not. The concrete installer role and procedure remain to be named.

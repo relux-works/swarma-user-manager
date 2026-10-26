@@ -506,7 +506,7 @@ thread mismatch/read error, CAP_NET_ADMIN (bit 12), malformed evidence or drift
 withdraws the prior Q and publishes no successor. The initial/boot record and
 retained reader's full-record digest bind the field; it is not stable deployment
 input or inferred from the unit. Readers reject missing/null/malformed fields or
-CAP_NET_ADMIN. Versions 1 and 2 remain unsupported (`qualification_required`),
+CAP_NET_ADMIN. Versions 1 and 2 are unsupported by this codec (`qualification_required`),
 with no implicit conversion or downgrade; old records require explicit reviewed
 requalification, not a new policy pin inferred from installed state.
 Initial records carry an empty invocation ID and
