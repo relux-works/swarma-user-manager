@@ -1,8 +1,9 @@
 # M0 start invalidation: receiver design proposal
 
-**Status: proposed joint contract, no implementation or activation.** M0 start
-stays closed until the dispatcher and receiver select, publish and qualify the
-entire interlock, including the native release and time mechanisms below.
+**Status: A selected for M0; no implementation or activation.** M0 start
+stays closed until the dispatcher and receiver publish and qualify the selected
+interlock, including bounded handoff, time and independent stop. B remains the
+direction for full acceptance, with its separate strict native-release gates.
 This is the user-manager half of [dispatcher M0 §§3–5][m0], alongside the
 [first-run selection](first-run-launch-stop.md). M0 starts only the existing
 operator-prepared active generation; it never creates, rebinds or recreates one.
@@ -21,8 +22,8 @@ a protected control path and consumed once at the selected start boundary.
 Policy evaluation stays in the dispatcher. The receiver checks its own
 invalidation state and qualified validity limit, never caller policy or a grant.
 Strict native release with deadline enforcement is Option B below; a userspace
-clock check followed by exec is insufficient for that guarantee. Option A offers
-a different bounded committed-start guarantee for joint M0 selection.
+clock check followed by exec is insufficient for that guarantee. Option A is
+selected for M0's bounded committed-start semantics below.
 
 | Option | Tradeoff and disposition |
 |---|---|
@@ -81,26 +82,40 @@ Independent receiver stop authority/progress for this exact original generation
 must also be explicitly installed and qualified; existing ordinary dispatcher
 stop authority does not silently confer it on a new receiver component.
 
-## Joint choice: committed-start A or strict native-release B
+## Selected M0 committed-start A; full-acceptance direction B
 
-**Option A — recommended for M0, subject to joint choice.** After the root
-receipt and verified UID/GID drop, a final receiver-owned committed-start
-authorization C is serialized with Rv by the protected execution gate. Recheck
+**Option A — selected for M0 by the content curator; owner may override.** This
+retains M0's accepted guarantee: policy revocation/expiry closes new starts
+immediately, and already-started runs are stopped within the original P7 bound
+of at most 300 seconds and any earlier applicable M0/qualified deadline. A start
+committed before Rv or expiry is already started for this purpose, with its stop
+obligation. M0 has no guarantee that all worker instructions cease at expiry.
+
+After the root receipt and verified UID/GID drop, a final receiver-owned
+committed-start authorization C is serialized with Rv by the protected execution gate. Recheck
 current validity and persist durable one-start accounting at C. Rv or expiry
 before C refuses. C before Rv/expiry makes the original execution, including its
 still-preparatory child and **every resumer**, an in-flight stop obligation.
 Qualify a bounded C-to-exec-or-abort interval and the maximum residual interval
 during which worker code may run after expiry. Independent stop must cover that
 residual interval during dispatcher failure and finish within the earliest
-original P7 / M0 / shorter qualified deadline. No later resume after confirmed
-absence, deadline reset, new child/effect or restored debit is permitted.
+original P7 / M0 / shorter qualified deadline. The qualified residual interval
+fits inside that same original stop deadline; it creates no separate new deadline.
+No later resume after confirmed absence, deadline reset, new child/effect or
+restored debit is permitted.
+
+A committed start missing its qualified completion interval or original deadline
+is classified as refused, never as launch success. That classification does not
+erase an attempted/unknown effect or prove absence: retain its original evidence,
+stop obligation, claim and pending reconciliation until conclusively resolved.
 
 This explicitly permits worker code to run for at most the qualified residual
 interval after expiry, with stop completed within the original deadline; it is
 **not equivalent to strict native S**. A timer setting alone proves neither bound.
 Missing interval, independent-stop or time qualification keeps M0 closed.
 
-**Option B — strict native release.** No native release S at or after expiry,
+**Option B — strict native release, the direction for full acceptance.** It is
+not a prerequisite for M0 under selected A. No native release S at or after expiry,
 or after Rv wins its shared exclusion. Counterexample to treating A as B:
 C precedes expiry E, but scheduler/storage delay puts S after E; target code can
 act before a stop that still meets P7. For removal, releasing exclusion after C
@@ -111,12 +126,12 @@ are possible barrier/failure-policy building blocks, not proof of this compositi
 or of durable one-start accounting and expiry-safe resume.
 
 S means the **committed handoff that makes the prepared child runnable**, not a
-CPU-time promise about when its first instruction executes. A separates C from S;
-B enforces validity at S. This remains a **joint choice with the dispatcher;
-owner decision if it changes the product guarantee**. Neither option is selected
-or qualified by this note. Common authority, original-effect, lock, stop/absence
-and deadline rules remain; the native-S procedure, platform atomic-release gates
-and strict S race/`ExpiryAtNativeS` obligations below describe B. Under A, compare
+CPU-time promise about when its first instruction executes. Selected A separates
+C from S; B enforces validity at S. The M0 selection needs joint dispatcher
+integration and qualification; it does not assert deployment or native feasibility.
+Common authority, original-effect, lock, stop/absence and deadline rules remain;
+the native-S procedure, platform atomic-release gates and strict S race/
+`ExpiryAtNativeS` obligations below describe B. Under A, compare
 Rv with C instead; a committed delayed S remains in scope for stop. A needs controls
 for C-before-expiry/delayed-S with bounded stop, Rv-before-C refusal, and blocked
 late resumers after confirmed absence, including dispatcher-failure crash cuts.
@@ -176,10 +191,10 @@ selected boundary (C under A, S under B).
 All participants, including recovery and native release, must honor the gate;
 an advisory mutex with an unfenced child or second resumer is insufficient.
 
-Only bounded protected reads, final checks, durable local commit and native
-release belong in that final window. Existing journal reader windows, including
-the 250 ms cooperative bound, remain additional limits, not renewed authority
-deadlines. No exec-event wait, storage stall, child acknowledgement or control
+Only bounded protected reads, final checks and durable local commit belong in
+that final window, through C under A or native release S under B. Existing journal
+reader windows, including the 250 ms cooperative bound, remain additional limits,
+not renewed authority deadlines. No exec-event wait, storage stall, child acknowledgement or control
 RPC is made safe by holding a lock. Exact lock integration, finite budgets,
 fairness for invalidation and the complete wait graph require joint review.
 
@@ -192,6 +207,9 @@ Automatic narrowing stop during dispatcher failure needs the protected receiver
 authority above; no borrowed operator exception or new launch authority follows.
 
 ## Races, crashes and original effects
+
+The two S-versus-Rv rows describe B. For selected A, compare Rv with C;
+a C-winning execution, including delayed S and all resumers, remains stop work.
 
 | Cut/order | Required disposition |
 |---|---|
@@ -233,8 +251,8 @@ confidence to recover.
 
 The **R-TIME / dispatcher §3.4 time-confidence evidence adapter** is a publication
 and qualification gate: select its source, boot/monotonic identity, durable
-watermark and continuity/floor evidence, plus enforcement at native S and
-independent stop progress. No time-service implementation or helper clock member
+watermark and continuity/floor evidence, plus enforcement at C under A or S under B
+and independent stop progress. No time-service implementation or helper clock member
 is selected here. Incomparable clocks, reboot gaps or unknown source currentness
 close starts; wall time or a newly installed policy cannot extend original limits.
 
@@ -242,11 +260,11 @@ close starts; wall time or a newly installed policy cannot extend original limit
 
 | Owner/surface | Proposed delta or retained gate |
 |---|---|
-| User-manager helper §§4.6, 4.7, 7, 8.3, 12, 14 | New protected receiver gate/control store, generation/stop/recovery participation, receipt-to-native-S ordering, retained outcomes and independently authorized narrowing stop. Amend these contracts before implementation; the unchanged helper does not supply the interlock. |
+| User-manager helper §§4.6, 4.7, 7, 8.3, 12, 14 | New protected receiver gate/control store, generation/stop/recovery participation, receipt-to-selected-start-boundary ordering, retained outcomes and independently authorized narrowing stop. Amend these contracts before implementation; the unchanged helper does not supply the interlock. |
 | Public helper/launcher members | **None proposed** in `helper-op/1` or `launch-op/1`; preserve the closed shapes and FD3-only handoff. A separate protected control interface/store needs versioned schema/authentication publication. Publish the proposed named outcome in the selected result/error contract (including Appendix A if encoded as a helper error), without inventing observation states. |
 | Dispatcher and protected installer | Own policy evaluation, exact association/setup, projection installation, original intent/debit, close-before-publish Rv, deadlines and late-result/stop reconciliation. No dispatcher state lock crosses receiver I/O. Installation failure cannot leave usable stale receiver authority. |
-| Linux | Native non-runnable exec barrier, atomic deadline/fence release, crash evidence, containment and independent stop are **unselected/unqualified**. Existing systemd units, ptrace stops, seccomp, lock files or timers alone are not proof. Preserve all FD3, profile, D1, installer, root/native and restore gates. |
-| macOS | Same invariant and deadline obligations; native barrier/release/time source, protected store exclusion and account-wide stop/quiet-period qualification remain **open**. Linux journal-lock qualification is not portable evidence; no automatic enablement or weakened S. |
+| Linux | A requires qualified bounded commit-to-exec-or-abort/residual intervals, crash evidence, containment and independent stop within original deadlines. B additionally requires the native non-runnable exec barrier and atomic deadline/fence release. These mechanisms are **unqualified**. Existing systemd units, ptrace stops, seccomp, lock files or timers alone are not proof. Preserve all FD3, profile, D1, installer, root/native and restore gates. |
+| macOS | The same selected-A bounds, evidence and stop/quiet-period obligations remain **open**; B's additional native-release composition remains a full-acceptance gate. Linux journal-lock qualification is not portable evidence; no automatic enablement or weaker selected guarantee. |
 
 ## Negative obligations and valid controls
 
@@ -254,6 +272,12 @@ These are **NOT RUN** acceptance obligations for the eventual integration, not
 runtime tests, executable fixtures or qualification evidence from this note.
 Each needs instrumentation that detects the forbidden physical release, not just
 a parser rejection, unrelated setup failure or absence of a reply.
+
+For M0, apply RvBeforeS at C; ExpiryAtNativeS and strict native-S portions of
+LockAndNativeBoundary are B-only. A's controls must exercise valid C followed by
+delayed S within the qualified residual/original stop bound, refusal on missed
+start completion, and refusal of new C after expiry/Rv, including dispatcher
+failure and late resumers. A launch refusal never substitutes for confirmed absence.
 
 | Named obligation | Forbidden case | Nearby valid control |
 |---|---|---|
@@ -266,7 +290,8 @@ a parser rejection, unrelated setup failure or absence of a reply.
 | LockAndNativeBoundary | Instrumented delayed RPC/inventory/exec-event wait must not occur under short locks; no pre-S loader instruction, inherited gate handle or alternative resumer. | Prepared local evidence plus bounded final commit respects the published rank/window and actual release boundary. |
 
 Before activation: jointly publish control/store/outcome schemas, removal and
-expiry semantics, native S/deadline primitive, all writers' exclusion, retention
+expiry semantics, A's bounded handoff/residual/stop mechanisms (B additionally
+needs its strict native S/deadline composition), all writers' exclusion, retention
 and rollback protection, clock continuity, independent stop authority/progress,
 and negative/control results for the exact native tuple. No catalog-ID surface
 table or executable landing-property suite accompanied this design brief;
