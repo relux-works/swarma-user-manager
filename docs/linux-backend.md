@@ -957,14 +957,23 @@ for root qualification, publication, or latest successful boot-unit evidence.
 
 ### D1 audit and qualification limits
 
+Ubuntu qualification requires the [Linux Audit dependencies](../README.md#linux-station-tools)
+to be provisioned and verified by the operator before qualification.
+
 The [deployed audit rule](../deploy/audit/swarma-qualify-sock-diag.rules) is
 root/owner configuration, never installed or changed by the daemon. The concrete
 installer and approved loading/verification procedure remain deployment gates;
 see the [decided design](design/socket-inventory-sandbox.md#capability-bound-audit-rule-and-q-evidence).
+The operator must rebind the executable-bound rule when an approved upgrade
+replaces the executable.
 The rule selects the exact native b64 socket triple and fixed executable path;
 it records attempts/results, not payloads or completeness authority. Qualification
-must verify actual CapEff, loaded audit rule/event and complete inventory over
-nonempty receipted reserved accounts in both initial and boot flows.
+must verify the exact installed and loaded rule, enabled auditing and a live
+audit daemon, with fresh matching successful socket events for both the initial
+and boot qualifier processes and no intervening audit loss or boot drift. Actual
+CapEff must exclude `CAP_NET_ADMIN`, and complete inventory must cover nonempty
+receipted reserved accounts in both flows. Package installation, an empty account
+set or an unprivileged fixture alone cannot establish this qualification.
 
 An incomplete dump without CAP_NET_ADMIN stays unknown with admission closed:
 stop and ask the owner, never restore the capability or fall back to a helper or

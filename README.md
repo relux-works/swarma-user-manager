@@ -297,6 +297,13 @@ stages, descriptor observations, owned quarantine and local policy/persistence
 checks. Their trusted-input boundaries, build-bound r1 evidence and remaining provider qualification
 are documented in the package README; observations never establish provenance.
 
+Ubuntu deployments of the Linux qualification profile require the `auditd`
+package from the standard Ubuntu repository, protected `auditctl` and `ausearch`
+tools, and a working Linux Audit daemon with auditing enabled. The operator
+provisions these dependencies; the user-manager daemon does not install packages,
+start/configure the audit daemon, or load its own rules. Package installation
+alone does not qualify a host; see the [D1 audit and qualification limits](docs/linux-backend.md#d1-audit-and-qualification-limits).
+
 | Tool | Purpose | Command / entry point | Output |
 |---|---|---|---|
 | Go | Compile Linux primitives | `go build ./internal/linuxos` | Compiler verdict |
