@@ -3,13 +3,20 @@ package manager
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 // Cross-principal UID reuse releases historical quota/name reservations while replay, ownership and the ledger retain the correct generation.
+// This is a correctness fixture, not a 30-second completion test. Retained
+// history validation needs headroom under race instrumentation/shared-host load;
+// short-budget and expired-authority behavior remain covered separately.
 func TestReviewerUIDReuseReservation(t *testing.T) {
 	for _, mode := range []string{"quota", "name"} {
 		t.Run(mode, func(t *testing.T) {
 			h := setup(t)
+			h.e.Policy.Limits.OperationMS = (2 * time.Minute).Milliseconds()
+			h.e.Policy.Limits.StepMS = time.Minute.Milliseconds()
+			h.b.evidenceTTL = 2 * time.Minute
 			h.e.Policy.UIDMax = h.e.Policy.UIDMin + 1
 			h.e.Policy.GIDMax = h.e.Policy.UIDMax
 			if mode == "quota" {
