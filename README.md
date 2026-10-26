@@ -33,8 +33,9 @@ implemented. Installed root/audit and full populated-account qualification remai
 The [first-worker launch/stop selection](docs/design/first-run-launch-stop.md)
 maps the existing dispatcher-only launcher, account-wide stop and effect
 observation contracts to one non-federated run. It selects a broker v0 allowlist
-lease with no binding, lists the small publication deltas and keeps installer,
-production-evidence and native-qualification gates explicit.
+lease with no binding and an operator-prepared active account authorized by
+protected M0 dispatcher policy. It lists the small publication deltas and keeps
+installer, production-evidence and native-qualification gates explicit.
 
 ## Principles
 

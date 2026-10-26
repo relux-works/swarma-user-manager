@@ -470,7 +470,16 @@ The [first-run selection](docs/design/first-run-launch-stop.md) reuses helper
 §§4.6–4.7/7; it does not lift station v0's no-launcher fence. Before that path
 can run, publish its launcher result/exec-failure handoff, observe wire and
 retention/coverage bounds, stop absence evidence/bounds and production claim,
-profile and SC-Q4 adapters. The selected broker v0 station-UID allowlist lease
-uses no binding; cleanup/reuse obligations remain explicit. Installer/native
-qualification, Q2-B representation/production authority, independent G17 custody
-and D1 integration remain gates; macOS requires its own native qualification.
+profile and SC-Q4 adapters. M0 selects operator create → durable active → key
+registration → UID allowlist and exact UID/generation launch policy installation;
+dispatch starts only that existing generation. Signature authenticates; separate
+dispatcher-published/operator-installed protected policy authorizes. No helper
+grant fields, broker binding, automatic generation join or UID reuse is selected.
+Policy expiry/revocation closes launches immediately; fresh authorized owned-run
+stop/observe remain available within the original P7 <=300 s/shorter-profile
+deadline, never reset by retry/restart. SC-Q4 rechecks exact versions, stop and
+revocation state and original deadline through actual release. Q2-B/PC2 is a
+gate only for selected PC2/bump/pre-active/replenishment; G17 only for a consuming
+PC2 or independently-current recovery/time path. Uncertain restore/floor evidence
+still refuses; installer, D1 and native gates remain, including macOS-native
+qualification. Setup caller configuration and cleanup obligations stay explicit.
