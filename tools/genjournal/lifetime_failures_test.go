@@ -58,10 +58,14 @@ func TestAppendPreparedLifetimeSingleWrite(t *testing.T) {
 
 // Any sync or incomplete full-chain/exact-tail proof failure remains unknown,
 // even when bytes are readable. No error-prefix View proves durability.
+// Hold fixture time fixed so shared-host I/O delays cannot preempt these fault
+// assertions; TestAppendPreparedLifetimeBudget checks the original deadlines.
 func TestAppendPreparedLifetimeUnknownWrite(t *testing.T) {
 	for _, event := range []string{"after:write", "before:journal-sync", "after:journal-sync", "before:append-parent-sync", "after:append-parent-sync", "before:verify-post", "corrupt-chain", "extra-line", "valid"} {
 		t.Run(event, func(t *testing.T) {
 			f := newLifetimeFixture(t)
+			now := f.binding.ObservationExpiresMS - 2000
+			f.hooks.now = func() (int64, error) { return now, nil }
 			f.hooks.at = func(got string) error {
 				if got == event {
 					return refuse("journal_io")
