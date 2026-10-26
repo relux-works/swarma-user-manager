@@ -418,6 +418,11 @@ remain PENDING. Existing journal/effect/qualification codecs are unchanged.
 
 ## Self-service host qualification publication gates
 
+The [A4 implementation plan](docs/design/host-qualification-kit-plan.md#open-questions-and-handoff)
+records the catalogue input handoff and owner choices for the first exact
+host/profile, approved effects, exclusion and recovery. Those inputs gate the
+dependent slices; the plan supplies no kit, native proof or publication authority.
+
 The [protocol](spec/host-qualification-protocol.md#9-open-decisions-and-activation-gates)
 and empty [platform matrix](platforms/verified.md) are documentation proposals.
 They generalize the owner-run flow without changing the closed local record or

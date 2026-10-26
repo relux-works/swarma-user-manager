@@ -23,6 +23,10 @@ is an empty format proposal with no qualified rows. Signing/enrollment, catalog,
 expiry/revocation and publication policy remain explicit activation gates; this
 documentation supplies no generic installer or submission command.
 
+The [A4 kit plan](docs/design/host-qualification-kit-plan.md) separates generic
+orchestration from module collectors and offline catalogue evaluation, with
+reviewable slices and explicit catalogue inputs. It delivers no executable kit.
+
 Hosts holding a v1/v2 local qualification record need explicit owner
 requalification through the [reviewed installer and pin procedure](docs/linux-backend.md#owner-qualification-procedure)
 to issue `station-qualification/3`; a unit restart does not convert old records.
