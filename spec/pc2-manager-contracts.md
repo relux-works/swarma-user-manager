@@ -363,9 +363,17 @@ implicitly.
 
 | Role | Decided authority |
 |---|---|
-| Owner's root authority | Approves the deployment version |
-| Installer | Installs that version under the owner's root approval |
+| Owner's root authority | Approves once a policy accepting releases signed by the release key in the selected channel; manually approves any change to the key or channel |
+| Installer | Automatically installs releases accepted by that policy under the owner's root approval |
 | Daemon | Receives no root authority |
+
+The owner decision refines deployment-version approval into a one-time
+release-channel policy: accept releases signed by the approved release key in
+the approved channel. Each such release needs no separate manual approval;
+manual approval is required only when the key or channel changes. Release key
+custody and rotation procedure, channel definition and its signed metadata,
+installer verification of both signature and channel before installation, and
+rollback/downgrade refusal remain open; this decision selects no mechanisms.
 
 The root writer/coordinator roles below do not grant the daemon root authority.
 Their exact participant privileges, recovery authentication, exclusion and direct
@@ -555,7 +563,7 @@ Decisions and remaining gates are owned, not implicit permission:
 | MC-Q1 / P1 | Deployment/package and platform owners | Admit the package publication's profile, mount/namespace provenance and protected head/currentness/replacement protocol; qualify actual native-writer lock conflict. No authenticated F_pkg provider until then |
 | MC-Q2 / G5-B / P2 | Manager and key-service capacity owners | Accept complete class/object ownership, pending-slot interpretation, exact prospective inventory/metadata/native-copy bounds and once-only materialization under every crash cut. Pre-funded credit is never permission for an unspecified census |
 | MC-Q3 / G5-A / P3 | Generation-journal and manager owners | Implement and review AppendPreparedLifetime with guard entry/unwind, all-exit reverse release and unchanged outcome/budget tests. Existing AppendPrepared remains insufficient |
-| MC-Q4 / G5-C / P3 — decided role matrix | Platform, root-policy and each participant owner | Owner decision: the owner's root approves the deployment version; the installer installs under that approval; the daemon receives no root authority (§5.1). Exact participant privileges, offline coordinator authentication, service stop/start authority, writer exclusion/termination and direct read-only sync privileges/latency remain implementation/qualification gates |
+| MC-Q4 / G5-C / P3 — decided role matrix and channel policy | Platform, root-policy and each participant owner | Owner decision: the owner's root approves once a release key/channel policy; the installer automatically installs releases signed by that key in that channel under the approval; manual approval is needed only for key or channel changes; the daemon receives no root authority (§5.1). Release key custody/rotation, channel definition/signed metadata, installer signature/channel verification before install and rollback/downgrade refusal remain open. Exact participant privileges, offline coordinator authentication, service stop/start authority, writer exclusion/termination and direct read-only sync privileges/latency remain implementation/qualification gates |
 | MC-Q5 / Q2 / G2 / G5-E / P4 — decided authority roles | Deployment/bootstrap and independent restore-custody owners | Owner decision: isolated trust-node signer under one-time owner grant signs C0; G17 custodian holds the independent floor; owner-run G19 runbook handles unknown C0 outcome/recovery; G18 fences restored old writers (§6). Custodian not chosen; G17/G18/G19 mechanisms not implemented; activation stays closed. Protected commit/floor transition APIs and qualification remain gates; no genesis/floor authority is inferred locally |
 | MC-Q6 / joint PC2 — decided failure policy | Manager and key-service protocol owners | Owner decision: storage/custody loss keeps "revocation incomplete" indefinitely while immediate containment applies (§5). Observation absorption/RPC correlation and independent custody remain open; no joint implementation/qualification gate is closed |
 | MC-Q7 / G5-D | Message-authority/provider owners | Publish original cumulative/restore/time/scope/WC1 evidence and continuity/privilege interfaces. Manager neither fabricates provider evidence nor persists runtime receipt authority |
