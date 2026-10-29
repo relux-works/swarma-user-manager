@@ -87,13 +87,13 @@ Replay returns the immutable result and newly assessed current target state.
 
 | Proposed return | Evidence and required caller action |
 |---|---|
-| `ok:true` launch result | Exact receipt/drop/C plus kernel image/incarnation observation within the qualified completion bound; retain claim until later confirmed stop/absence |
+| `ok:true` launch result | Exact receipt/drop/C plus kernel image/incarnation observation within the qualified completion bound; retain claim until later qualified timely stop/absence; missed/unknown compliance retains fences, claim and cleanup obligations |
 | Pre-intent `ok:false` | Existing intake/caller/ownership/generation/profile codes; only complete authoritative observation can establish no admitted effect |
 | `privilege_drop_failed` | Existing code; receipt may already exist. Observe original effect, retain fences/claim; never infer absence |
 | `m0_start_invalidated` | **Proposed** code publishing the already named prevented outcome: Rv/expiry won before C. Dispose of preparatory child, retain evidence until absence; no seventh observation state |
 | `launch_exec_failed` | **Proposed** code: trusted bootstrap reported a bounded errno record for failed native exec, or conclusively aborted before exec; no successful exec claim. Stop/reconcile any preparatory/account processes |
 | `launch_completion_expired` | **Proposed** code: missed C-to-exec-or-abort bound/original deadline; classified refused, never success, even if an image is observed later. Unknown process outcome stays pending |
-| `qualification_required` | **Proposed here for the new launch/control contracts** when their required qualified admission evidence is missing. It is already used by the station-only contract, not listed in helper Appendix A; publishing this extension requires its explicit code-list amendment. It cannot refuse narrowing stop merely for short/unknown time or incomplete absence coverage |
+| `qualification_required` | **Proposed here for the new launch/control contracts** when their required qualified admission evidence is missing. It is already used by the station-only contract, not listed in helper Appendix A; publishing this extension requires its explicit code-list amendment. It cannot refuse valid narrowing exec.stop or invalidate merely for short/unknown time, stale control revision or incomplete absence coverage; §6 classifies routes |
 | `processes_remain` / unavailable evidence | Nonterminal admitted work; caller reconciles original effect. Error envelope alone never says terminal or not-recorded |
 
 The four proposed code extensions require result/Appendix A publication before use; no
@@ -225,9 +225,12 @@ PID/UID merely because a partial scan guessed it. Unknown identities remain
 unresolved, with original fences/claim/cleanup debt retained. Nonzero/unknown
 process outcomes return processes_remain and pending receiver state, not a
 terminal refusal. A missed deadline stays recorded as missed compliance until
-and after true evidence resolves the process debt. Later full absence can
-resolve physical stop only; it never retroactively satisfies M0/P7 timing or
-clears separate incident/security/cleanup holds.
+and after true evidence resolves the process debt. Later full absence resolves
+physical stop only; it never retroactively satisfies M0/P7 timing. **Missed or
+unknown compliance retains the source-required start/ingress fences, execution
+claim and cleanup obligations even after physical absence**; do not discharge
+these on a zero count, an absence digest, ok:true or a recorded result. Separate
+incident/security/broker holds remain governed by their existing contracts.
 
 Do not hold generation/data locks while waiting through grace or quiet; retain
 durable start/ingress fences, reacquiring and revalidating exact generation/
@@ -235,7 +238,12 @@ latest receipt/process identity before each action. Original per-invocation and
 M0/P7/profile budgets never refill; returning pending on an invocation budget
 cut does not cancel admitted independent narrowing progress.
 
-Success result stays exactly `{execution_id,stopped_at,receipt}` with receipt
+A physical-absence acknowledgement uses ok:true, state=absent and result exactly
+`{execution_id,stopped_at,receipt,compliance}`. This envelope acknowledges physical
+absence, **not ordinary successful stop-boundary completion** unless
+compliance.status=timely. Missed/unknown are distinct retained terminal physical
+outcomes with the obligations above; they cannot authorize claim discharge.
+No pre-admission refusal is returned after termination effects. Receipt remains
 exactly `{signalled,killed,remaining}`. Counts are unique process incarnations signalled in each phase, not retry
 attempt counts; remaining is exactly zero; stopped_at is canonical UTC `YYYY-MM-DDTHH:MM:SSZ`, attribution only, not
 an authority clock. Current state is `absent`. Its durable evidence link refers
@@ -243,7 +251,34 @@ to a protected absence object, proposed exactly:
 
 `{generation,execution_id,launch_receipt_digest,boot_id,scan_start_ms,
 quiet_start_ms,quiet_end_ms,enumerator_digest,scope_digest,history_digest,
-fence_revision,remaining}`.
+fence_revision,remaining,compliance}`.
+
+`compliance` is the same closed object in the stop result and its absence proof,
+and in observation evidence below, exactly
+`{status,deadline_ms,clock_boot_id,time_evidence_digest}`. status is exactly
+`timely`, `missed` or `unknown`; deadline_ms is an integer in §1 bounds or null,
+clock_boot_id a lowercase boot UUID or null, time_evidence_digest a 64-hex digest
+or null. The three nullable fields bind the earliest comparable **original**
+completion ceiling and its qualified time evidence, never stopped_at. Retain all
+original M0/P7/profile/residual ceilings, event provenance and unresolved clocks
+in protected history even when they cannot be reduced to one comparable ceiling.
+Null does not discard an original obligation or manufacture an infinite deadline.
+
+| Status | Closed classification and transition |
+|---|---|
+| timely | Complete qualifying physical absence, with authoritative quiet_end within every applicable original ceiling and qualified boot/event/detection/interval evidence for all those bounds. All three evidence fields are nonnull. No unresolved clock or timing obligation remains |
+| missed | Positive evidence establishes any original bound was missed, including a known missed detection/stop interval; this dominates unknown and is sticky through recovery, later absence and replay. Retain whatever original deadline/evidence is known; fields may be null for unresolved comparisons |
+| unknown | No established miss, but physical absence or complete qualified timing/compliance proof is missing. Incomparable clocks, unknown event/detection or unavailable original time evidence cannot produce timely |
+
+While work is pending, unknown may resolve to timely only on positive original
+within-bound evidence, or to missed on positive violation; a known miss never
+becomes timely/unknown. Physical absence can be proved with a qualified quiet
+clock even if original deadline/event mapping is unknown: publish absent with
+unknown compliance, retaining holds. If quiet measurement itself is unqualified,
+absence cannot be published. Once the terminal physical result is recorded,
+its compliance object is immutable (including unknown); later information is
+retained as linked evidence, never a rewritten successful result or automatic
+release. This conservative first slice has no new incident-resolution API.
 
 Times are same-boot CLOCK_BOOTTIME milliseconds; quiet_end−quiet_start ≥2000 ms,
 remaining=0. `scope_digest` binds the configured complete account-wide scan
@@ -255,7 +290,7 @@ visibility, unchanged boot/generation/latest receipt and no surviving resumer.
 Unknown/partial scans or quiet-period reappearance reset the unfinished quiet
 observation without resetting the original deadline; an incomplete quiet period
 never publishes absence. A later complete quiet proof is physical evidence only,
-with any missed timing/compliance retained. Nonzero survivors or unreadable identities remain pending. Kernel process identity is
+with its explicit missed/unknown compliance and all source-required holds retained. Nonzero survivors or unreadable identities remain pending. Kernel process identity is
 revalidated before signals; receipt-root exit alone proves neither UID absence
 nor authority to signal another process.
 
@@ -322,7 +357,7 @@ Proposed result is a closed object with exactly
 | recorded_result | Original closed mutation response, ≤4096 bytes, or null; never the plan or an unbounded log |
 | target | `{generation,execution_id,epoch,boot_id,process_state,absence_digest}`, or null. process_state is `present`, `absent`, `unknown` or `not_assessed`; fields other than generation/execution may be null when not authoritatively established. Historical receipt epoch never silently becomes successor epoch |
 | coverage | `{principal,from_seq,through_seq,chain_hash,restore_epoch,admission_closed}`, or null. principal is the exact §5 tagged locator; sequence/floor/restore values refer to the protected receiver effect store, not gen-journal sequence; an unrelated generation-ledger checkpoint cannot fill them |
-| evidence | Exactly `{receipt_digest,exec_digest,absence_digest,rollback_digest,conflict_digest,stop_effect}`. Digest members are 64-hex or null; stop_effect is null or the closed independent-stop locator below. Protected retained objects stay receiver-owned, not unrestricted public reads |
+| evidence | Exactly `{receipt_digest,exec_digest,absence_digest,rollback_digest,conflict_digest,stop_effect,compliance}`. Digest members are 64-hex or null; stop_effect is null or the closed independent-stop locator below. compliance is the §4 closed object or null where no stop obligation/evidence is known; null is never timely. Protected retained objects stay receiver-owned, not unrestricted public reads |
 
 `stop_effect` is exactly `{principal,stop_effect_id,operation,args,args_digest}`.
 Its principal is the derived receiver_stop locator, stop_effect_id=`stop`,
@@ -332,6 +367,16 @@ evidence once the original association exists, even before any stop intent, so
 the owner can construct an exact query. A locator proves **neither** an admitted
 stop nor absence; the selected six-state observation still decides that.
 
+For ordinary and receiver-origin stops, recorded_result contains the immutable
+stop response including compliance; evidence.compliance repeats that same object
+once an absence/result exists. Pending obligations expose the §4 classification
+(unknown or an established missed), not timely. For a launch query, evidence may
+link its receiver-origin stop and that stop's compliance; the launch result never
+acquires a stop-success meaning. Absent target plus missed/unknown/null compliance
+cannot release fences/claim/cleanup. A new observation, recovery, old-stop replay
+or another route cannot upgrade the original terminal compliance. Observation is
+read-only: it neither installs, closes, seals nor discharges anything.
+
 Envelope state equals result.observation for this read. The six result branches
 have distinct invariants:
 
@@ -340,7 +385,7 @@ have distinct invariants:
 | recorded | Nonnull recorded_result and current target; result may be terminal failure. Target unknown is permitted if current process reads fail; no liveness/absence inferred from old result |
 | pending | Durable original intent and identity/evidence linkage, recorded_result=null; target may be unknown. Continues same admitted effect, never replacement |
 | rolled_back | Nonnull authoritative rollback_digest plus retained tombstone/current target. Launch requires protected whole-account absence; stop only before any termination action. No debit refill |
-| not_recorded | recorded_result/target=null; positive complete coverage from the queried typed principal namespace genesis (from_seq=0), surviving committed through_seq/hash/restore floor, admission_closed=true for the original effect's entire admission interval; all six evidence members null. Not a missing map entry |
+| not_recorded | recorded_result/target=null; positive complete coverage from the queried typed principal namespace genesis (from_seq=0), surviving committed through_seq/hash/restore floor, admission_closed=true for the original effect's entire admission interval; all seven evidence members null. Not a missing map entry |
 | unavailable | Any missing/expired/unreadable/partial/restored-unreconciled coverage; null evidence where unknown. An old terminal result may remain retained internally; do not substitute it for a complete answer or emit not_recorded |
 | contradictory | Authenticated conflicting intent/result/receipt/generation/scan facts; preserve digests of conflict and fences, no unsafe signals or second start |
 
@@ -397,11 +442,20 @@ original effect; changing grace to 11 while reusing stop-example must conflict.
 {"v":1,"op":"effect.observe","request_id":"read-example","args":{"principal":{"kind":"caller","id":"dispatcher-example"},"effect_id":"stop-example","operation":"exec.stop","args_digest":"f3be053914cc34706e20630bcc2e9b5a41a38c7fbee552df3296544edaf53625"}}
 ```
 
-A terminal stop result example (requiring the protected absence evidence above):
+A timely terminal physical stop result example (requiring all qualified evidence above):
 
 ```json
-{"request_id":"stop-example","ok":true,"result":{"execution_id":"EX-example","stopped_at":"2026-10-01T00:00:00Z","receipt":{"signalled":2,"killed":1,"remaining":0}},"state":"absent"}
+{"request_id":"stop-example","ok":true,"result":{"execution_id":"EX-example","stopped_at":"2026-10-01T00:00:00Z","receipt":{"signalled":2,"killed":1,"remaining":0},"compliance":{"status":"timely","deadline_ms":290000,"clock_boot_id":"11111111-1111-4111-8111-111111111111","time_evidence_digest":"3333333333333333333333333333333333333333333333333333333333333333"}},"state":"absent"}
 ```
+
+For the same original D=290000, quiet ending at 293500 instead carries exactly
+`{"status":"missed","deadline_ms":290000,"clock_boot_id":"11111111-1111-4111-8111-111111111111","time_evidence_digest":"3333333333333333333333333333333333333333333333333333333333333333"}`
+in result.compliance, absence.compliance and evidence.compliance. With no qualified
+original deadline mapping and no established miss, that member instead is
+`{"status":"unknown","deadline_ms":null,"clock_boot_id":null,"time_evidence_digest":null}`.
+Both may acknowledge physical absence only after complete qualified quiet; neither
+is timely completion or permission to discharge the retained holds. These are
+syntax/classification examples, not executed receiver outcomes.
 
 An expired or unreadable result gives unavailable observation, not this stop
 receipt. A parser accepting these bytes proves no authorization or absence.
@@ -447,7 +501,7 @@ published before availability. Network transport and worker publishers refuse.
 
 Proposed `swarma-user-manager receiver-control/1` request is exactly
 `{v,op,control_id,association,expected_revision,payload}`. v=1; control_id uses
-request-ID bounds; expected_revision is a nonnegative CAS revision. association
+request-ID bounds; expected_revision is a nonnegative revision (CAS for widening, advisory for monotone invalidate). association
 is exactly `{principal,generation,execution_id,launch_effect_id,launch_epoch,
 controller_epoch,daemon_epoch,claim_digest}`. Epochs are positive; claim digest
 binds the immutable protected claim body and original intent. These are distinct
@@ -456,7 +510,7 @@ identities, not a run-ID/execution-ID equality. Payload is closed by operation:
 | op | Exact payload and receiver action |
 |---|---|
 | install | `{valid_until_ms,clock_boot_id,time_evidence_digest,pins,deadlines}`. First unspent association only; never renew a closed/consumed generation. pins exactly `{placement,admission_class,curator_profile,lock_digest,exec_profile,body_digest,executor_digest,plan_digest}`; identifiers 1–64, digests 64-hex. Compare to protected selected profile/claim, not caller-home settings |
-| invalidate | `{cause,event_ms,detected_ms,time_evidence_digest,deadlines}`. cause is removal, expiry, stop, emergency, restore or association_loss. Persist closed gate, original event and stop obligation before acknowledgement. Existing earlier event/deadline always wins |
+| invalidate | `{cause,event_ms,detected_ms,time_evidence_digest,deadlines}`. cause is removal, expiry, stop, emergency, restore or association_loss; for ALL causes event_ms and detected_ms are integers or null, time_evidence_digest is 64-hex or null. Persist closed gate, original event/unknown provenance and stop obligation before acknowledgement even without time evidence or with stale expected_revision. Existing earlier original event/deadline always wins; null never replaces a known value or extends a bound |
 | seal_effect | `{principal,effect_id,operation,args_digest}` using the §5 tagged locator. Caller locator must match association.principal; receiver_stop locator must equal its exactly derived origin. Permanently close only that exact effect's intake and drain prior registered work; receiver-origin additional closure preconditions below prevent disabling owed stop. Unfinished work is retained, never erased or called not-recorded |
 
 `deadlines` is exactly `{m0_absolute_ms,p7_absolute_ms,qualified_absolute_ms}`,
@@ -470,16 +524,69 @@ There is no helper request deadline/clock argument. New conversion/floor adapter
 acceptance remains required; this document supplies its input/output binding,
 not a made-up time service or extra custodian prerequisite for unrelated M0.
 
-Response exactly `{control_id,ok:true,result:{revision,gate,debit,coverage_digest}}`
+Response exactly
+`{control_id,ok:true,result:{revision,gate,debit,coverage_digest,compliance}}`
 or `{control_id,ok:false,error:{code,message}}`. gate is armed/closed/committed;
-debit is unspent/consumed; coverage_digest is 64-hex or null. Duplicate exact
-control ID replays its original acknowledgement plus current monotone state;
-changed association/payload gives request_id_conflict. Reject unknown/oversize/
-unauthenticated/CAS-conflicting input with request_invalid/request_too_large/
-caller_role_not_permitted/state_conflict; unavailable qualified evidence gives
-qualification_required. These mappings and this schema are proposals, not
-released codes for a new installed endpoint. A close acknowledgement is not a
-stop result. A seal acknowledgement is not automatically a no-intent proof.
+debit is unspent/consumed; coverage_digest is 64-hex or null. compliance is the §4
+object for invalidate's retained stop obligation (unknown/missed while unfinished,
+retained terminal classification if already resolved), otherwise null. gate=closed
+reports the closed admission frontier even if the separate debit is consumed;
+it never converts consumed back to unspent. A duplicate exact control ID replays
+its immutable original acknowledgement; obtain current monotone state/classification
+from protected observation, never rewrite the original ack. Changed association/
+payload under the same ID gives request_id_conflict without reopening a gate or
+cancelling previously owed closure/stop. These schemas/codes are proposals, not
+installed endpoints. A close acknowledgement proves durable Rv and debt, not
+physical absence/timely stop. A seal acknowledgement is not a no-intent proof.
+
+### Route admission classification (all entry and recovery paths)
+
+| Route | Required predicates and failure effects |
+|---|---|
+| Widening install, launch.start/C; any future renewal | Qualified current time/boot/confidence, exact current association/profile/authority/target and applicable CAS revision all remain required. Missing time gives qualification_required; stale CAS gives state_conflict. No C/exec or newly armed gate on failure; no renewal of a closed/consumed generation is introduced |
+| invalidate, every cause | Valid authenticated current publisher capability and exact protected immutable generation/execution/association are required. Unknown/unavailable/expired/incomparable time or expected_revision mismatch **cannot** cause request_invalid, qualification_required or state_conflict solely for those facts. Under the same terminal gate as C, monotonically persist Rv plus original debt, with no CAS precondition. Already closed remains closed idempotently; no debounce/wait for time, no debit refill |
+| exec.stop and independent receiver-origin stop | Existing exact authority/generation/latest receipt/safe process identity remain required; short/late/unknown time never prevents safe signalling. Control CAS is not a stop precondition. Same §4 timing classification and original intent/args apply |
+| seal_effect | This disables future admission, possibly safety work: retain exact authority/association/genesis/frontier/drain and all receiver-origin absence/compliance/resumer/debt guards below; CAS mismatch may refuse. It has no blanket narrowing-name exemption and never substitutes for invalidate or stop |
+| effect.observe and terminal result/replay | Read-only original-identity authorization and evidence checks, six states; no widening or new signals. Missing timing affects reported compliance, never retroactive mutation or inferred timely success |
+
+Invalid syntax/size still gives request_invalid/request_too_large; unauthorized
+publisher gives caller_role_not_permitted; wrong generation/immutable target or
+forged origin gives state_conflict under the existing exact checks. Unsafe process
+identity still refuses signalling. These failures preserve original debt and
+permit no unsafe action. This split waives only time qualification/CAS on otherwise valid narrowing
+invalidate, not ownership, generation or target checks. A valid close does not
+need a process scan; scanning/safe signalling follow outside the gate. Pending
+intents, local expiry callbacks, independent worker, retries, restart/recovery and
+restored-floor reconciliation all use this same split; none may reintroduce a
+widening admission predicate before durable close/safe narrowing.
+
+For null event/detected/evidence input, retain the unknown provenance explicitly,
+all known original event/detection values and earliest existing/known ceilings.
+Do not sample a new event, initialize a later budget, discard debt or wait for a
+qualified conversion before Rv. Positive evidence of a miss yields missed;
+otherwise missing original proof yields unknown, never timely by default.
+Additional causes may only shorten existing bounds or add retained uncertainty,
+not extend/reinitialize. Unknown original bounds remain unresolved obligations
+until authoritative original evidence exists, not a new clock start. A known
+miss stays missed through every route and recovery. No new incident API follows.
+
+Inert no-time close example: assume the protected exact association below exists,
+its current revision is 8 and its original ceiling is 290000. expected_revision=2
+is stale; none of the null timing members may prevent durable Rv. The boot UUID
+in the acknowledgement is retained original context, not a new qualified sample.
+
+```json
+{"v":1,"op":"invalidate","control_id":"close-example","association":{"principal":"dispatcher-example","generation":"11111111111111111111111111111111","execution_id":"EX-example","launch_effect_id":"launch-example","launch_epoch":1,"controller_epoch":1,"daemon_epoch":1,"claim_digest":"2222222222222222222222222222222222222222222222222222222222222222"},"expected_revision":2,"payload":{"cause":"removal","event_ms":null,"detected_ms":null,"time_evidence_digest":null,"deadlines":{"m0_absolute_ms":null,"p7_absolute_ms":null,"qualified_absolute_ms":null}}}
+```
+
+```json
+{"control_id":"close-example","ok":true,"result":{"revision":9,"gate":"closed","debit":"unspent","coverage_digest":null,"compliance":{"status":"unknown","deadline_ms":290000,"clock_boot_id":"11111111-1111-4111-8111-111111111111","time_evidence_digest":null}}}
+```
+
+The original ceiling/debt survives the all-null incoming deadlines. If C already
+won, the same close reports debit=consumed and owes independent stop instead;
+no admission refund. Missing authority or mismatched immutable association is
+still refused. These examples do not assert any installed control availability.
 
 Only the receiver writer owns the durable store: append immutable intent and
 resolving evidence, atomically replace projections with file+directory sync,
@@ -487,8 +594,9 @@ retain original result/tombstone hashes and external surviving floors. A
 projection is a view, not an independently refreshed authority cache. Dispatcher
 policy evaluation and snapshot preparation happen outside receiver locks;
 receiver verifies publisher scope, protected association/profile revisions and
-monotonicity. No policy/grant verifier moves into launcher code. Install/CAS
-failure leaves starts closed, not stale authority armed. Every policy install,
+monotonicity. No policy/grant verifier moves into launcher code. Widening install/CAS
+failure leaves starts closed, not stale authority armed; invalidate bypasses that
+CAS precondition and durably closes the exact association instead. Every policy install,
 replacement/removal, expiry, generation transition, stop/emergency, restore and
 recovery writer must participate; an unregistered edit is an incident.
 
@@ -501,7 +609,9 @@ lock. Short windows retain their existing budgets. A receiver snapshot taken
 before locks is revalidated at commit, not treated as a lease.
 
 Under selected A: receipt → verified drop → **durable C/debit** → exec-or-abort.
-Rv is the durable invalidation boundary serialized with C. Rv or expiry before
+Rv is the durable invalidation boundary serialized with C, including no-time/
+stale-revision invalidation. Whichever acquires this terminal gate first wins;
+a durable Rv cannot be overwritten by a previously prepared install or C. Rv or expiry before
 C refuses; C winning before Rv/expiry is already-started stop work, including the
 preparatory child and **every resumer**. No controller restart, fresh ID, epoch,
 new policy, absent target or restored file refills the generation one-start
@@ -558,9 +668,13 @@ separate namespace or a newly declared zero after loss. Observe pending/recorded
 from actual intent/result evidence. No trigger/record, missing genesis, open
 producer interval, unreadable prefix or restore uncertainty is unavailable,
 not not_recorded. A receiver-origin seal may close/drain producers only when
-a separate retained terminal stop has already proved whole-account absence,
-the original start gate is irrevocably closed, all resumers are fenced, and no
-independent narrowing obligation remains eligible. Otherwise refuse that seal
+a retained terminal stop has proved qualifying **timely** whole-account absence
+with no unresolved timing/cleanup debt. The origin stop's **own** retained timely
+absence counts; a separate second stop is not required. A genuinely unissued
+origin can instead use another retained qualifying stop's proof for this exact
+execution/history/frontier. Physical absence with missed/unknown compliance does
+not satisfy this predicate. The original start gate must be irrevocably closed,
+all resumers fenced, and no independent narrowing obligation may remain eligible. Otherwise refuse that seal
 with state_conflict; it must not disable future owed safety work. Drain includes
 all registered timers/callbacks/recovery writers. With intact genesis-to-frontier
 coverage and a genuinely unissued origin stop, not_recorded is then possible;
@@ -598,7 +712,7 @@ is widened by installing just a client/codec. Source-ready is not deployable.
 | Owner | Exact remaining acceptance / evidence |
 |---|---|
 | User-manager | Closed proposed wire/results/codes, coordinator/drop/FD lifetime refinement, durable receiver store/coverage, independent narrowing origin, exact signal/scan/quiet and recovery/retention semantics |
-| Dispatcher | Exact protected claim/profile pin and publisher/daemon incarnation adapter; control CAS/close-before-publish; original IDs/arguments/deadlines and one-start debit reconciliation; no caller state lock during I/O |
+| Dispatcher | Exact protected claim/profile pin and publisher/daemon incarnation adapter; widening control CAS and monotone no-time/no-CAS invalidate/close-before-publish; original IDs/arguments/deadlines and one-start debit reconciliation; no caller state lock during I/O |
 | Curator executor intake | Approved native ELF and plan schema/version; immutable FD3 consumption, complete interpreted-input/profile pins; explicitly assess and accept the fast-self-reexec availability cost below or reject this profile; own readiness channel separate, no new sample-ack handshake or assumed SAM handoff |
 | Installer / Integration | Authenticated association and fixed caller paths, control socket/service identity, containment and independent stop capability/fate, protected store/reserve/floors, time confidence mapping and exact native profile |
 | Native qualification | Maximum FD3/seals/read-only/exec descriptor behavior; completed real/effective/saved ID drop; no inherited handles; account-wide escaped children/partial visibility/quiet; C/expiry/Rv races, resumer/failure/crash cuts and original bounds on each supported platform |
@@ -642,11 +756,11 @@ These are specification witnesses, **not executed tests or qualification**.
 | FD3/drop/profile | Fully sealed read-only maximum plan, exact native ELF/body pins and verified drop | Writable alias, interpreter input, body drift, leaked lock/root descriptor, interrupted stage: no executor entry; retain any receipt/cleanup until absence |
 | C/Rv/expiry | Valid C then delayed exec inside original bounds; independent stop covers residual | Rv/expiry before C refuses; cancellation after C is original stop work, not rollback. Late C/exec evidence never becomes success or renewed time |
 | Lost reply / crash | Durable original result is observed through same ID | EOF/pipe close, root exit or coordinator crash cannot prove exec/absence; unknown retains debit/claim/fences and abort/stop; no replacement |
-| Stop/quiet | Exact latest receipt, identity-safe TERM/KILL, full zero UID scans across 2 s | Escaped child/partial scan/quiet reappearance/stale boot or receipt: pending, no absence receipt; original grace/deadline not reset |
+| Stop/quiet | Exact latest receipt, identity-safe TERM/KILL, full zero UID scans across 2 s; explicit compliance classification | Escaped child/partial scan/quiet reappearance/stale boot or receipt: pending, no absence receipt; original grace/deadline not reset |
 | Old-stop replay | Terminal old stop returns original receipt/current state without signals | Successor receipt or reused PID cannot be signalled by unfinished old stop; preserve original debt, do not retarget |
 | Observe | Six closed branches; authoritative full closed-interval history supports not_recorded | Missing/expired result, partial prefix, open intake, restored chain, unavailable scan: unavailable/contradictory as appropriate, never no-intent or absence |
 | Retention/capacity | Full evidence/reserved narrowing capacity survives restart | Eviction/rollback/torn projection/old service instance cannot reset debit or coverage; close widening and reconcile surviving floors |
-| Clock/cleanup | Earlier original detection/expiry/P7/profile ceiling and full absence before claim discharge | Wall-clock rollback, new controller, new policy or lost time evidence cannot renew limits; stop continues, missed bounds reported, broker debt stays separate |
+| Clock/cleanup | Earlier original detection/expiry/P7/profile ceiling and qualified timely full absence before claim discharge | Wall-clock rollback, new controller, new policy or lost time evidence cannot renew limits; stop continues, missed bounds reported, broker debt stays separate |
 
 ### Named source regression traces
 
@@ -656,9 +770,9 @@ runtime tests, passing semantic validators or mutant-kill evidence.
 
 | Named trace | Required valid behaviour / forbidden neighbour and retained obligations |
 |---|---|
-| `F1LateBudgetStopNarrows` | Removal0/detection20 gives D=290. Valid stop admitted at286 with canonical grace10: TERM immediately; verified survivors KILL no later than287.75 under the stated scan allowance. Actual quiet/scan proof by290 may meet the bound; otherwise pending/missed compliance. Refusing before signalling because ten seconds no longer fit is forbidden |
-| `F1AlreadyLateStopNarrows` | Valid stop at291 with D=290: TERM/revalidate/KILL without discretionary grace; retain original D. Full quiet can only complete later, so no timely-compliance success is possible; process debt stays pending until real absence. No expiry refusal or deadline reset |
-| `F1NoClockStopNarrows` | With valid authority/generation/latest receipt and safely identified target but unavailable time mapping, signal now; no grace wait for time confidence. Unknown timing/visibility prevents absence/compliance claims, not safe narrowing; fences/claim/cleanup remain |
+| `F1LateBudgetStopNarrows` | Removal0/detection20 gives D=290. Valid stop admitted at286 with canonical grace10: TERM immediately; verified survivors KILL no later than287.75 under the stated scan allowance. Actual quiet/scan proof by290 may meet the bound; otherwise pending or a physical-absence result explicitly missed/unknown with retained fences/claim/cleanup. Refusing before signalling because ten seconds no longer fit is forbidden |
+| `F1AlreadyLateStopNarrows` | Valid stop at291 with D=290: TERM/revalidate/KILL without discretionary grace; retain original D. Full quiet can only complete later, so no timely-compliance success is possible; process debt stays pending until real absence, whose terminal physical result/absence/observe compliance is missed; fences/claim/cleanup remain. No expiry refusal or deadline reset |
+| `F1NoClockStopNarrows` | With valid authority/generation/latest receipt and safely identified target but unavailable time mapping, signal now; no grace wait for time confidence. Unknown quiet timing/visibility prevents absence; unknown original deadline mapping permits qualified physical absence only with unknown compliance, not timely completion; neither blocks safe narrowing; fences/claim/cleanup remain |
 | `F1StartStillRefuses` | The same missing/expired/incomparable start-time evidence refuses new C/exec under selected A. A stop exception never renews start authority or refills debit |
 | `F1UnsafeStopStillRefuses` | Different principal/generation, stale latest receipt, reused PID/start/boot or invalid intake: refuse the unsafe action and send no signal to that target. Time urgency never bypasses identity/ownership; original uncertainty/debt is retained |
 | `F1RetryArgsDoNotChange` | Retry the t286 stop under its same ID and canonical grace10/digest, original grace-start/D. Operational wait is clipped, never rewrite grace to4, create another ID or restart its grace/deadline |
@@ -666,13 +780,32 @@ runtime tests, passing semantic validators or mutant-kill evidence.
 | `F2TypedNamespacesDisjoint` | Caller key `(caller,P,stop)` and origin key `(receiver_stop,P,H,stop)` coexist and serialize through the same safe stop machine while retaining their own attribution/results. The constructors cannot coincide for any otherwise valid caller principal/ID, including every legacy user.* ID or receiver-looking text; no legacy ID is reserved/rejected |
 | `F2OwnerCanObserveOrigin` | Original authenticated owner P queries the exact returned principal/stop_effect_id/operation/args_digest after launch-policy expiry and can resolve pending/recorded. Different owner, another origin or an association not owned by P refuses access without exposing its evidence; no new mutation authority |
 | `F2FixedArgsRecoverOnce` | Receiver restart/repeated expiry/removal reuses retained A/H, effect_id=stop, op=exec.stop, canonical grace0/digest and earliest original deadlines. Changed generation/execution/grace1/op conflicts/refuses; never a second stop identity, new grace or start refill |
-| `F2OriginCoverageIsNotEmptyMap` | An intact original origin genesis plus complete closed/drained frontier and separately proven terminal account absence may establish a genuinely unissued origin stop as not_recorded. Missing/restored genesis, open timer/recovery producer or unreadable prefix yields unavailable; existing intent stays pending/recorded |
-| `F2SealCannotDisableSafety` | Seal before proven account absence/resumer closure or while any narrowing obligation remains eligible refuses state_conflict and preserves independent stop progress. Valid seal after full discharge drains all registered internal producers, never erases a result or clears start debit |
-| `N1CodePublicationIsExplicit` | The proposed launch/control qualification_required extension is documented as requiring code-list publication; absent time alone does not use it to block narrowing stop |
+| `F2OriginCoverageIsNotEmptyMap` | An intact original origin genesis plus complete closed/drained frontier and separately proven qualifying timely terminal account absence may establish a genuinely unissued origin stop as not_recorded. Missing/restored genesis, open timer/recovery producer or unreadable prefix yields unavailable; existing intent stays pending/recorded |
+| `F2SealCannotDisableSafety` | Seal before qualifying timely account absence/resumer closure, with missed/unknown timing or while any narrowing obligation remains eligible refuses state_conflict and preserves independent stop progress. Valid seal after full discharge drains all registered internal producers, never erases a result or clears start debit |
+| `N1CodePublicationIsExplicit` | The proposed launch/control qualification_required extension is documented as requiring code-list publication; absent time alone does not use it to block narrowing stop or any invalidate cause |
 | `N2LegacyIdentifierUnchanged` | A legacy caller effect with any otherwise valid original helper ID keeps its byte-valued key and caller constructor. New-call regexp cannot reject it or reinterpret it as receiver-origin |
 | `N3PinnedCCJOnly` | The fixed ASCII stop example digest remains unchanged under pinned CCJ-1; a changed grace changes its digest. A second canonicalizer or LF-added digest is not the published identity recipe |
 | `N4FastReexecCostIsVisible` | Valid executor self-reexec before image sampling remains unknown/false-refused with stop debt; content/native review must accept that availability cost or reject the mechanism, never infer success from EOF or add an unreviewed handshake |
 | `N5ZeroAccountBeforePrepare` | Fresh complete zero-account-process/no-unresolved-claim evidence permits new preparation under exclusion. Residual process, partial scan or unresolved prior claim closes start before staging/child creation, without weakening an independently authorized stop |
+
+### Repeated narrowing class and compliance regression fixtures
+
+The original named witnesses above remain. Their late/no-clock expectations now
+explicitly distinguish physical absence from timely completion; no old witness is
+deleted or renamed. The following source fixtures refine the repeated class across
+routes. They are **NOT RUN**; there is no executable semantic checker or runtime
+mutant kill claim.
+
+| Named source fixture | Positive control / forbidden neighbour and post-failure obligations |
+|---|---|
+| `F3NarrowingRoutesIgnoreTimeAndCAS` | Same valid authenticated owner, immutable current association/generation/execution, safely identified target, unknown time evidence and stale expected_revision: exec.stop safely signals; invalidate with each of removal/expiry/stop/emergency/restore/association_loss records Rv+debt before C despite null event_ms/detected_ms/time_evidence_digest. Only changing the route to widening install refuses qualification_required (or state_conflict for its stale CAS), leaves widening closed and creates no C. A valid current-time/current-revision install is the nearby positive widening control; all no-time narrowing retains original ceilings/debt and unknown/missed compliance |
+| `F3RouteSelectiveTimeGate` | Named route-only narrowing counterexample/mutant: hold the preceding owner/target/unknown-time/stale-revision facts fixed, retain exec.stop's exception but apply install's time/CAS predicate ONLY when the route is invalidate. This wrongly refuses Rv, permitting a previously dropped child to reach C before local expiry. F3NarrowingRoutesIgnoreTimeAndCAS must reject that source design; NOT RUN, no named executable failing test or killed mutant |
+| `F3CloseWinsBeforeC` | Serialize valid no-time/stale-CAS Rv first: C refuses and preparatory child is disposed under original stop debt. Serialize C first: debit remains consumed and independent stop covers every resumer. Repeated close/recovery/callback uses same intent/origin/earliest deadline; no new event, grace, ID or debit |
+| `F3AuthorityAndSealStillGuarded` | Same no-time narrowing with wrong owner/generation/immutable target refuses unsafe action; no guessed PID signals. A seal with missing genesis, open producer, missed/unknown compliance or eligible stop debt refuses state_conflict and retains safety progress; valid authority/time for widening never bypasses consumed debit |
+| `F4TimelyLateUnknownStayDistinct` | Same exact stop args/receipt: complete qualified quiet by280 under D290 yields timely; quiet291.5–293.5 yields missed; qualified quiet with unknown original mapping yields unknown. Corresponding stop result, protected absence and observation carry the same distinct compliance object. Only timely may satisfy this boundary's claim-release predicate; late/unknown retain start/ingress fences, claim and cleanup, with independent broker debt unchanged |
+| `F4ReplayAndOriginRetainCompliance` | Ordinary or fixed-grace0 receiver-origin result once terminal is immutable. Lost reply, old-stop replay (zero signals), owner observation, restart and additional causes never turn missed/unknown into timely or erase holds. Pending work may resolve only from authoritative original evidence; missing quiet proof stays pending, not absent |
+| `F4NoLateShapeDischarge` | Counterexample: delete compliance from result/absence/evidence or treat ok:true/recorded/absent alone as timely release. A late D290/quiet293.5 trace then aliases the timely shape and wrongly discharges claim. F4TimelyLateUnknownStayDistinct forbids it; this is source-only NOT RUN, not a runtime killed mutant |
+| `N1OwnOriginAbsenceCanSeal` | The receiver origin's own retained qualifying timely absence, irrevocably closed start gate, fenced resumers, discharged relevant debt and full original producer drain permit sealing without a second stop. Own missed/unknown absence or open producer still refuses; existing intent/result stays recorded, never not_recorded |
 
 Before runtime work, publish accepted schema/authority/ownership and exact bounds;
 then qualify real providers with these controls and forbidden neighbours. This
