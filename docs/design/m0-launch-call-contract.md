@@ -278,7 +278,21 @@ unknown compliance, retaining holds. If quiet measurement itself is unqualified,
 absence cannot be published. Once the terminal physical result is recorded,
 its compliance object is immutable (including unknown); later information is
 retained as linked evidence, never a rewritten successful result or automatic
-release. This conservative first slice has no new incident-resolution API.
+release. Terminal unknown permanently retains the dispatcher execution claim,
+start/ingress and stop fences, cleanup obligations and all original ceilings in
+this slice, even if later original evidence proves timeliness. This deliberate
+fail-closed choice accepts that availability cost.
+
+Any future resolution of that terminal-unknown hold is limited to
+**original-evidence reconciliation by the effect owner, or an operator-signed
+disposition**; nothing else may clear the hold. Either route requires its own
+specified authority and evidence contract before use. This slice introduces no
+clearing endpoint, implemented API or current permission for either route.
+Reconciliation uses original evidence, never newly manufactured timeliness;
+neither route may rewrite the terminal result or turn a known miss into timely.
+A later scan, retry, new ID, time reset, null value, acknowledgement or physical
+absence cannot discharge the hold. This conservative first slice has no new
+incident-resolution API.
 
 Times are same-boot CLOCK_BOOTTIME milliseconds; quiet_end−quiet_start ≥2000 ms,
 remaining=0. `scope_digest` binds the configured complete account-wide scan
