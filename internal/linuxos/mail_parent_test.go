@@ -268,6 +268,7 @@ func TestMailParentProtectedObservation(t *testing.T) {
 			if e := os.Mkdir(mailPath, 0755); e != nil {
 				t.Fatal(e)
 			}
+			requireFixtureMode(t, mailPath, 0755)
 			a := mailDatabaseFixture()
 			a.data["group"] = []byte(fmt.Sprintf("root:x:%d:\nmail:x:8:\n", etc.group))
 			for name, data := range a.data {
@@ -306,9 +307,7 @@ func TestMailParentProtectedObservation(t *testing.T) {
 				}
 			case "parent-mode-drift":
 				hook = func() {
-					if e := os.Chmod(mailPath, 0755|os.ModeSetgid); e != nil {
-						t.Fatal(e)
-					}
+					requireFixtureMode(t, mailPath, 0755|os.ModeSetgid)
 				}
 				want = "mail_parent"
 			case "parent-inode-drift":
@@ -319,6 +318,7 @@ func TestMailParentProtectedObservation(t *testing.T) {
 					if e := os.Mkdir(mailPath, 0755); e != nil {
 						t.Fatal(e)
 					}
+					requireFixtureMode(t, mailPath, 0755)
 				}
 			case "passwd-drift":
 				hook = func() {
@@ -335,9 +335,7 @@ func TestMailParentProtectedObservation(t *testing.T) {
 				}
 			case "database-mode-drift":
 				hook = func() {
-					if e := os.Chmod(filepath.Join(root, "group"), 0644); e != nil {
-						t.Fatal(e)
-					}
+					requireFixtureMode(t, filepath.Join(root, "group"), 0644)
 				}
 			case "unsafe-config-ancestor":
 				etc.chainErr = refusal("unsafe_ancestor", "publication", nil)

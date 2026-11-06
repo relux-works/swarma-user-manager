@@ -261,7 +261,9 @@ func errorCode(e error) string {
 // The real anchor constructor refuses symlink components, and a shared sticky
 // ancestor permits inventory but cannot authorize publication beneath it.
 func TestRootAnchorNoFollowAndPublicationFence(t *testing.T) {
-	d, e := OpenRoot("/tmp")
+	path := t.TempDir()
+	requireFixtureMode(t, path, os.ModeSticky|0777)
+	d, e := openRoot(path, uint32(os.Getuid()), uint32(os.Getgid()))
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -269,17 +271,23 @@ func TestRootAnchorNoFollowAndPublicationFence(t *testing.T) {
 	if e = d.protected(); e == nil {
 		t.Fatal("shared temporary root authorized publication")
 	}
-	path, e := os.MkdirTemp("/tmp", "station-anchor-")
+	alias := filepath.Join(path, "alias")
+	if e = os.Symlink(path, alias); e != nil {
+		t.Fatal(e)
+	}
+	if x, e := openRoot(alias, uint32(os.Getuid()), uint32(os.Getgid())); e == nil {
+		x.Close()
+		t.Fatal("symlink anchor accepted")
+	}
+	// The same checked ancestry accepts a private positive neighbor.
+	requireFixtureMode(t, path, 0700)
+	private, e := openRoot(path, uint32(os.Getuid()), uint32(os.Getgid()))
 	if e != nil {
 		t.Fatal(e)
 	}
-	t.Cleanup(func() { os.Remove(filepath.Join(path, "alias")); os.Remove(path) })
-	if e = os.Symlink("/tmp", filepath.Join(path, "alias")); e != nil {
-		t.Fatal(e)
-	}
-	if x, e := OpenRoot(filepath.Join(path, "alias")); e == nil {
-		x.Close()
-		t.Fatal("symlink anchor accepted")
+	defer private.Close()
+	if e = private.protected(); e != nil {
+		t.Fatal("private anchor refused", e)
 	}
 }
 

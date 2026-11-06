@@ -227,9 +227,12 @@ func TestOwnedQuarantineRenameMechanism(t *testing.T) {
 	}
 }
 
+// /dev/shm is required here for a distinct device; redirecting to TMPDIR would
+// erase the cross-device assertion. Disabled with other prepared-host fixtures.
 // A real different-device destination is refused without source removal or
 // destination creation; this uses only task-owned directories, never mounts.
 func TestEffectCrossFilesystemRefused(t *testing.T) {
+	requirePreparedHostFixture(t)
 	path, err := os.MkdirTemp("/dev/shm", "station-effect-test-")
 	if err != nil {
 		t.Skip("PENDING: no writable separate filesystem", err)
@@ -265,6 +268,7 @@ func TestEffectCrossFilesystemRefused(t *testing.T) {
 // Real peer-owned bytes are observed through a descriptor, with distinct peer
 // UID and exact digest; observing ownership never grants a mutation token.
 func TestPeerReceiptObservation(t *testing.T) {
+	requirePreparedHostFixture(t)
 	a, b := peerUID(t, "platform-test-a"), peerUID(t, "platform-test-b")
 	if a == b {
 		t.Fatal("peer identities overlap")
