@@ -18,6 +18,7 @@ import (
 // local identities to reach the database lock boundary. Empty argv elements,
 // every option and CREATE_HOME=no stay exact. Never execute as root or set-id.
 func TestAccountToolNonRootParsing(t *testing.T) {
+	requirePreparedHostFixture(t)
 	if os.Geteuid() == 0 || os.Getuid() == 0 {
 		t.Skip("non-root parser qualification only")
 	}

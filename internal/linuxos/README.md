@@ -157,25 +157,68 @@ existing `golang.org/x/sys/unix` are required; there are no new dependencies.
 |---|---|---|---|
 | Go | Build this package | `go build ./internal/linuxos` | Compiler verdict |
 | Go | Narrow primitive tests | `GOMAXPROCS=2 go test -p 1 ./internal/linuxos -count=1 -v -timeout=45s` | Named verdicts; Go temporary fixture directories |
-| Python 3, existing sudo | Disposable peer-account fixtures | Invoked only by the package tests as `sudo -n -u platform-test-a -- /usr/bin/python3 ...` (peer UID resolved at runtime) | Exact PID/path cleanup and named test verdicts |
+| Python 3, existing sudo | Retained disposable peer-account bodies, currently disabled | Legacy body uses `sudo -n -u platform-test-a -- /usr/bin/python3 ...` (peer UID resolved at runtime); the prepared-fixture guard skips before invocation | No current host lifecycle evidence |
 | C compiler | Harmless loader-constructor regression fixture | `/usr/bin/cc -shared -fPIC -o PLANT_SO PLANT_C` (invoked by `TestRootBootstrapLoaderEntry`) | Temporary test-owned source, shared object and executable sentinel; removed with the fixture |
-| Shell/Python 3 | Owner-run opt-in root qualification; r1 pass recorded | `/usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin /usr/bin/dash /abs/path/root-qualification.sh apply ABS_TEST_BINARY APPROVED_SHA`; then `verify`; then `rollback` | Protected disposable fixture; no production policy or sudoers changes |
+| Shell/Python 3 | Historical owner-run root qualification; r1 pass recorded | `/usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin /usr/bin/dash /abs/path/root-qualification.sh apply ABS_TEST_BINARY APPROVED_SHA`; then `verify`; then `rollback` | Historical protected disposable fixture; current Go entrypoint is disabled |
 
 Unprivileged tests map root:S owners to the test runner only through private
 in-package constructors. They check inherited ACL rejection, symlinks, exact
 inventory, digests, writable parents, unreadable sources, process admission and
-bounded deletion, with nearby positive controls. Peer tests create real files,
-POSIX and System V shared memory, a listening Unix socket and one process as
-`platform-test-a`; they resolve both test-account UIDs at runtime. Peer process
-signaling runs as the owning peer, while using the same admission/absence loop.
-No test may signal a process it did not start.
+bounded deletion, with nearby positive controls. The root-anchor fixture uses
+TMPDIR only when the real anchor constructor and publication protection accept
+its ancestry. Otherwise it declares an environment SKIP naming the refused
+predicate; that skip does not test or qualify the anchor assertions. A private
+leaf under a shared sticky ancestor alone cannot authorize publication.
 
-`TestRootQualification` is **opt-in/skipped by default**. The owner-run r1
+The retained peer bodies would create files, POSIX and System V shared memory,
+a listening Unix socket and one process as `platform-test-a`, resolving both
+test-account UIDs at runtime. They currently skip before lookups, fixture setup
+or account tools. They do not run in default CI. No test may signal a process
+it did not start.
+
+The test-only guard in [host_account_tools_test.go](host_account_tools_test.go)
+requires **both** `SWARMA_TEST_HOST_ACCOUNT_TOOLS=1` (exactly `1`) and
+`SWARMA_TEST_DISPOSABLE_DECLARATION` set to a clean absolute path. Every path
+component must be nonsymlink. The declaration must be a regular file, owned by
+the effective test UID, mode exactly 0600, with one hard link; reads are bounded
+to 4096 bytes. Its bytes must equal Go `json.Marshal` of these fields in this
+order, followed by exactly one LF:
+
+```json
+{"version":1,"disposition":"DISPOSABLE","scope":"linuxos-test-accounts-only","host":"<exact os.Hostname()>","boot_id":"<trimmed /proc/sys/kernel/random/boot_id>"}
+```
+
+Extra whitespace, fields, duplicate keys, trailing records and a different host
+or boot fail closed. This is an operator assertion that this exact host boot is
+disposable, not automatic detection or resource ownership. A nonempty variable
+or declaration alone is insufficient.
+
+Even a valid declaration cannot enable the retained parser, peer, cross-device
+or root-qualification bodies: `requirePreparedHostFixture` has no live same-run
+creation receipts and skips. Existing accounts, `platform-test-*` names and saved
+`UserCreated`/`GroupCreated` flags cannot confer ownership. The test-only ledger
+in [host_fixture_contract_test.go](host_fixture_contract_test.go) accepts only
+account/group/service names with its random `linuxos-test-<12 lowercase hex>-`
+prefix and lowercase ASCII letters, digits and hyphens (at most 63 bytes).
+Only a successful absence check and exclusive creation callback issue a live
+receipt. Every change/removal checks that receipt's identity and membership in
+the same run's ledger; successful removal consumes it. Receipts are never
+serialized or imported. Foreign, uncreated,
+forged and prior-run resources/receipts are refused. No provisioner is supplied.
+The declaration and ownership tests use inert fixtures/model callbacks, and
+child proofs verify default skips and refusal without receipts. Their passes
+do not exercise or qualify host account/group/service lifecycle bodies, which
+remain **UNRUN**.
+
+`TestRootQualification` is **disabled by the same receipt guard**, even with a
+valid declaration and `LINUXOS_ROOT_QUALIFICATION` set. The owner-run r1
 apply/verify/rollback pass covers the exact binary and runner hashes recorded in
 [the evidence note](../../docs/root-qualification-evidence.md); compiling another
-binary does not transfer that evidence. For another owner-approved run, first build the exact reviewed
-binary with `go test -c -trimpath -o /chosen/path/linuxos.test ./internal/linuxos` and record
-its SHA-256 with `sha256sum /chosen/path/linuxos.test`. The owner must supply
+binary does not transfer that evidence. The historical procedure below describes
+the separately reviewed script; it does not enable the current Go test body or
+supply same-run ownership receipts. That procedure builds the exact reviewed
+binary with `go test -c -trimpath -o /chosen/path/linuxos.test ./internal/linuxos`
+and records its SHA-256 with `sha256sum /chosen/path/linuxos.test`. The owner supplies
 `/etc/swarma-linuxos-qualification.json`, root:root mode 0600, containing `Min`,
 `Max`, `ReservedUIDs` and `ReservedGIDs`: a reviewed unused test range and all
 actual journal holds. There are no default/fixed IDs. The bootstrap
@@ -207,7 +250,8 @@ script probe stops at the root-required guard, before fixture I/O. Those
 unprivileged regressions claim no root execution; the separate r1 pass does.
 Review the script and pass
 the approved binary hash to `apply`; it checks protected paths and exact copied
-bytes before executing. The opt-in test verifies actual account creation,
+bytes before executing. The retained, currently disabled Go body describes
+actual account creation,
 root:S home metadata, ACL/capability refusal, a fresh process's unlinked handle
 and root pidfd stop. It durably records a disposable cleanup identity and then
 verifies deletion/account/group rollback. `verify` rechecks absence; `rollback`

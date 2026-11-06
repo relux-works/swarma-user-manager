@@ -196,6 +196,7 @@ func qualificationRollback(ctx context.Context, d *Dir, s *qualificationState, p
 // 402f02c3ea3e2110ab6408e0ed575ef5e8d81249cced6b0381093fd7f7255858.
 // That pass covers only that exact build on one host; default execution skips.
 func TestRootQualification(t *testing.T) {
+	requirePreparedHostFixture(t)
 	mode := os.Getenv("LINUXOS_ROOT_QUALIFICATION")
 	if mode == "" {
 		t.Skip("OPT-IN: owner reviews root-qualification.sh, supplies root-owned unused-range/reservation policy and approved test-binary SHA, then runs apply, verify, rollback")

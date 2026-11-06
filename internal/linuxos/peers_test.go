@@ -38,6 +38,7 @@ func peerCommand(ctx context.Context, name, program, cwd string, args ...string)
 	return cmd
 }
 func peerRun(t *testing.T, name, program, cwd string, args ...string) string {
+	requirePreparedHostFixture(t)
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -48,9 +49,12 @@ func peerRun(t *testing.T, name, program, cwd string, args ...string) string {
 	return string(b)
 }
 
+// Cross-account fixture: /tmp traversal is part of the prepared-host contract.
+// Private TMPDIR ancestors cannot be traversed by another UID; never chmod them.
 // Real station A creates an inode in /tmp; descriptor inventory finds its UID,
 // station B remains clean and removing only that inode restores clean scope.
 func TestPeerTemporaryFileInventory(t *testing.T) {
+	requirePreparedHostFixture(t)
 	a, b := peerUID(t, "platform-test-a"), peerUID(t, "platform-test-b")
 	if a == b {
 		t.Fatal("identities overlap")
@@ -85,6 +89,7 @@ func TestPeerTemporaryFileInventory(t *testing.T) {
 // removing only the unique object restores the inspected namespace to its prior
 // target-object count. Unrelated existing objects are never deleted.
 func TestPeerPOSIXSharedMemory(t *testing.T) {
+	requirePreparedHostFixture(t)
 	uid := peerUID(t, "platform-test-a")
 	dir, e := OpenRoot("/dev/shm")
 	if e != nil {
@@ -129,6 +134,7 @@ if c.shm_unlink(sys.argv[1].encode())!=0: raise OSError(ctypes.get_errno(),'shm_
 	}
 }
 func startPeer(t *testing.T, program, cwd string, args ...string) (int, *exec.Cmd, <-chan error) {
+	requirePreparedHostFixture(t)
 	t.Helper()
 	cmd := peerCommand(context.Background(), "platform-test-a", program, cwd, args...)
 	out, e := cmd.StdoutPipe()
@@ -201,6 +207,7 @@ func cleanupPeer(t *testing.T, v Process, done <-chan error) {
 // and unlinking exactly that socket the target object disappears. This is only
 // current-namespace diagnostics, not all-host namespace qualification.
 func TestPeerUnixSocketUID(t *testing.T) {
+	requirePreparedHostFixture(t)
 	uid := peerUID(t, "platform-test-a")
 	path, e := os.MkdirTemp("/tmp", "station-socket-inventory-")
 	if e != nil {
@@ -259,6 +266,7 @@ signal.pause()`
 // Signal delivery here runs as that peer, not root, so privileged signaling
 // remains separately PENDING.
 func TestPeerProcessStopAndAbsence(t *testing.T) {
+	requirePreparedHostFixture(t)
 	uid := peerUID(t, "platform-test-a")
 	pid, _, done := startPeer(t, "import os,signal; print(os.getpid(),flush=True); signal.pause()", "/")
 	p, e := OpenProc()
@@ -307,6 +315,7 @@ func TestPendingOpenInodeAndNamespaceQualification(t *testing.T) {
 // A real System V segment remains inventoried after its creator process exits;
 // removing exactly its kernel ID restores the preceding inventory count.
 func TestPeerSystemVSharedMemory(t *testing.T) {
+	requirePreparedHostFixture(t)
 	uid := peerUID(t, "platform-test-a")
 	p, e := OpenProc()
 	if e != nil {

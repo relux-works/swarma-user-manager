@@ -269,6 +269,7 @@ func TestReviewForeignNamespaceUnknown(t *testing.T) {
 
 // A uniquely named real peer-owned POSIX message queue is visible in its backing root and disappears after exact unlink.
 func TestReviewMqueueOwnedObject(t *testing.T) {
+	requirePreparedHostFixture(t)
 	uid := peerUID(t, "platform-test-a")
 	name, err := unique()
 	if err != nil {
