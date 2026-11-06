@@ -258,10 +258,71 @@ func errorCode(e error) string {
 	return ""
 }
 
+// rootAnchorFixture needs publication-safe ancestry as well as a private leaf.
+// A sticky TMPDIR is suitable for inventory, but not this positive control.
+func rootAnchorFixture(t *testing.T) string {
+	t.Helper()
+	path := t.TempDir()
+	check := func(path string) error {
+		d, err := openRoot(path, uint32(os.Getuid()), uint32(os.Getgid()))
+		if err != nil {
+			return err
+		}
+		defer d.Close()
+		return d.protected()
+	}
+	if err := check(path); err == nil {
+		t.Logf("root-anchor fixture: protected temporary ancestry at %s", path)
+		return rootAnchorAncestry(t, path)
+	} else {
+		t.Logf("root-anchor fixture: temporary ancestry cannot publish (%v); checking protected HOME fallback", err)
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = check(home); err != nil {
+		t.Fatal("root-anchor fixture needs protected temporary or HOME ancestry", err)
+	}
+	path, err = os.MkdirTemp(home, "station-anchor-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.RemoveAll(path); err != nil {
+			t.Error(err)
+		}
+	})
+	requireFixtureMode(t, path, 0700)
+	if err = check(path); err != nil {
+		t.Fatal("fresh private root-anchor fixture refused", err)
+	}
+	t.Logf("root-anchor fixture: using fresh private directory under protected HOME at %s", path)
+	return rootAnchorAncestry(t, path)
+}
+
+func rootAnchorAncestry(t *testing.T, path string) string {
+	t.Helper()
+	for part := path; ; part = filepath.Dir(part) {
+		var st unix.Stat_t
+		if err := unix.Lstat(part, &st); err != nil {
+			t.Fatal(err)
+		}
+		if st.Mode&unix.S_IFMT != unix.S_IFDIR {
+			t.Fatalf("root-anchor fixture ancestry is not a nonsymlink directory: %s", part)
+		}
+		t.Logf("root-anchor fixture ancestry: %s mode=%04o uid=%d gid=%d symlink=false", part, st.Mode&07777, st.Uid, st.Gid)
+		if part == "/" {
+			break
+		}
+	}
+	return path
+}
+
 // The real anchor constructor refuses symlink components, and a shared sticky
 // ancestor permits inventory but cannot authorize publication beneath it.
 func TestRootAnchorNoFollowAndPublicationFence(t *testing.T) {
-	path := t.TempDir()
+	path := rootAnchorFixture(t)
 	requireFixtureMode(t, path, os.ModeSticky|0777)
 	d, e := openRoot(path, uint32(os.Getuid()), uint32(os.Getgid()))
 	if e != nil {

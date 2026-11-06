@@ -291,10 +291,13 @@ var hostFixtureEntrypoints = map[string][]string{
 	"root_qualification_test.go":  {"TestRootQualification"},
 }
 
-// Supplemental source oracle: enumerated host entrypoints must guard before
-// setup/effects. The dynamic child proofs below separately verify skip behavior.
+// Supplemental source oracle: enumerated host entrypoints and peer helpers must
+// guard before setup/effects. Dynamic child proofs cover the test entrypoints.
 func TestHostEntrypointGuardInventory(t *testing.T) {
 	for file, names := range hostFixtureEntrypoints {
+		if file == "peers_test.go" {
+			names = append(append([]string(nil), names...), "peerRun", "startPeer")
+		}
 		f, err := parser.ParseFile(token.NewFileSet(), file, nil, 0)
 		if err != nil {
 			t.Fatal(err)
