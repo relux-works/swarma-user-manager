@@ -164,9 +164,10 @@ existing `golang.org/x/sys/unix` are required; there are no new dependencies.
 Unprivileged tests map root:S owners to the test runner only through private
 in-package constructors. They check inherited ACL rejection, symlinks, exact
 inventory, digests, writable parents, unreadable sources, process admission and
-bounded deletion, with nearby positive controls. The root-anchor fixture checks
-publication-safe ancestry; when temporary ancestry is unsafe, it reports its
-choice of a fresh private 0700 directory under protected HOME ancestry. A private
+bounded deletion, with nearby positive controls. The root-anchor fixture uses
+TMPDIR only when the real anchor constructor and publication protection accept
+its ancestry. Otherwise it declares an environment SKIP naming the refused
+predicate; that skip does not test or qualify the anchor assertions. A private
 leaf under a shared sticky ancestor alone cannot authorize publication.
 
 The retained peer bodies would create files, POSIX and System V shared memory,
