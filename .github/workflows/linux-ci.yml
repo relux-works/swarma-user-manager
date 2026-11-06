@@ -1,8 +1,8 @@
 # Template for public module repositories.
 # Repository-specific: runner/bootstrap and loader diagnostics; Go version;
 # test flags/packages, qualification variable and peerUID's environment gate.
-# Review leaves SWARMA_TEST_UNPRIVILEGED unset. Peer-account paths outside peerUID
-# run in CI and fail without the prepared accounts, intentionally.
+# CI runs go test ./... with SWARMA_TEST_UNPRIVILEGED=1 and root qualification unset.
+# Guarded linuxos host bodies skip; no host account or lifecycle qualification is claimed.
 name: Linux Go CI
 
 on:
