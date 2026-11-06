@@ -260,6 +260,7 @@ func errorCode(e error) string {
 
 // rootAnchorFixture needs publication-safe ancestry as well as a private leaf.
 // A sticky TMPDIR is suitable for inventory, but not this positive control.
+// Hosted CI requires this probe to succeed; generic local environments may skip.
 func rootAnchorFixture(t *testing.T) string {
 	t.Helper()
 	path := t.TempDir()
@@ -272,6 +273,9 @@ func rootAnchorFixture(t *testing.T) string {
 		return d.protected()
 	}
 	if err := check(path); err != nil {
+		if os.Getenv("SWARMA_TEST_REQUIRE_ROOT_ANCHOR") == "1" {
+			t.Fatalf("required root-anchor TMPDIR fixture refused by openRoot/protected: %v", err)
+		}
 		var errno unix.Errno
 		if errors.As(err, &errno) {
 			t.Skipf("environment SKIP: root-anchor TMPDIR fixture refused by openRoot/protected: %v (errno=%d: %v)", err, errno, errno)
@@ -280,6 +284,19 @@ func rootAnchorFixture(t *testing.T) string {
 	}
 	t.Logf("root-anchor fixture: protected temporary ancestry at %s", path)
 	return rootAnchorAncestry(t, path)
+}
+
+// An independent real-constructor neighbor still runs if the refusal test fails.
+func TestRootAnchorPrivateNeighbor(t *testing.T) {
+	path := rootAnchorFixture(t)
+	d, err := openRoot(path, uint32(os.Getuid()), uint32(os.Getgid()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	if err = d.protected(); err != nil {
+		t.Fatal("private anchor refused", err)
+	}
 }
 
 func rootAnchorAncestry(t *testing.T, path string) string {

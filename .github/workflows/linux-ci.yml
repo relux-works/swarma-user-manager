@@ -41,6 +41,92 @@ jobs:
             printf '%s\n' "$out"
           fi
           test -z "$out"
+      # Create only a fresh leaf under /: /tmp is sticky and HOME may carry ACLs.
+      # sudo provisions/removes that leaf on the disposable hosted runner only;
+      # the real constructor and every assertion execute as the ordinary runner.
+      - name: Witness root-anchor assertions and weakened-anchor control
+        env:
+          SWARMA_TEST_UNPRIVILEGED: '1'
+          SWARMA_TEST_REQUIRE_ROOT_ANCHOR: '1'
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          tmp="$(sudo -n mktemp -d /swarma-root-anchor.XXXXXXXX)"
+          cleanup() {
+            rm -f -- "$tmp/overlay.json" "$tmp/fs_linux.go" "$tmp/original.go"
+            sudo -n rmdir -- "$tmp"
+          }
+          trap cleanup EXIT
+          sudo -n chown "$(id -u):$(id -g)" -- "$tmp"
+          export TMPDIR="$tmp"
+          go version
+          git rev-parse HEAD 'HEAD^{tree}'
+          sha256sum .github/workflows/linux-ci.yml internal/linuxos/home_test.go internal/linuxos/fs_linux.go
+          witness() {
+            local phase="$1"
+            shift
+            local evidence="$RUNNER_TEMP/root-anchor-$phase.jsonl"
+            local -a statuses
+            set +e
+            timeout --signal=TERM --kill-after=5s 110s \
+              env -u LINUXOS_ROOT_QUALIFICATION CGO_ENABLED=1 GOMAXPROCS=2 \
+              go test -json -p 1 -count=1 -timeout=90s "$@" \
+              -run '^(TestRootAnchorNoFollowAndPublicationFence|TestRootAnchorPrivateNeighbor|TestDirectoryDescentRetainsPublicationFence)$' \
+              ./internal/linuxos | tee "$evidence"
+            statuses=("${PIPESTATUS[@]}")
+            set -e
+            printf '%s\n' "${statuses[0]}" | tee "$RUNNER_TEMP/root-anchor-$phase.exit"
+            printf '%s inner go test exit: %s\n' "$phase" "${statuses[0]}"
+            test "${statuses[1]}" -eq 0
+            python3 - "$evidence" "$phase" "${statuses[0]}" <<'PY'
+          import json, sys
+          expected = {
+              "TestRootAnchorNoFollowAndPublicationFence",
+              "TestRootAnchorPrivateNeighbor",
+              "TestDirectoryDescentRetainsPublicationFence",
+          }
+          terminal = []
+          intended_failure = False
+          with open(sys.argv[1]) as stream:
+              for line in stream:
+                  event = json.loads(line)
+                  if event.get("Test") in expected and event["Action"] in {"pass", "fail", "skip"}:
+                      terminal.append((event["Test"], event["Action"]))
+                  if event.get("Test") == "TestRootAnchorNoFollowAndPublicationFence" and "symlink anchor accepted" in event.get("Output", ""):
+                      intended_failure = True
+          negative = sys.argv[2] == "weakened"
+          wanted = [(name, "fail" if negative and name == "TestRootAnchorNoFollowAndPublicationFence" else "pass") for name in expected]
+          if int(sys.argv[3]) != (1 if negative else 0) or sorted(terminal) != sorted(wanted) or negative and not intended_failure:
+              raise SystemExit(f"invalid {sys.argv[2]} witness: inner exit={sys.argv[3]}, events={terminal}, anchor assertion={intended_failure}")
+          print(f"Validated {sys.argv[2]} inner test events: {terminal}")
+          PY
+          }
+          witness positive
+          # Go's build overlay changes only a temporary copy, never the checkout.
+          python3 - "$tmp" <<'PY'
+          import hashlib, json, pathlib, sys
+          tmp = pathlib.Path(sys.argv[1])
+          source = pathlib.Path("internal/linuxos/fs_linux.go").resolve()
+          original = source.read_bytes()
+          old = b"next, e := unix.Openat2(int(f.Fd()), part, &unix.OpenHow{Flags: unix.O_RDONLY | unix.O_DIRECTORY | unix.O_CLOEXEC | unix.O_NOFOLLOW, Resolve: unix.RESOLVE_BENEATH | unix.RESOLVE_NO_SYMLINKS})"
+          new = b"next, e := unix.Openat2(int(f.Fd()), part, &unix.OpenHow{Flags: unix.O_RDONLY | unix.O_DIRECTORY | unix.O_CLOEXEC})"
+          if original.count(old) != 1:
+              raise SystemExit("anchor control source binding changed")
+          (tmp / "original.go").write_bytes(original)
+          planted = original.replace(old, new)
+          (tmp / "fs_linux.go").write_bytes(planted)
+          (tmp / "overlay.json").write_text(json.dumps({"Replace": {str(source): str(tmp / "fs_linux.go")}}))
+          print("original anchor sha256:", hashlib.sha256(original).hexdigest())
+          print("weakened anchor sha256:", hashlib.sha256(planted).hexdigest())
+          PY
+          # The wrapper succeeds only for an actual exit-1 assertion failure,
+          # with both private/descriptor neighbors passing and no selected SKIP.
+          witness weakened -overlay="$tmp/overlay.json"
+          cp -- "$tmp/original.go" "$tmp/fs_linux.go"
+          cmp -- internal/linuxos/fs_linux.go "$tmp/fs_linux.go"
+          sha256sum internal/linuxos/fs_linux.go "$tmp/fs_linux.go"
+          witness restored -overlay="$tmp/overlay.json"
       # Repository-specific, read-only diagnostics; unavailable probes are nonfatal.
       - name: Report bootstrap and loader prerequisites
         continue-on-error: true
