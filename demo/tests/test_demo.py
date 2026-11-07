@@ -656,7 +656,7 @@ class PrimitiveTests(unittest.TestCase):
             self.assertEqual(native.signal(row, old, signal.SIGKILL), 'sent')
             send.assert_called_once_with(99, signal.SIGKILL, None, 0)
 
-    def run_unprivileged_pipeline(self, exe, valid):
+    def run_unprivileged_pipeline(self, exe, valid, publication_fault=None):
         # Real fork/session/barriers/FD3/fexecve/drainer; root ownership and drop
         # are synthetic. This is explicitly not a successful privileged launch.
         with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as workspace:
@@ -665,10 +665,14 @@ class PrimitiveTests(unittest.TestCase):
             r['executor']['sha256'] = d.digest(exe.read_bytes())
             backend = d.Native(r)
             actual_process = d.process
+            actual_clock = time.monotonic
+            clock_offset = [0.]
             calls = []
             def fixture_process(pid):
                 real = actual_process(pid)
                 calls.append(pid)
+                if len(calls) == 2 and publication_fault == 'late-drop':
+                    clock_offset[0] = 10.
                 return d.Process(pid, real.start_time, real.session_id, (0,) * 4 if len(calls) == 1 else (os.getuid(),) * 4,
                                  (0,) * 4 if len(calls) == 1 else (os.getgid(),) * 4)
             def fixture_open(path, **kwargs):
@@ -678,14 +682,28 @@ class PrimitiveTests(unittest.TestCase):
                     return os.open(home, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
                 raise AssertionError('unexpected fixture path')
             receipts = []
-            with mock.patch.object(d, 'protected', side_effect=fixture_open), mock.patch.object(d, 'process', side_effect=fixture_process), mock.patch.object(d, 'drop', return_value=None):
-                if valid:
+            def publication(*args):
+                self.assertEqual(len(receipts), 1)
+                self.assertEqual(len(calls), 1)  # still behind the root barrier
+                if publication_fault == 'refuse':
+                    d.refuse('state_unavailable')
+                if publication_fault == 'late-publication':
+                    clock_offset[0] = 10.
+            def synthetic_drop(_):
+                Path(workspace, 'drop-called').write_text('synthetic fixture only')
+            with mock.patch.object(d.time, 'monotonic', side_effect=lambda: actual_clock() + clock_offset[0]), mock.patch.object(d, 'write_launch_record', side_effect=publication) as writer, mock.patch.object(d, 'protected', side_effect=fixture_open), mock.patch.object(d, 'process', side_effect=fixture_process), mock.patch.object(d, 'drop', side_effect=synthetic_drop):
+                if publication_fault:
+                    with self.assertRaises(d.Refusal) as exc:
+                        d.spawn(backend, row, launch_request(bytes(range(256)) * 192), bytes(range(256)) * 192, lambda value: receipts.append(value), time.monotonic() + 5)
+                    self.assertEqual(exc.exception.code, 'state_unavailable' if publication_fault == 'refuse' else 'request_timeout')
+                elif valid:
                     outcome = d.spawn(backend, row, launch_request(bytes(range(256)) * 192), bytes(range(256)) * 192, lambda value: receipts.append(value), time.monotonic() + 5)
                     self.assertEqual(outcome, 'receipt_seen')
                 else:
                     with self.assertRaises(d.NativeFailure) as exc:
                         d.spawn(backend, row, launch_request(bytes(range(256)) * 192), bytes(range(256)) * 192, lambda value: receipts.append(value), time.monotonic() + 5)
                     self.assertEqual(exc.exception.detail, {'stage': 'exec', 'type': 'OSError', 'errno': 8})
+            writer.assert_called_once()
             self.assertEqual(len(receipts), 1)
             try:
                 pid, status = os.waitpid(receipts[0]['pid'], 0)
@@ -695,7 +713,11 @@ class PrimitiveTests(unittest.TestCase):
                 facts = [e for e in backend.launch_evidence if e['stage'] == 'child_exit_observed']
                 self.assertEqual(len(facts), 1)
                 code = facts[0]['exit']
-            self.assertEqual(code, 0 if valid else 127)
+            self.assertEqual(code, 126 if publication_fault else 0 if valid else 127)
+            if publication_fault:
+                self.assertFalse(Path(workspace, 'stdout.log').exists())
+                self.assertEqual(Path(workspace, 'drop-called').exists(), publication_fault == 'late-drop')
+                return
             if not valid:
                 return
             end = time.monotonic() + 3
@@ -712,6 +734,11 @@ class PrimitiveTests(unittest.TestCase):
 
     def test_unprivileged_native_fd_pipeline_with_synthetic_root_stage(self):
         self.run_unprivileged_pipeline(Path('/private/bin/fd-probe'), True)
+
+    def test_publication_failure_and_original_deadline_hold_child_barriers(self):
+        for fault in ('refuse', 'late-publication', 'late-drop'):
+            with self.subTest(fault=fault):
+                self.run_unprivileged_pipeline(Path('/private/bin/fd-probe'), True, fault)
 
     def test_real_exec_failure_keeps_receipt_and_transmits_errno_after_fd_scrub(self):
         with tempfile.TemporaryDirectory() as private:

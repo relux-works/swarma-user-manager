@@ -74,7 +74,7 @@ Numeric identity alone is insufficient. The closed roster record is:
 - `operator`: exactly `name,uid,gid`, fixed to `agent,1001,1001`.
 - `dispatcher`: exactly `name,uid,gid,principal,generation`; name and principal
   `swarma-demo-dispatcher`, UID/GID 1101, with a fresh admitted generation.
-- `executor`: exactly `id,path,sha256`, with the fixed demo ID/path and actual digest.
+- `executor`: exactly `id,path,sha256`, with one approved ID/path pair and actual digest.
 - `runtime`: exactly four explicit booleans: `admitted,inventory_qualified,
   creation_exclusion_qualified,interpreter_qualified`.
 - `accounts`: exactly three rows with `name,uid,gid,generation,owning_dispatcher,
@@ -97,6 +97,24 @@ root-owned sudo parent executable inode. The UID must match the pinned dispatche
 The operator and worker UIDs cannot launch or use this ordinary stop interface.
 The demo helper accepts **only** `exec.stop`; create, retire, bump, observation and
 arbitrary commands are unreachable. There is no R-ALLSTOP operator wire adapter.
+
+The existing `validate_roster` is the sole canonical roster admission function.
+It approves exactly these pairs; a third value, near-miss spelling, crossed pair
+or alternate path spelling refuses with `executor_not_approved`:
+
+| ID | Fixed installed path |
+| --- | --- |
+| `swarma-demo-executor` | `/usr/local/libexec/swarma/swarma-demo-executor` |
+| `swarma-demo-codex-executor` | `/usr/local/libexec/swarma/swarma-demo-codex-executor` |
+
+The launch request's executor must equal the admitted roster executor. Digest
+verification and the retained ELF descriptor apply to either approved path.
+The Codex executor and its plan grammar belong to the credential broker's fixed
+demo implementation; P1 continues to carry the decoded plan as opaque bytes.
+This approval supplies no account, provider, runtime or qualification authority.
+The roster's `source_revision` remains the frozen private-copy baseline above.
+A consuming component must pin the successor validator only after its actual
+main landing; a local candidate is not a canonical source pin.
 
 The later VM installer must grant the actual admitted dispatcher two NOPASSWD
 rules, each with the exact fixed helper/launcher path and empty argument spec
@@ -171,6 +189,49 @@ It starts a session and persists a root-owned 0644 receipt at
 waiting behind a barrier. The receipt fields remain exactly
 `execution_id,epoch,pid,start_time,boot_id,session_id`. The attempt record also
 retains the original request, caller/account binding and timing evidence.
+
+Before releasing the root child barrier, the launcher also publishes the P4
+launch record at `/run/swarma-demo/launch-records/EXECUTION.json`. This separate
+public authority has exactly the agreed fields:
+
+| Field | Origin and grammar |
+| --- | --- |
+| `execution_id` | Decoded launch intake, `[A-Za-z0-9][A-Za-z0-9._-]{0,63}` |
+| `uid` | Current protected roster account, integer 30000–30019 |
+| `generation` | Same account, 32 lowercase hex digits, nonzero |
+| `plan_sha256` | 64 lowercase hex digits; SHA-256 of exact decoded FD3 bytes |
+| `boot_id` | Current protected roster's Linux boot UUID |
+
+The writer reloads the fixed protected roster through `load_roster`, which
+checks the current boot and all runtime admission flags. It compares the entire
+snapshot and account, and reuses the existing closed launch decoder to bind the
+executor and plan. No request chooses a root directory, account UID, digest or
+qualification flag. The ordinary verified sudo/caller gate still applies.
+
+The later installer must prepare `/run/swarma-demo` and its `launch-records`
+directory as root:root 0755 on the same filesystem. The writer never creates or
+repairs them. It reuses the protected no-follow descriptor walk, including
+ancestor ownership, non-writability and ACL checks. A root-created exclusive
+0600 temporary in the parent directory is written completely, changed to 0444,
+file-synced and closed. Linux `renameat2(RENAME_NOREPLACE)` then atomically moves
+it into the launch-record directory without replacing any file or link. The
+destination directory and staging parent are synced before success. No partial,
+temporary or multi-link file enters the directory enumerated by P4 consumers.
+Unsupported exclusive rename, a cross-filesystem move or a stale temporary
+refuses; there is no weaker fallback. The final file is root:root 0444 and
+single-link, matching P4's reader contract.
+
+Before publication, ordinary failures remove only the temporary created by this
+invocation and sync its directory. An existing temporary remains reserved. A
+crash may leave that reservation; there is no automatic recovery/rearming.
+After publication, every failure, directory-sync uncertainty, missed deadline,
+exec failure and stop retains the final authority and irreversible attempt.
+A retry cannot overwrite it or initiate another physical start. A published
+record binds authorization; it proves neither a running process nor readiness.
+The original ten-second receipt budget includes publication and cleanup, with
+checks before each child-barrier release and the existing final reply sample.
+Records and their owning roster must stay immutable for the admitted consumer
+lifetime; later reconciliation belongs to the qualified operator procedure.
 
 The child clears groups, ambient/bounding capabilities and all real/effective/
 saved GID/UID values, enables no-new-privileges and verifies root cannot be
@@ -279,6 +340,13 @@ output draining. The fork/exec/descriptor positive control runs as an ordinary
 UID with a synthetic root/drop stage. The real demo executor's offline control
 refuses that UID. None establishes a real UID transition, privileged kill,
 account creation, complete host census, production isolation or VM qualification.
+
+Launch-record fixtures exercise both real approved values, third/near-miss
+refusal, request/roster mismatches, exact ID grammar and byte digest, exclusive
+rename, single-link 0444 publication, symlink/stale-temporary collisions, short
+writes, and faults before and after publication. Ownership and root invocation
+are synthetic over private owned files; these tests install nothing under
+`/run` and establish no native privilege or runtime qualification.
 
 After any later admitted demo, the responsible operator first closes dispatcher
 admission, confirms whole-account absence for every admitted attempt, and exports

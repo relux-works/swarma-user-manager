@@ -30,6 +30,10 @@ LAUNCHER = '/usr/local/libexec/swarma/swarma-user-launcher'
 HELPER = '/usr/local/libexec/swarma/swarma-user-manager'
 EXECUTOR = '/usr/local/libexec/swarma/swarma-demo-executor'
 EXECUTOR_ID = 'swarma-demo-executor'
+CODEX_EXECUTOR_ID = 'swarma-demo-codex-executor'
+CODEX_EXECUTOR = '/usr/local/libexec/swarma/swarma-demo-codex-executor'
+EXECUTORS = {EXECUTOR_ID: EXECUTOR, CODEX_EXECUTOR_ID: CODEX_EXECUTOR}
+LAUNCH_RECORDS = '/run/swarma-demo/launch-records'
 UID_MIN, UID_MAX = 30000, 30019
 PLAN_MAX, LAUNCH_MAX, STOP_MAX = 48 * 1024, 80 * 1024, 16 * 1024
 OUTPUT_MAX, COPY_MAX, ENTRY_MAX = 1024 * 1024, 256 * 1024 * 1024, 20000
@@ -148,7 +152,7 @@ def decode(data, launch):
         closed(obj, ('v', 'op', 'request_id', 'generation', 'execution_id', 'epoch', 'executor', 'plan'))
         if obj['op'] != 'launch.start' or not integer(obj['epoch'], 1, 2**53 - 1):
             refuse('request_invalid')
-        if obj['executor'] != EXECUTOR_ID:
+        if type(obj['executor']) is not str or obj['executor'] not in EXECUTORS:
             refuse('executor_not_approved')
         raw = obj['plan']
         if type(raw) is not str or len(raw) > 64 * 1024:
@@ -392,7 +396,7 @@ def validate_roster(obj):
         refuse('state_unavailable')
     ex = obj['executor']
     closed(ex, ('id', 'path', 'sha256'))
-    if ex['id'] != EXECUTOR_ID or ex['path'] != EXECUTOR or type(ex['sha256']) is not str or not SHA.fullmatch(ex['sha256']):
+    if type(ex['id']) is not str or ex['id'] not in EXECUTORS or ex['path'] != EXECUTORS[ex['id']] or type(ex['sha256']) is not str or not SHA.fullmatch(ex['sha256']):
         refuse('executor_not_approved')
     runtime = obj['runtime']
     closed(runtime, ('admitted', 'inventory_qualified', 'creation_exclusion_qualified', 'interpreter_qualified'))
@@ -464,6 +468,85 @@ def target(roster, gen):
         if row['generation'] == gen:
             return row
     refuse('generation_not_active')
+
+
+def rename_exclusive(source, name, destination, final):
+    # Linux RENAME_NOREPLACE: ordinary rename would overwrite authority. There
+    # is no fallback to a check-then-rename or a transient two-link publication.
+    libc = ctypes.CDLL(None, use_errno=True)
+    rename = getattr(libc, 'renameat2', None)
+    if rename is None:
+        refuse('state_unavailable')
+    rename.argtypes = (ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint)
+    rename.restype = ctypes.c_int
+    if rename(source, os.fsencode(name), destination, os.fsencode(final), 1) != 0:
+        number = ctypes.get_errno()
+        raise OSError(number, os.strerror(number))
+
+
+def write_launch_record(roster, row, request, plan):
+    """Publish authority from the protected current roster and decoded intake.
+
+    Called under transition exclusion with the child behind its root barrier.
+    No caller chooses a directory, UID, generation, boot or digest. Published
+    authority is retained even if a later barrier/exec/deadline fails.
+    """
+    if os.getuid() != 0 or os.geteuid() != 0:
+        refuse('not_root')
+    trusted = load_roster()
+    if trusted != roster or target(trusted, request['generation']) != row:
+        refuse('target_not_owned')
+    checked, decoded = decode(encoded(request), True)
+    if checked['executor'] != trusted['executor']['id'] or decoded != plan:
+        refuse('executor_not_approved' if checked['executor'] != trusted['executor']['id'] else 'request_invalid')
+    value = {'execution_id': checked['execution_id'], 'uid': row['uid'],
+             'generation': row['generation'], 'plan_sha256': digest(decoded),
+             'boot_id': trusted['boot_id']}
+    data = encoded(value)
+    # Stage outside the enumerated consumer directory. No partial/temporary
+    # record (or two-link intermediate) can invalidate an already pinned launch.
+    staging = protected('/run/swarma-demo', mode=0o755, directory=True)
+    directory, fd, created, published = None, None, False, False
+    temporary, final = '.' + checked['execution_id'] + '.launch-new', checked['execution_id'] + '.json'
+    try:
+        directory = protected(LAUNCH_RECORDS, mode=0o755, directory=True)
+        fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC,
+                     0o600, dir_fd=staging)
+        created = True
+        info = os.fstat(fd)
+        if info.st_uid != 0 or info.st_gid != 0 or info.st_nlink != 1 or not stat.S_ISREG(info.st_mode):
+            refuse('state_unavailable')
+        no_acl(fd)
+        view = memoryview(data)
+        while view:
+            size = os.write(fd, view)
+            if size <= 0:
+                refuse('state_unavailable')
+            view = view[size:]
+        os.fchmod(fd, 0o444)
+        os.fsync(fd)
+        closing, fd = fd, None
+        os.close(closing)
+        rename_exclusive(staging, temporary, directory, final)
+        published = True
+        created = False
+        os.fsync(directory)
+        os.fsync(staging)
+    finally:
+        try:
+            if fd is not None:
+                os.close(fd)
+        finally:
+            try:
+                if created and not published:
+                    os.unlink(temporary, dir_fd=staging)
+                    os.fsync(staging)
+            finally:
+                try:
+                    if directory is not None:
+                        os.close(directory)
+                finally:
+                    os.close(staging)
 
 
 class Store:
@@ -725,6 +808,8 @@ def launch(roster, uid, request, plan, store, backend, started):
 
 def launch_locked(roster, uid, request, plan, store, backend, started):
     authorize(roster, uid)
+    if request['executor'] != roster['executor']['id']:
+        refuse('executor_not_approved')
     row = target(roster, request['generation'])
     deadline = started + RECEIPT
     with store.locked():
@@ -1180,12 +1265,18 @@ def spawn(backend, row, request, plan, persist, deadline):
                    'boot_id': current_boot(), 'session_id': member.session_id}
         persist(receipt)
         backend.launch_evidence.append({'stage': 'receipt_persisted', 'at': utc(), 'monotonic_seconds': time.monotonic()})
+        write_launch_record(backend.roster, row, request, plan)
+        backend.launch_evidence.append({'stage': 'launch_record_published', 'at': utc(), 'monotonic_seconds': time.monotonic()})
+        if time.monotonic() >= deadline:
+            refuse('request_timeout')
         os.write(gate_w, b'R')
         read_barrier(status_r, deadline, b'dropped\n')
         actual = process(child)
         if actual.start_time != member.start_time or actual.uids != (row['uid'],) * 4 or actual.gids != (row['gid'],) * 4:
             return 'unknown'
         backend.launch_evidence.append({'stage': 'drop_verified', 'at': utc(), 'monotonic_seconds': time.monotonic()})
+        if time.monotonic() >= deadline:
+            refuse('request_timeout')
         os.write(gate_w, b'E')
         # EOF means the CLOEXEC status pipe closed. It is not readiness or work
         # success: the separate executor identity witness must be read later.
