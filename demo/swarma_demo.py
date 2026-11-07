@@ -38,6 +38,14 @@ GEN = re.compile(r'[0-9a-f]{32}\Z')
 SHA = re.compile(r'[0-9a-f]{64}\Z')
 BOOT = re.compile(r'[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\Z')
 NAMES = ('swarma-demo-01', 'swarma-demo-02', 'swarma-demo-03')
+OPERATOR = {'name': 'agent', 'uid': 1001, 'gid': 1001}
+DISPATCHER_NAME, DISPATCHER_ID = 'swarma-demo-dispatcher', 1101
+DISPATCHER_HOME = '/var/lib/swarma-demo-dispatcher'
+# Frozen Git entries only; never follow or flatten these links.
+COPY_EXCLUSIONS = dict.fromkeys(('.claude/skills/swarma-user-manager',
+                                '.codex/skills/swarma-user-manager'),
+                               'de4c19a2c482d19fed882eca9fd6df09de71040b')
+STATE_MAX, EVENT_MAX = 128 * 1024, 256
 
 
 class Refusal(Exception):
@@ -85,7 +93,7 @@ def generation(value):
     return type(value) is str and GEN.fullmatch(value) is not None and value != '0' * 32
 
 
-def strict(data, cap):
+def bounded_json(data, cap, list_max):
     if len(data) > cap:
         refuse('request_too_large')
 
@@ -109,7 +117,7 @@ def strict(data, cap):
                 walk(key, depth + 1)
                 walk(val, depth + 1)
         if type(value) is list:
-            if len(value) > 64:
+            if len(value) > list_max:
                 refuse('request_invalid')
             for val in value:
                 walk(val, depth + 1)
@@ -120,6 +128,17 @@ def strict(data, cap):
         return value
     except (ValueError, UnicodeError, RecursionError):
         refuse('request_invalid')
+
+
+def strict(data, cap):
+    # Request/roster intake keeps its original 64-element bound.
+    return bounded_json(data, cap, 64)
+
+
+def state_decode(data):
+    # Protected internal evidence has a separate byte/event bound. Requests
+    # cannot select this codec, and Store.write validates it before publication.
+    return bounded_json(data, STATE_MAX, EVENT_MAX)
 
 
 def decode(data, launch):
@@ -235,13 +254,13 @@ def read_bounded(fd, cap):
 
 
 def manifest(source, deadline, destination=None, owner=None):
-    """Descriptor-relative private copy; excludes only top-level .git administration.
+    """Descriptor-relative copy with two exact frozen source-link exclusions.
 
-    Refuses *all* links, including tracked skill links at the frozen source. That
-    known contract conflict is not silently resolved by flattening or omission.
+    The copied regular content digest excludes these links; the source manifest
+    records their exact Git path/mode/blob. An account-owned copy permits none.
     """
     root = os.open(source, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
-    total, count, entries = 0, 0, []
+    total, count, entries, excluded = 0, 0, [], []
     try:
         def walk(parent, relative, depth):
             nonlocal total, count
@@ -262,7 +281,21 @@ def manifest(source, deadline, destination=None, owner=None):
                 path = relative + '/' + name if relative else name
                 before = os.stat(name, dir_fd=parent, follow_symlinks=False)
                 if stat.S_ISLNK(before.st_mode):
-                    refuse('path_is_link')
+                    if owner is not None or path not in COPY_EXCLUSIONS:
+                        refuse('path_is_link')
+                    raw = os.fsencode(os.readlink(name, dir_fd=parent))
+                    blob = hashlib.sha1(b'blob ' + str(len(raw)).encode() + b'\0' + raw,
+                                        usedforsecurity=False).hexdigest()
+                    after = os.stat(name, dir_fd=parent, follow_symlinks=False)
+                    if (after.st_dev, after.st_ino, after.st_mode, after.st_mtime_ns, after.st_ctime_ns) != (before.st_dev, before.st_ino, before.st_mode, before.st_mtime_ns, before.st_ctime_ns):
+                        refuse('copy_changed')
+                    if blob != COPY_EXCLUSIONS[path]:
+                        refuse('path_is_link')
+                    excluded.append({'path': path, 'mode': '120000', 'blob': blob,
+                                     'status': 'excluded-by-freeze'})
+                    continue
+                if path in COPY_EXCLUSIONS:
+                    refuse('copy_changed')
                 if not stat.S_ISDIR(before.st_mode) and not stat.S_ISREG(before.st_mode):
                     refuse('copy_special_file')
                 fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC | (os.O_DIRECTORY if stat.S_ISDIR(before.st_mode) else 0), dir_fd=parent)
@@ -318,7 +351,7 @@ def manifest(source, deadline, destination=None, owner=None):
                 finally:
                     os.close(fd)
         walk(root, '', 0)
-        return {'digest': digest(encoded(entries)), 'entries': count, 'bytes': total}
+        return {'digest': digest(encoded(entries)), 'entries': count, 'bytes': total, 'excluded': excluded}
     finally:
         os.close(root)
 
@@ -332,14 +365,14 @@ def validate_roster(obj):
     closed(obj, ('format', 'source_revision', 'boot_id', 'operator', 'dispatcher', 'executor', 'runtime', 'accounts'))
     if obj['format'] != 'swarma-user-manager demo-roster/1' or obj['source_revision'] != BASE or type(obj['boot_id']) is not str or not BOOT.fullmatch(obj['boot_id']):
         refuse('state_unavailable')
-    closed(obj['operator'], ('name', 'uid'))
-    if obj['operator']['name'] != 'swarma-operator' or not integer(obj['operator']['uid'], 1, 2**32 - 2):
+    closed(obj['operator'], ('name', 'uid', 'gid'))
+    if obj['operator'] != OPERATOR or any(type(obj['operator'][key]) is not int for key in ('uid', 'gid')):
         refuse('state_unavailable')
     d = obj['dispatcher']
     closed(d, ('name', 'uid', 'gid', 'principal', 'generation'))
-    if not identifier(d['name']) or not identifier(d['principal']) or not generation(d['generation']) or not integer(d['uid'], 1, 2**32 - 2) or not integer(d['gid'], 1, 2**32 - 2):
+    if d['name'] != DISPATCHER_NAME or d['principal'] != DISPATCHER_NAME or not generation(d['generation']) or type(d['uid']) is not int or type(d['gid']) is not int or d['uid'] != DISPATCHER_ID or d['gid'] != DISPATCHER_ID:
         refuse('state_unavailable')
-    if d['name'] in NAMES + ('swarma-operator',) or d['uid'] == obj['operator']['uid'] or UID_MIN <= d['gid'] <= UID_MAX or UID_MIN <= d['uid'] <= UID_MAX or UID_MIN <= obj['operator']['uid'] <= UID_MAX:
+    if d['name'] in NAMES + (OPERATOR['name'],) or d['uid'] == obj['operator']['uid'] or UID_MIN <= d['gid'] <= UID_MAX or UID_MIN <= d['uid'] <= UID_MAX or UID_MIN <= obj['operator']['uid'] <= UID_MAX:
         refuse('state_unavailable')
     ex = obj['executor']
     closed(ex, ('id', 'path', 'sha256'))
@@ -445,14 +478,15 @@ class Store:
             info = os.fstat(fd)
             if info.st_uid != 0 or info.st_gid != 0 or info.st_nlink != 1 or not stat.S_ISREG(info.st_mode) or stat.S_IMODE(info.st_mode) != 0o600:
                 refuse('state_unavailable')
-            return strict(read_bounded(fd, 128 * 1024), 128 * 1024)
+            return state_decode(read_bounded(fd, STATE_MAX))
         finally:
             os.close(fd)
 
     def write(self, gen, value):
         data = encoded(value)
-        if len(data) > 128 * 1024:
+        if len(data) > STATE_MAX:
             refuse('state_unavailable')
+        state_decode(data)  # never publish evidence our bounded reader rejects
         name = gen + '.new'
         fd = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600, dir_fd=self.fd)
         try:
@@ -532,10 +566,15 @@ class Native:
             refuse('target_not_owned')
         d = now['dispatcher']
         entry = pwd.getpwnam(d['name'])
-        if (entry.pw_uid, entry.pw_gid) != (d['uid'], d['gid']):
+        if (entry.pw_uid, entry.pw_gid, entry.pw_dir, entry.pw_shell) != (d['uid'], d['gid'], DISPATCHER_HOME, '/usr/sbin/nologin') or any(d['name'] in item.gr_mem for item in grp.getgrall()):
             refuse('caller_role_not_permitted')
-        operator = pwd.getpwnam('swarma-operator')
-        if operator.pw_uid != now['operator']['uid']:
+        primary = grp.getgrgid(d['gid'])
+        if primary.gr_name != d['name'] or primary.gr_mem:
+            refuse('caller_role_not_permitted')
+        home = protected(DISPATCHER_HOME, mode=0o700, owner=d['uid'], directory=True)
+        os.close(home)
+        operator = pwd.getpwnam(OPERATOR['name'])
+        if (operator.pw_uid, operator.pw_gid) != (now['operator']['uid'], now['operator']['gid']):
             refuse('caller_role_not_permitted')
         entry = pwd.getpwnam(row['name'])
         if (entry.pw_uid, entry.pw_gid, entry.pw_dir, entry.pw_shell) != (row['uid'], row['gid'], row['home'], '/usr/sbin/nologin'):
@@ -619,7 +658,7 @@ class Native:
             return False
         return (actual.start_time == receipt['start_time'] and actual.session_id == receipt['session_id'] and actual.uids == (row['uid'],) * 4 and actual.gids == (row['gid'],) * 4)
 
-    def signal(self, row, member, number):
+    def signal(self, row, member, number, *, deadline=None, grace_end=None):
         self.check(row)
         try:
             fd = os.pidfd_open(member.pid, 0)
@@ -628,6 +667,13 @@ class Native:
         try:
             if process(member.pid) != member or member.uids != (row['uid'],) * 4 or member.gids != (row['gid'],) * 4:
                 return 'identity_changed'
+            # Recheck after NSS, pidfd and incarnation work, immediately before
+            # the native action. The caller durably records KILL before retrying.
+            now = self.clock()
+            if deadline is not None and now >= deadline:
+                return 'deadline_expired'
+            if number == signal.SIGTERM and grace_end is not None and now >= grace_end:
+                return 'grace_expired'
             signal.pidfd_send_signal(fd, number, None, 0)
             return 'sent'
         except ProcessLookupError:
@@ -730,7 +776,8 @@ def stop_loop(roster, row, record, store, backend):
     origin = evidence['started_mono']
     deadline = origin + STOP_WHOLE
     grace_end = origin + evidence['grace_seconds']
-    late_at_entry = backend.clock() >= deadline
+    entry_end = min(deadline, evidence['kill_mono'] + FINAL_SCAN) if evidence['kill_mono'] is not None else deadline
+    late_at_entry = backend.clock() >= entry_end
     quiet_since = None
     sent = set()
     # At most 512 bounded census steps. Time and storage bounds are independent.
@@ -738,7 +785,8 @@ def stop_loop(roster, row, record, store, backend):
         backend.check(row)
         if not backend.receipt_matches(row, record['receipt']):
             evidence['outcome'] = 'pending'
-            evidence['events'].append({'at': utc(), 'elapsed_seconds': backend.clock() - origin, 'failure': 'receipt_identity_changed'})
+            if len(evidence['events']) < EVENT_MAX:
+                evidence['events'].append({'at': utc(), 'elapsed_seconds': backend.clock() - origin, 'failure': 'receipt_identity_changed'})
             break
         now = backend.clock()
         scan_end = min(deadline, now + FINAL_SCAN)
@@ -748,21 +796,30 @@ def stop_loop(roster, row, record, store, backend):
         # claiming timely absence. Never initiate an unbounded late census.
         if now >= scan_end:
             evidence['outcome'] = 'pending'
-            if now >= deadline:
-                evidence['deadline_missed'] = True
-                if late_at_entry:
-                    late_narrow(row, record, store, backend)
+            evidence['deadline_missed'] = now >= deadline
+            evidence['final_scan_deadline_missed'] = evidence['kill_mono'] is not None and now >= evidence['kill_mono'] + FINAL_SCAN
+            if late_at_entry:
+                late_narrow(row, record, store, backend)
             break
         members, complete = backend.scan(row, scan_end)
         now = backend.clock()
+        if len(members) > 64:
+            complete = False  # bounded evidence cannot establish complete absence
         evidence['last_scan_complete'] = complete
         evidence['remaining'] = len(members) if complete else None
         event = {'at': utc(), 'elapsed_seconds': now - origin, 'complete': complete,
                  'members': [dict(pid=m.pid, start_time=m.start_time, session_id=m.session_id, uids=m.uids, gids=m.gids) for m in members[:64]],
                  'member_count': len(members), 'signals': []}
-        if len(members) > 64:
-            complete = False  # bounded evidence cannot establish complete absence
+        if len(evidence['events']) >= EVENT_MAX:
+            evidence['outcome'] = 'pending'
+            break  # no unrecorded ordinary signal batch after evidence exhaustion
+        evidence['events'].append(event)
         for member in members[:64]:
+            now = backend.clock()
+            action_end = min(deadline, evidence['kill_mono'] + FINAL_SCAN) if evidence['kill_mono'] is not None else deadline
+            if now >= action_end:
+                complete = False
+                break
             number = signal.SIGKILL if now >= grace_end else signal.SIGTERM
             key = (member.pid, member.start_time, int(number))
             if key in sent:
@@ -771,7 +828,12 @@ def stop_loop(roster, row, record, store, backend):
                 evidence['kill_mono'] = backend.clock()
                 with store.locked():
                     store.write(row['generation'], record)  # original KILL bound before action
-            outcome = backend.signal(row, member, number)
+            # Persistence can consume the remainder of the original budget.
+            action_end = min(deadline, evidence['kill_mono'] + FINAL_SCAN) if evidence['kill_mono'] is not None else deadline
+            if backend.clock() >= action_end:
+                complete = False
+                break
+            outcome = backend.signal(row, member, number, deadline=action_end, grace_end=grace_end)
             event['signals'].append({'pid': member.pid, 'start_time': member.start_time, 'signal': int(number), 'outcome': outcome})
             sent.add(key)
             if outcome == 'sent':
@@ -782,11 +844,6 @@ def stop_loop(roster, row, record, store, backend):
             quiet_since = None
         elif quiet_since is None:
             quiet_since = backend.clock()
-        if len(evidence['events']) < 256:
-            evidence['events'].append(event)
-        else:
-            evidence['outcome'] = 'pending'
-            break  # retain first failures; no silent evidence truncation
         now = backend.clock()
         final_end = min(deadline, (evidence['kill_mono'] + FINAL_SCAN) if evidence['kill_mono'] is not None else deadline)
         if complete and not members and quiet_since is not None and now - quiet_since >= QUIET and now < final_end:
@@ -795,6 +852,7 @@ def stop_loop(roster, row, record, store, backend):
             break
         with store.locked():
             store.write(row['generation'], record)
+        now = backend.clock()  # state persistence also consumes the same budget
         if now >= final_end:
             break
         backend.sleep(min(0.25, final_end - now))
@@ -803,11 +861,20 @@ def stop_loop(roster, row, record, store, backend):
         evidence['outcome'] = 'pending'
     with store.locked():
         store.write(row['generation'], record)
+        finished = backend.clock()
+        final_end = min(deadline, evidence['kill_mono'] + FINAL_SCAN) if evidence['kill_mono'] is not None else deadline
+        if evidence['outcome'] == 'absent' and finished >= final_end:
+            evidence['outcome'] = 'pending'
+            evidence['finished_at'] = None
+            evidence['elapsed_seconds'] = finished - origin
+            evidence['deadline_missed'] = finished >= deadline
+            evidence['final_scan_deadline_missed'] = evidence['kill_mono'] is not None and finished >= evidence['kill_mono'] + FINAL_SCAN
+            store.write(row['generation'], record)
     return record
 
 
 def late_narrow(row, record, store, backend):
-    """No new grace/census/absence claim after the original budget is missed.
+    """No new grace/census/absence claim after any applicable original bound.
 
     Revalidate and KILL previously recorded safe incarnations immediately, with
     a bounded five-second work allowance, retaining the missed original bound.
@@ -829,17 +896,18 @@ def late_narrow(row, record, store, backend):
         with store.locked():
             store.write(row['generation'], record)
     event = {'at': utc(), 'elapsed_seconds': backend.clock() - evidence['started_mono'],
-             'failure': 'original_deadline_missed', 'late_narrowing': True, 'signals': []}
+             'failure': 'original_bound_missed', 'late_narrowing': True, 'signals': []}
+    if len(evidence['events']) >= EVENT_MAX:
+        return  # retain original evidence; no signal without a recording slot
+    evidence['events'].append(event)
     for member in candidates.values():
         if backend.clock() >= end:
             break
-        result = backend.signal(row, member, signal.SIGKILL)
+        result = backend.signal(row, member, signal.SIGKILL, deadline=end)
         event['signals'].append({'pid': member.pid, 'start_time': member.start_time,
                                  'signal': int(signal.SIGKILL), 'outcome': result})
         if result == 'sent':
             evidence['killed'] += 1
-    if len(evidence['events']) < 256:
-        evidence['events'].append(event)
     with store.locked():
         store.write(row['generation'], record)
 

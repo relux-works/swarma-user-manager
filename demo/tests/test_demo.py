@@ -35,14 +35,14 @@ def roster():
     # Synthetic test pins only: never an admission for a real machine or caller.
     return {'format': 'swarma-user-manager demo-roster/1', 'source_revision': d.BASE,
             'boot_id': '11111111-1111-1111-1111-111111111111',
-            'operator': {'name': 'swarma-operator', 'uid': 1901},
-            'dispatcher': {'name': 'fixture-dispatcher', 'uid': 1900, 'gid': 1900,
-                           'principal': 'fixture-dispatcher', 'generation': 'f' * 32},
+            'operator': {'name': 'agent', 'uid': 1001, 'gid': 1001},
+            'dispatcher': {'name': 'swarma-demo-dispatcher', 'uid': 1101, 'gid': 1101,
+                           'principal': 'swarma-demo-dispatcher', 'generation': 'f' * 32},
             'executor': {'id': d.EXECUTOR_ID, 'path': d.EXECUTOR, 'sha256': 'a' * 64},
             'runtime': {'admitted': True, 'inventory_qualified': True,
                         'creation_exclusion_qualified': True, 'interpreter_qualified': True},
             'accounts': [{'name': name, 'uid': 30000 + i, 'gid': 30000 + i,
-                          'generation': str(i + 1) * 32, 'owning_dispatcher': 'fixture-dispatcher',
+                          'generation': str(i + 1) * 32, 'owning_dispatcher': 'swarma-demo-dispatcher',
                           'home': '/srv/swarma-demo/home/' + name,
                           'workspace': '/srv/swarma-demo/work/' + name,
                           'copy_digest': 'b' * 64} for i, name in enumerate(d.NAMES)]}
@@ -159,11 +159,15 @@ class FakeRunner:
             return 'unknown'
         return 'receipt_seen'
 
-    def signal(self, row, member, number):
+    def signal(self, row, member, number, *, deadline=None, grace_end=None):
         if self.store.transition:
             raise AssertionError('transition lock held over signal')
         if number == signal.SIGKILL and self.store.data[row['generation']]['stop']['kill_mono'] is None:
             raise AssertionError('KILL before durable original bound')
+        if deadline is not None and self.now >= deadline:
+            return 'deadline_expired'
+        if number == signal.SIGTERM and grace_end is not None and self.now >= grace_end:
+            return 'grace_expired'
         self.calls.append((self.now, member, number))
         if self.on_signal:
             return self.on_signal(self, member, number)
@@ -267,24 +271,30 @@ class BoundaryTests(unittest.TestCase):
             bad = roster()
             del bad['dispatcher'][field]
             self.assert_refusal('request_invalid', d.validate_roster, bad)
-        for key, value in (('home', '/tmp/foreign'), ('workspace', '/tmp/foreign'), ('uid', 1900), ('copy_digest', '')):
+        for key, value in (('home', '/tmp/foreign'), ('workspace', '/tmp/foreign'), ('uid', 1101), ('copy_digest', '')):
             bad = roster()
             bad['accounts'][0][key] = value
             self.assert_refusal('state_unavailable', d.validate_roster, bad)
         bad = roster()
         bad['operator']['name'] = 'interactive-person'
         self.assert_refusal('state_unavailable', d.validate_roster, bad)
-        for uid in (1901, 30000, 0, 1902):
+        for section, key, value in (('operator', 'uid', 1002), ('operator', 'gid', 1002),
+                                    ('dispatcher', 'uid', 1102), ('dispatcher', 'gid', 1102),
+                                    ('dispatcher', 'name', 'other-service'), ('dispatcher', 'principal', 'other-service')):
+            bad = roster()
+            bad[section][key] = value
+            self.assert_refusal('state_unavailable', d.validate_roster, bad)
+        for uid in (1001, 30000, 0, 1902):
             self.assert_refusal('caller_role_not_permitted', d.authorize, roster(), uid)
-        self.assertEqual(d.authorize(roster(), 1900), roster()['dispatcher'])
+        self.assertEqual(d.authorize(roster(), 1101), roster()['dispatcher'])
 
     def test_invocation_refuses_args_nonroot_and_forged_sudo(self):
         self.assert_refusal('argv_not_allowed', d.verified_invocation, ['--uid=30000'], {})
-        self.assert_refusal('not_root', d.verified_invocation, [], {'SUDO_UID': '1900'})
+        self.assert_refusal('not_root', d.verified_invocation, [], {'SUDO_UID': '1101'})
         with mock.patch.object(d.os, 'getuid', return_value=0), mock.patch.object(d.os, 'geteuid', return_value=0):
             for value in ('', '-1', '0', '4294967295', '1x', '\u0661'):
                 self.assert_refusal('not_invoked_by_sudo', d.verified_invocation, [], {'SUDO_UID': value})
-            self.assert_refusal('not_invoked_by_sudo', d.verified_invocation, [], {'SUDO_UID': '1900'})
+            self.assert_refusal('not_invoked_by_sudo', d.verified_invocation, [], {'SUDO_UID': '1101'})
     def test_synthetic_verified_sudo_parent_identity_positive_and_inode_mismatch(self):
         # No sudo execution: trusted-parent metadata is synthetic, descriptor
         # identity comparison is real and binds the exact opened file.
@@ -304,9 +314,9 @@ class BoundaryTests(unittest.TestCase):
                 return types.SimpleNamespace(st_uid=0, st_gid=0, st_mode=stat.S_IFREG | 0o4755,
                                              st_dev=st.st_dev, st_ino=st.st_ino, st_nlink=1)
             with mock.patch.object(d.os, 'getuid', return_value=0), mock.patch.object(d.os, 'geteuid', return_value=0), mock.patch.object(d.os, 'getppid', return_value=500), mock.patch.object(d.os, 'readlink', return_value='/usr/bin/sudo'), mock.patch.object(d.os, 'stat', return_value=types.SimpleNamespace(st_uid=0)), mock.patch.object(d, 'protected', side_effect=lambda _: original_open(expected, os.O_RDONLY | os.O_CLOEXEC)), mock.patch.object(d.os, 'open', side_effect=fixture_open), mock.patch.object(d.os, 'fstat', side_effect=fixture_fstat):
-                self.assertEqual(d.verified_invocation([], {'SUDO_UID': '1900'}), 1900)
+                self.assertEqual(d.verified_invocation([], {'SUDO_UID': '1101'}), 1101)
                 actual_target[0] = other
-                self.assert_refusal('not_invoked_by_sudo', d.verified_invocation, [], {'SUDO_UID': '1900'})
+                self.assert_refusal('not_invoked_by_sudo', d.verified_invocation, [], {'SUDO_UID': '1101'})
 
 
 
@@ -318,10 +328,10 @@ class AttemptTests(unittest.TestCase):
         self.runner = FakeRunner(self.r, self.store)
 
     def start(self):
-        return d.launch(self.r, 1900, launch_request(), b'opaque\x00\xff', self.store, self.runner, self.runner.clock())
+        return d.launch(self.r, 1101, launch_request(), b'opaque\x00\xff', self.store, self.runner, self.runner.clock())
 
     def end(self, grace=10):
-        return d.stop(self.r, 1900, stop_request(grace), self.store, self.runner)
+        return d.stop(self.r, 1101, stop_request(grace), self.store, self.runner)
 
     def test_positive_one_start_receipt_before_drop_and_terminal_replay(self):
         rec = self.start()
@@ -359,7 +369,7 @@ class AttemptTests(unittest.TestCase):
         for key, value in (('execution_id', 'EX-second'), ('epoch', 4), ('request_id', 'second-effect'), ('plan', base64.b64encode(b'changed').decode())):
             request = launch_request()
             request[key] = value
-            self.assert_refusal('execution_already_started', d.launch, self.r, 1900, request, b'changed', self.store, self.runner, self.runner.clock())
+            self.assert_refusal('execution_already_started', d.launch, self.r, 1101, request, b'changed', self.store, self.runner, self.runner.clock())
         self.assertEqual(self.runner.spawn_count, 1)
 
     def test_dirty_or_partial_census_prevents_physical_launch(self):
@@ -467,10 +477,10 @@ class AttemptTests(unittest.TestCase):
 
     def test_missing_receipt_wrong_generation_latest_receipt_and_caller(self):
         self.start()
-        self.assert_refusal('caller_role_not_permitted', d.stop, self.r, 1901, stop_request(), self.store, self.runner)
+        self.assert_refusal('caller_role_not_permitted', d.stop, self.r, 1001, stop_request(), self.store, self.runner)
         request = stop_request()
         request['args']['execution_id'] = 'EX-old'
-        self.assert_refusal('state_conflict', d.stop, self.r, 1900, request, self.store, self.runner)
+        self.assert_refusal('state_conflict', d.stop, self.r, 1101, request, self.store, self.runner)
         self.store.data['1' * 32]['receipt'] = None
         self.assert_refusal('state_conflict', self.end)
         self.assertEqual(self.runner.calls, [])
@@ -480,9 +490,91 @@ class AttemptTests(unittest.TestCase):
         self.runner.members.clear()
         self.runner.complete = False
         self.runner.now += 5
-        result = d.stop(self.r, 1900, stop_request(), self.store, self.runner, started=100)
+        result = d.stop(self.r, 1101, stop_request(), self.store, self.runner, started=100)
         self.assertEqual(result['stop']['started_mono'], 100)
         self.assertAlmostEqual(self.runner.now, 145)
+
+
+    def interrupted_stop(self, grace, at):
+        self.start()
+        row = self.r['accounts'][0]
+        self.runner.members.append(d.Process(43, 901, 43, (row['uid'],) * 4, (row['gid'],) * 4))
+        class Interrupted(Exception):
+            pass
+        self.runner.on_scan = lambda runner: (_ for _ in ()).throw(Interrupted())
+        with self.assertRaises(Interrupted):
+            self.end(grace)
+        self.runner.on_scan = None
+        self.runner.now = at
+
+    def test_finite_signal_cost_rechecks_original_grace_between_members(self):
+        self.interrupted_stop(30, 129.75)
+        def cost(runner, member, number):
+            runner.now += 0.25
+            if number == signal.SIGKILL:
+                runner.members = [p for p in runner.members if p != member]
+            return 'sent'
+        self.runner.on_signal = cost
+        result = self.end(30)
+        self.assertFalse([c for c in self.runner.calls if c[0] >= 130 and c[2] == signal.SIGTERM])
+        self.assertEqual(result['stop']['started_mono'], 100)
+        self.assertEqual(result['stop']['outcome'], 'absent')
+
+    def test_finite_signal_cost_starts_no_ordinary_action_at_original_deadline(self):
+        self.interrupted_stop(0, 144.75)
+        def cost(runner, member, number):
+            runner.now += 0.25
+            return 'sent'
+        self.runner.on_signal = cost
+        result = self.end(0)
+        self.assertEqual([c[0] for c in self.runner.calls], [144.75])
+        self.assertEqual(result['stop']['outcome'], 'pending')
+        self.assertEqual(result['stop']['elapsed_seconds'], 45)
+
+    def test_final_publication_crossing_bound_retains_pending(self):
+        self.start()
+        self.runner.members.clear()
+        original_write = self.store.write
+        def cost(gen, value):
+            original_write(gen, value)
+            if value['stop']['outcome'] == 'absent':
+                self.runner.now = value['stop']['started_mono'] + d.STOP_WHOLE
+        self.store.write = cost
+        result = self.end()
+        self.assertEqual(result['stop']['outcome'], 'pending')
+        self.assertIsNone(result['stop']['finished_at'])
+        self.assertEqual(self.store.read('1' * 32)['stop']['outcome'], 'pending')
+
+    def test_first_kill_persistence_cost_cannot_start_action_after_deadline(self):
+        self.interrupted_stop(0, 144.75)
+        original_write = self.store.write
+        def cost(gen, value):
+            original_write(gen, value)
+            self.runner.now += 0.25
+        self.store.write = cost
+        result = self.end(0)
+        self.assertEqual(self.runner.calls, [])
+        self.assertEqual(result['stop']['kill_mono'], 144.75)
+        self.assertEqual(result['stop']['started_mono'], 100)
+        self.assertEqual(result['stop']['outcome'], 'pending')
+
+    def test_expired_earlier_cutoff_and_whole_cutoff_both_narrow_without_census(self):
+        self.start()
+        self.runner.survive_term = self.runner.survive_kill = True
+        first = self.end(0)
+        origin, kill = first['stop']['started_mono'], first['stop']['kill_mono']
+        for at in (kill + d.FINAL_SCAN + 0.01, origin + d.STOP_WHOLE + 0.01):
+            self.runner.now = at
+            count = len(self.runner.calls)
+            self.runner.on_scan = lambda runner: self.fail('late continuation renewed census')
+            result = self.end(0)
+            self.assertGreater(len(self.runner.calls), count)
+            self.assertEqual(self.runner.calls[count][0], at)
+            self.assertEqual(self.runner.calls[count][2], signal.SIGKILL)
+            self.assertEqual(result['stop']['started_mono'], origin)
+            self.assertEqual(result['stop']['kill_mono'], kill)
+            self.assertEqual(result['stop']['outcome'], 'pending')
+            self.assertTrue(result['stop']['events'][-1]['late_narrowing'])
 
 
 class PrimitiveTests(unittest.TestCase):
@@ -642,6 +734,21 @@ class PrimitiveTests(unittest.TestCase):
                 d.protected('/usr/bin/python3', mode=0o755)  # actual no-follow link
 
 
+    def test_native_signal_rechecks_clock_after_identity_and_nss_work(self):
+        r = roster()
+        row = r['accounts'][0]
+        member = d.Process(42, 900, 42, (row['uid'],) * 4, (row['gid'],) * 4)
+        native = d.Native(r)
+        native.check = lambda _: None
+        native.clock = lambda: 130.0
+        with mock.patch.object(d.os, 'pidfd_open', return_value=999), mock.patch.object(d.os, 'close'), mock.patch.object(d, 'process', return_value=member), mock.patch.object(d.signal, 'pidfd_send_signal') as send:
+            self.assertEqual(native.signal(row, member, signal.SIGTERM, deadline=145, grace_end=130), 'grace_expired')
+            self.assertEqual(native.signal(row, member, signal.SIGKILL, deadline=130), 'deadline_expired')
+            send.assert_not_called()
+            self.assertEqual(native.signal(row, member, signal.SIGKILL, deadline=145), 'sent')
+            send.assert_called_once_with(999, signal.SIGKILL, None, 0)
+
+
 class StateTests(unittest.TestCase):
     @contextmanager
     def fixture(self):
@@ -708,6 +815,51 @@ class StateTests(unittest.TestCase):
                 self.assertEqual(json.loads((receipts / 'EX-fixture.json').read_bytes()), receipt)
 
 
+    def test_real_persisted_maximum_grace_and_partial_continuations_roundtrip(self):
+        for partial in (False, True):
+            with self.subTest(partial=partial), self.fixture() as (disk, root):
+                r = roster()
+                class PersistedStore(MemoryStore):
+                    def read(self, gen):
+                        return disk.read(gen)
+                    def write(self, gen, value):
+                        super().write(gen, value)
+                        disk.write(gen, value)
+                store = PersistedStore(r)
+                gen = r['accounts'][0]['generation']
+                disk.write(gen, store.data[gen])
+                runner = FakeRunner(r, store)
+                d.launch(r, r['dispatcher']['uid'], launch_request(), b'opaque', store, runner, runner.clock())
+                runner.survive_term = True
+                if partial:
+                    runner.members.clear()
+                    runner.complete = False
+                request = stop_request(30)
+                record = d.stop(r, r['dispatcher']['uid'], request, store, runner)
+                loaded = store.read(gen)
+                self.assertGreater(len(loaded['stop']['events']), 64)
+                self.assertLessEqual(len(loaded['stop']['events']), 256)
+                self.assertEqual(loaded, json.loads(d.encoded(record)))
+                before = len(runner.calls)
+                replay = d.stop(r, r['dispatcher']['uid'], request, store, runner)
+                self.assertEqual(replay['stop']['started_mono'], 100)
+                self.assertEqual(replay['stop']['outcome'], 'pending' if partial else 'absent')
+                if not partial:
+                    self.assertEqual(len(runner.calls), before)
+
+    def test_state_codec_256_event_limit_keeps_request_limit_64(self):
+        with self.fixture() as (store, root):
+            value = {'stop': {'events': [{'complete': False}] * 256}}
+            store.write('1' * 32, value)
+            self.assertEqual(store.read('1' * 32), value)
+            with self.assertRaises(d.Refusal):
+                d.strict(d.encoded(value), d.STATE_MAX)
+            value['stop']['events'].append({'complete': False})
+            with self.assertRaises(d.Refusal):
+                store.write('1' * 32, value)
+            self.assertEqual(len(store.read('1' * 32)['stop']['events']), 256)
+
+
 class OperatorTests(unittest.TestCase):
     def test_recorded_preflight_positive_has_no_account_effect(self):
         with tempfile.TemporaryDirectory() as private:
@@ -722,6 +874,64 @@ class OperatorTests(unittest.TestCase):
             self.assertEqual(evidence['outcome'], 'preflight_only')
             self.assertFalse(evidence['accounts_changed'])
             self.assertFalse(evidence['apply'])
+
+    def test_synthetic_apply_creates_only_pinned_dispatcher_and_worker_commands(self):
+        # All privileged operations are intercepted. Only the private admission
+        # and report use real filesystem I/O; no account/native claim is made.
+        with tempfile.TemporaryDirectory() as private:
+            admission, record = Path(private, 'admission.json'), Path(private, 'record.json')
+            operator_home = Path(private, 'operator')
+            operator_home.mkdir(mode=0o700)
+            r = roster()
+            admission.write_bytes(d.encoded(r))
+            actual_open = os.open
+            def opened(path, *args, **kwargs):
+                if path == '/var/lib/swarma-demo-provision.json':
+                    path = record
+                if path == d.ROSTER:
+                    path = Path(private, 'written-roster.json')
+                return actual_open(path, *args, **kwargs)
+            copied = {'digest': 'b' * 64, 'entries': 1, 'bytes': 0, 'excluded': []}
+            class SyntheticStore:
+                def write(self, gen, value):
+                    pass
+                def close(self):
+                    pass
+            command_lines, directories, ownership = [], [], []
+            def command(argv, home, timeout=5):
+                command_lines.append(argv)
+                return {'exit': 0, 'timeout': False, 'output_over_cap': False,
+                        'scope': 'synthetic command interception; never executed'}
+            from contextlib import ExitStack
+            with ExitStack() as patches:
+                patches.enter_context(mock.patch.object(p.sys, 'argv', ['provision.py', '--admission', str(admission), '--source', '/source', '--record', '/var/lib/swarma-demo-provision.json', '--apply']))
+                patches.enter_context(mock.patch.object(p.os, 'open', side_effect=opened))
+                patches.enter_context(mock.patch.object(p.demo, 'protected', side_effect=lambda *a, **kw: actual_open(admission, os.O_RDONLY | os.O_CLOEXEC)))
+                patches.enter_context(mock.patch.object(p.demo, 'verified_invocation', return_value=1001))
+                patches.enter_context(mock.patch.object(p.demo, 'current_boot', return_value=r['boot_id']))
+                patches.enter_context(mock.patch.object(p, 'source_check', return_value=(copied, [])))
+                patches.enter_context(mock.patch.object(p, 'command', side_effect=command))
+                patches.enter_context(mock.patch.object(p.demo.pwd, 'getpwall', return_value=[]))
+                patches.enter_context(mock.patch.object(p.demo.grp, 'getgrall', return_value=[]))
+                patches.enter_context(mock.patch.object(p.demo.pwd, 'getpwnam', side_effect=KeyError))
+                patches.enter_context(mock.patch.object(p.demo.grp, 'getgrnam', side_effect=KeyError))
+                patches.enter_context(mock.patch.object(p.os, 'mkdir', side_effect=lambda path, mode=0o777: directories.append((path, mode))))
+                patches.enter_context(mock.patch.object(p.os, 'chmod'))
+                patches.enter_context(mock.patch.object(p.os, 'chown', side_effect=lambda path, uid, gid, **kw: ownership.append((path, uid, gid))))
+                patches.enter_context(mock.patch.object(p.demo, 'Store', SyntheticStore))
+                patches.enter_context(mock.patch.object(p, 'manifest', return_value=copied))
+                patches.enter_context(mock.patch.object(p, 'fresh_git', return_value={'scope': 'synthetic'}))
+                patches.enter_context(mock.patch.object(p, 'chown_private'))
+                temporary = patches.enter_context(mock.patch.object(tempfile, 'TemporaryDirectory'))
+                temporary.return_value.__enter__.return_value = str(operator_home)
+                self.assertEqual(p.main(), 0)
+            self.assertEqual(len(command_lines), 8)
+            self.assertEqual(command_lines[0], ['/usr/sbin/groupadd', '--gid', '1101', 'swarma-demo-dispatcher'])
+            self.assertEqual(command_lines[1], ['/usr/sbin/useradd', '--uid', '1101', '--gid', '1101', '--groups', '', '--no-create-home', '--no-user-group', '--no-log-init', '--home-dir', '/var/lib/swarma-demo-dispatcher', '--shell', '/usr/sbin/nologin', '--password', '!', 'swarma-demo-dispatcher'])
+            self.assertEqual([argv[-1] for argv in command_lines[2:]], [name for name in d.NAMES for _ in range(2)])
+            self.assertIn((d.DISPATCHER_HOME, 0o700), directories)
+            self.assertIn((d.DISPATCHER_HOME, 1101, 1101), ownership)
+            self.assertEqual(json.loads(record.read_bytes())['outcome'], 'provisioned_not_launched')
 
     def test_apply_transition_refusal_is_recorded_without_account_commands(self):
         with tempfile.TemporaryDirectory() as private:
@@ -810,10 +1020,32 @@ class CopyTests(unittest.TestCase):
                 p.manifest(source, time.monotonic() + 15)
             self.assertEqual(exc.exception.code, 'copy_bound_exceeded')
 
-    def test_actual_frozen_skill_link_is_refused_not_flattened(self):
-        with self.assertRaises(p.demo.Refusal) as exc:
-            p.manifest(str(DEMO_DIR.parent), time.monotonic() + 5)
-        self.assertEqual(exc.exception.code, 'path_is_link')
+    def test_frozen_links_excluded_exactly_real_skill_retained_and_third_refused(self):
+        with tempfile.TemporaryDirectory() as destination:
+            result = p.manifest(str(DEMO_DIR.parent), time.monotonic() + 10, destination)
+            self.assertEqual(result['excluded'], [dict(path=path, mode='120000', blob=blob,
+                             status='excluded-by-freeze') for path, blob in sorted(d.COPY_EXCLUSIONS.items())])
+            for path in d.COPY_EXCLUSIONS:
+                self.assertFalse(Path(destination, path).exists())
+                self.assertFalse(Path(destination, path).is_symlink())
+            self.assertTrue(Path(destination, 'agents/skills/swarma-user-manager').is_dir())
+            self.assertEqual(p.manifest(destination, time.monotonic() + 10)['digest'], result['digest'])
+            Path(destination, 'third-link').symlink_to('agents/skills/swarma-user-manager')
+            with self.assertRaises(p.demo.Refusal) as exc:
+                p.manifest(destination, time.monotonic() + 10)
+            self.assertEqual(exc.exception.code, 'path_is_link')
+
+    def test_frozen_exclusion_refuses_changed_blob_mode_and_copy_reinsertion(self):
+        for kind in ('changed-target', 'regular', 'private-copy'):
+            with self.subTest(kind=kind), tempfile.TemporaryDirectory() as root:
+                path = Path(root, '.codex/skills/swarma-user-manager')
+                path.parent.mkdir(parents=True)
+                if kind == 'regular':
+                    path.write_bytes(b'../../agents/skills/swarma-user-manager')
+                else:
+                    path.symlink_to('changed' if kind == 'changed-target' else '../../agents/skills/swarma-user-manager')
+                with self.assertRaises(p.demo.Refusal):
+                    p.manifest(root, time.monotonic() + 5, owner=os.getuid() if kind == 'private-copy' else None)
 
     def test_operator_tool_capture_drains_beyond_both_caps_and_preserves_timeout(self):
         with tempfile.TemporaryDirectory() as home:

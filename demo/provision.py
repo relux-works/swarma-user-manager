@@ -117,7 +117,16 @@ def source_check(source, home, log=None):
         log.extend(receipts)
     if receipts[0]['exit'] != 0 or receipts[0]['stdout'].strip() != demo.BASE or receipts[1]['exit'] != 0 or receipts[1]['stdout'] or any(r['timeout'] or r['output_over_cap'] for r in receipts):
         demo.refuse('copy_source_revision')
-    return manifest(source, time.monotonic() + 30), receipts
+    copied = manifest(source, time.monotonic() + 30)
+    expected = [{'path': path, 'mode': '120000', 'blob': blob,
+                 'status': 'excluded-by-freeze'} for path, blob in sorted(demo.COPY_EXCLUSIONS.items())]
+    if copied['excluded'] != expected:
+        demo.refuse('copy_source_revision')
+    # The real skill directory is regular source content and must remain.
+    skill = os.open(source + '/agents/skills/swarma-user-manager',
+                    os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    os.close(skill)
+    return copied, receipts
 
 
 def fresh_git(path, home):
@@ -164,8 +173,8 @@ def main():
                 demo.refuse('qualification_required')
             admission_fd = demo.protected(args.admission, mode=0o644)
             os.close(admission_fd)
-        # This preflight precedes every account or directory mutation. At the
-        # current frozen base it refuses the tracked symlinks, as required.
+        # This preflight precedes account/directory mutation and verifies both
+        # exact frozen exclusions, preserving the real skill source directory.
         import tempfile
         with tempfile.TemporaryDirectory(prefix='demo-operator-', dir=os.environ.get('TMPDIR', '/tmp')) as home:
             os.chmod(home, 0o700)
@@ -193,6 +202,20 @@ def main():
                     pass
                 else:
                     demo.refuse('user_exists_unmanaged')
+            # The dispatcher identity is the separately pinned demo service,
+            # created only by this admitted operator path. Never adopt/reuse it.
+            if any(item.pw_uid == demo.DISPATCHER_ID or item.pw_name == demo.DISPATCHER_NAME for item in demo.pwd.getpwall()) or any(item.gr_gid == demo.DISPATCHER_ID or item.gr_name == demo.DISPATCHER_NAME for item in demo.grp.getgrall()):
+                demo.refuse('user_exists_unmanaged')
+            for command_line in (['/usr/sbin/groupadd', '--gid', str(demo.DISPATCHER_ID), demo.DISPATCHER_NAME],
+                                 ['/usr/sbin/useradd', '--uid', str(demo.DISPATCHER_ID), '--gid', str(demo.DISPATCHER_ID), '--groups', '', '--no-create-home', '--no-user-group', '--no-log-init', '--home-dir', demo.DISPATCHER_HOME, '--shell', '/usr/sbin/nologin', '--password', '!', demo.DISPATCHER_NAME]):
+                report['accounts_changed'] = True  # includes uncertain effects
+                result = command(command_line, home)
+                report['commands'].append(result)
+                if result['exit'] != 0 or result['timeout'] or result['output_over_cap']:
+                    demo.refuse('account_creation_unknown')
+            os.mkdir(demo.DISPATCHER_HOME, 0o700)
+            os.chmod(demo.DISPATCHER_HOME, 0o700)
+            os.chown(demo.DISPATCHER_HOME, demo.DISPATCHER_ID, demo.DISPATCHER_ID, follow_symlinks=False)
             # State is O_EXCL provisioning ownership. Existing state, including
             # a partial/failed run, is never removed or automatically resumed.
             for parent in ('/srv/swarma-demo', '/srv/swarma-demo/home', '/srv/swarma-demo/work', '/etc/swarma-demo'):
