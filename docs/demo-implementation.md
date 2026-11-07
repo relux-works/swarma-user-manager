@@ -1,0 +1,214 @@
+# Disposable account launch/stop demo
+
+This is a source candidate for independent privileged-boundary review. It adds
+standalone demo executables and an operator procedure alongside the existing
+station implementation. It changes no production command, daemon, policy,
+qualification flag or dispatcher. Runtime admission and installation remain
+closed pending a disposable VM route, source approval, two fresh independent
+reviews of the exact candidate, and native qualification of the selected path.
+
+The source/copy baseline is `7d705966aa92acaebea2d55060dcb84ddf7e5031`.
+The launch/stop envelope comes from [helper §§2, 4.7, 7](../spec/helper.md)
+and the P1 documentation at
+[`81c4981`](https://github.com/relux-works/swarma-user-manager/blob/81c4981/docs/design/m0-launch-call-contract.md).
+The frozen demo values below supersede that document's open value placeholders.
+This file does not revise the documentation branch or implement the dispatcher.
+
+## Frozen values and source entrypoints
+
+| Boundary | Demo value |
+| --- | --- |
+| Precreated accounts | `swarma-demo-01`, `swarma-demo-02`, `swarma-demo-03` |
+| UID/GID | Inclusive 30000–30019; UID = primary GID, private group, no supplementary groups, no reuse |
+| Roster | `/etc/swarma-demo/roster.json`, root:root 0644 |
+| Homes | `/srv/swarma-demo/home/NAME`, account-owned 0700 |
+| Workspaces | `/srv/swarma-demo/work/NAME`, account-owned 0700 |
+| Home/work parent roots | root:root 0755 |
+| Dispatcher state | `/var/lib/swarma-demo-dispatcher`, service-owned 0700; owned by the separate dispatcher implementation |
+| Private copy | Fresh source at the exact baseline, 256 MiB, 20,000 entries; links, external hardlinks and special files refused |
+| Launcher | `/usr/local/libexec/swarma/swarma-user-launcher`, root:root 0755 |
+| Helper | `/usr/local/libexec/swarma/swarma-user-manager`, root:root 0755 |
+| Decoded/encoded plan | At most 48 KiB / 64 KiB, opaque bytes |
+| Intake | One closed JSON document; launch 80 KiB / helper 16 KiB, 5 s |
+| Launch receipt | Within the original 10 s envelope; otherwise unknown |
+| Stop | Default grace 10 s, maximum 30 s, then KILL; quiet 2 s; final scan within 5 s of KILL; whole stop at most 45 s |
+| Output | stdout and stderr independently retain at most 1 MiB, continue draining excess |
+| Clocks | Monotonic durations/deadlines, UTC evidence timestamps |
+
+[`demo/swarma_demo.py`](../demo/swarma_demo.py) is a standalone Python 3.14 Linux
+program installed as two ordinary executable copies at the fixed paths above.
+The fixed pathname selects launch or stop; arguments are refused. Its isolated
+`-IS` interpreter entry is privileged code, including its system interpreter,
+stdlib and loader. Those transitive inputs require native qualification; an
+executable script is not evidence of a qualified native platform boundary.
+There is no repository import in either installed entrypoint.
+
+[`demo/executor.c`](../demo/executor.c) builds the fixed ELF
+`/usr/local/libexec/swarma/swarma-demo-executor`. It checks its own real/effective/
+saved UID/GID, empty supplementary groups, no-new-privileges, the sealed read-only
+plan and inherited descriptors. It reads opaque FD3 bytes, writes
+`identity-witness.json` in its own workspace, and waits for explicit stop. It
+executes no plan commands. It is labelled `swarma-demo-executor` and records
+`curator_qualified: false`. No qualified Curator one-shot path is established by
+this candidate. Substituting `curator-run` is refused pending its own published,
+qualified interface and a reviewed source change.
+
+## Admission and caller custody
+
+There is no usable default roster or live account example. Admission must supply
+one actual `swarma-operator` UID and one actual dispatcher account/principal/
+generation, its numeric UID/GID, the VM boot ID, fresh per-account generations,
+private-copy content digest and the approved executor SHA-256. Numeric identity
+alone is insufficient. The root-owned roster binds each account name, UID, GID,
+generation, home, workspace and `owning_dispatcher` to the single pinned dispatcher.
+
+The closed roster record is:
+
+- `format`: `swarma-user-manager demo-roster/1`; `source_revision`: the full baseline;
+  `boot_id`: actual admitted Linux boot UUID.
+- `operator`: exactly `name,uid`, with name `swarma-operator` and a supplied UID.
+- `dispatcher`: exactly `name,uid,gid,principal,generation`; every value is supplied.
+- `executor`: exactly `id,path,sha256`, with the fixed demo ID/path and actual digest.
+- `runtime`: exactly four explicit booleans: `admitted,inventory_qualified,
+  creation_exclusion_qualified,interpreter_qualified`.
+- `accounts`: exactly three rows with `name,uid,gid,generation,owning_dispatcher,
+  home,workspace,copy_digest`.
+
+The four booleans are installer/operator gates referring to separately retained
+review and qualification evidence. Setting them does not perform qualification,
+verify a review, create a new authority or certify current process visibility.
+They must remain false before the real VM admission. The active configuration
+must remain immutable for the complete admitted attempt and stop interval.
+A changed boot, roster, ownership or service identity refuses new effects.
+Native evidence must cover continuous exclusion of alternative account ingress,
+complete initial-namespace process visibility, NSS identity custody, filesystem
+and process-call bounds, and interpreter/executable/descriptor behavior.
+
+The helpers require real/effective root plus a numeric `SUDO_UID` and a matching
+root-owned sudo parent executable inode. The UID must match the pinned dispatcher.
+The operator and worker UIDs cannot launch or use this ordinary stop interface.
+The demo helper accepts **only** `exec.stop`; create, retire, bump, observation and
+arbitrary commands are unreachable. There is no R-ALLSTOP operator wire adapter.
+
+The later VM installer must grant the actual admitted dispatcher two NOPASSWD
+rules, each with the exact fixed helper/launcher path and empty argument spec
+`""`. No template supplies a guessed dispatcher username. The human operator
+procedure uses authenticated, non-cached sudo as its existing operator contract
+requires; it receives no launcher authority or NOPASSWD operator rule. This
+candidate installs no sudoers rule, key, service, account or network policy.
+
+## Recorded provisioning and the source-copy conflict
+
+[`demo/provision.py`](../demo/provision.py) is an operator procedure, outside both
+dispatcher entrypoints. Its default is preflight; `--apply` is a later separately
+admitted VM action. It requires absolute `--admission`, `--source`, `--record`
+paths. Apply uses the fixed exclusive record
+`/var/lib/swarma-demo-provision.json`, root-only, to prevent automatic rerun or UID
+reuse. It verifies the actual operator transition, boot and admission before any
+account change, then verifies the fresh source revision and copy bounds.
+
+**The frozen source has two tracked symbolic links:**
+`.claude/skills/swarma-user-manager` and `.codex/skills/swarma-user-manager`.
+The no-links copy rule therefore refuses this source before provisioning. The
+operator must not flatten links, omit tracked content or change the baseline on
+its own. A contract-owner decision about the approved copy content is required.
+The implementation preserves this concrete blocker, with a refusal fixture.
+
+If that conflict is resolved by a later reviewed contract/source change, the
+prepared apply path reserves the complete range, refuses existing NSS users/
+groups, persists per-generation reservations, and issues only fixed groupadd/
+useradd calls for the three approved names. Password authentication is locked,
+the shell is `/usr/sbin/nologin`, and supplementary groups are empty. It creates
+private homes/workspaces/tmp/cache, copies only regular source files/directories
+using no-follow descriptors, initializes new standalone Git administration with
+no template hooks, remotes, credential helpers, alternates or global config, and
+records actual command UTC times, durations, exits/signals and bounded output.
+A partial failure retains reservations and the record; there is no rollback,
+account adoption, resume or deletion path. Apply itself has not been run.
+
+## Attempt, receipt, descriptor and stop behavior
+
+Private root helper state is `/var/lib/swarma-demo-user-manager`, mode 0700.
+This is separate from dispatcher state. Provisioning creates one root-owned
+reservation per generation. Missing state refuses; it never means permission to
+start. A generation has exactly one irreversible physical-attempt marker. A
+changed ID, epoch or plan cannot create a second start. Same-request inspection
+returns preserved facts only, including unknowns. Crashes or lost evidence
+require manual reconciliation or disposal; no automatic rearming is available.
+
+Launch validates the roster/caller, private paths and source-copy digest, checks
+zero account processes, verifies the fixed executor's SHA-256 through a retained
+ELF descriptor, and stages the complete plan in a sealed memfd reopened read only.
+It starts a session and persists a root-owned 0644 receipt at
+`STATE/receipts/GENERATION/EXECUTION.json` while the child is still root and
+waiting behind a barrier. The receipt fields remain exactly
+`execution_id,epoch,pid,start_time,boot_id,session_id`. The attempt record also
+retains the original request, caller/account binding and timing evidence.
+
+The child clears groups, ambient/bounding capabilities and all real/effective/
+saved GID/UID values, enables no-new-privileges and verifies root cannot be
+regained. The parent verifies the matching child incarnation and dropped IDs
+before releasing the exec barrier and transition lock. The executor receives
+only 0–2 and read-only FD3; executable and status descriptors are CLOEXEC.
+A trusted fixed drainer runs under the same account UID and retains capped
+workspace output, draining beyond each cap. Those output files and the identity
+witness are account-owned demo data; they make no protected metadata claim.
+
+The launch reply uses the helper-style response envelope. `ok:true`,
+`state:receipt_seen`, and the six-field receipt mean receipt observed only.
+They do not mean successful exec, readiness, useful work or absence. Failed drop,
+exec, persistence or a missed receipt budget retains the attempt and reports
+unknown. A later runtime positive witness requires the operator to read the
+executor's own identity file, compare its PID to the protected receipt, and
+independently inspect the current incarnation and approved image. This runtime
+witness is **NOT RUN**.
+
+Stop persists its original request, grace origin and deadline before signalling.
+A separate per-account stop lease serializes continuation; the shared transition
+lock is released during enumeration, signalling and waits. Signals use pidfds
+and revalidate the entire process incarnation and UID/GID tuple. Scope includes
+detached sessions and children surviving the original PID. Reused receipt PID,
+foreign identity, partial scans, signal errors and quiet-window reappearance
+retain pending evidence. Terminal absence replay does not signal.
+
+Normal stop finishes within its original 45 s budget or returns pending. It
+persists the first KILL time before action and permits no new final-scan budget
+on retry. A call already arriving after the original deadline can immediately
+revalidate/KILL previously recorded safe incarnations within a bounded 5 s work
+allowance; it never gets a fresh grace/stop budget or an absence-success claim.
+It records the missed original deadline. Ordinary continuation cannot turn late
+or unknown observations into timely absence. Stop removes no account or data.
+
+The demo local state/error details are not a new production journal or
+`effect.observe` API. Evidence records have finite byte/event/work bounds;
+exhaustion leaves the attempt reserved and unresolved. Kernel/storage hangs and
+unqualified NSS behavior cannot be turned into hard real-time guarantees by
+source tests.
+
+## Offline validation and removal
+
+Run `demo/check.sh /absolute/new-private-check-directory` as an ordinary user.
+It requires existing bwrap, Python 3.14 and GCC; it installs/downloads nothing.
+It mounts only system tools and this source read only, a private 0700 output tree,
+a new `/proc` and `/dev`, clears the environment, and unshares all namespaces.
+HOME, temporary files and caches are private absolute paths. The test recorder
+retains actual UTC bounds and exits, including failures. No Go dependencies or
+production packages are changed or downloaded by these checks.
+
+The fixtures cover strict callers/rosters/plans, one-attempt and lost-reply
+fences, receipt ordering, pidfd refusal/positive controls, escaped children,
+partial/late/quiet-race stops, real 256 MiB/20,000-entry copy limits, no-follow
+copies, independent Git state, read-only sealed maximum plans and continued
+output draining. The fork/exec/descriptor positive control runs as an ordinary
+UID with a synthetic root/drop stage. The real demo executor's offline control
+refuses that UID. None establishes a real UID transition, privileged kill,
+account creation, complete host census, production isolation or VM qualification.
+
+After any later admitted demo, the responsible operator first closes dispatcher
+admission, confirms whole-account absence for every admitted attempt, and exports
+the root records, receipts and bounded workspace results. Unknown absence keeps
+that obligation open. Remove the two demo-specific sudoers entries and the three
+installed demo executables after verified stop; preserve records, account
+reservations, homes and workspaces pending manual disposition or VM disposal.
+Do not remove or change the production station binary, service or policy.
+Deleting accounts or reusing UIDs is outside this demo procedure.
