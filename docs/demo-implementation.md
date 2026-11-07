@@ -312,7 +312,7 @@ call that reaches its cutoff returns pending; a later call may use bounded safe
 narrowing without renewing census or claiming timely absence. Ordinary continuation cannot turn late
 or unknown observations into timely absence. Stop removes no account or data.
 
-Final launch and stop publication is conservative. Protected disk state keeps
+Initial launch and stop publication is conservative. Protected disk state keeps
 launch `unknown` and stop `pending`, with an `unconfirmed` publication marker for
 a completed candidate. It stores elapsed time observed **before** publication as
 `observed_elapsed_seconds`; final `launch_elapsed_seconds` / `elapsed_seconds`
@@ -327,7 +327,8 @@ cleanup, state access or serialization follows that final sample. Reaching the
 original 10 s launch, 45 s whole-stop or first-KILL+5 s cutoff selects
 unknown/pending; the in-memory elapsed time includes all work through that sample.
 The wire schema remains unchanged and does not expose these elapsed fields.
-No durable terminal success is published and then optimistically corrected.
+No optimistic terminal result is published and then corrected. A stop can
+separately record an already observed terminal outcome as described below.
 
 An operation error still runs Store cleanup before a refusal is prepared; a
 cleanup error also refuses with unavailable evidence. A response preparation
@@ -338,16 +339,44 @@ bytes are submitted by one nonblocking write. A write error or short write exits
 selection, not a deadline guarantee for scheduling, syscall completion, stdout
 delivery or caller receipt. Those latencies require native qualification.
 
-A crash, storage error or lost response can therefore lose the successful reply,
-but cannot turn an unchecked publication into a durable success on retry. Launch
-retry returns preserved receipt/attempt facts with unknown outcome and never
-forks. Stop retry of an unconfirmed completion returns pending without census,
-signals or another publication, retaining the original request, grace origin and
-first-KILL cutoff. It requires manual reconciliation/disposal, even if the prior
-invocation returned success. Historical terminal records from earlier demo
-versions are also treated as unconfirmed on recovery. This is a deliberate
-availability cost: no durable terminal replay guarantee is claimed by this demo.
-Ordinary pending stops without a completion candidate retain the bounded
+Launch retry returns preserved receipt/attempt facts with unknown outcome and
+never forks. For stop, the original intake bytes are SHA-256 bound in protected
+stop evidence, including whitespace and JSON member order. The request identity
+and bytes must both match on every continuation or replay; equivalent decoded
+JSON with different bytes is refused. The installed entrypoint passes the actual
+intake bytes; internal offline callers without wire bytes use the canonical
+encoding of their request.
+
+A completed stop can record `terminal_outcome` after the pending publication and
+both original lock releases have actually completed within the original whole-stop
+and first-KILL bounds. Confirmation reacquires the same account lease and
+transition exclusion, verifies the entire protected record is unchanged, and
+checks those original bounds again. It then stores the observed terminal timestamp
+and elapsed time alongside the unchanged pending evidence. This records a past
+observation; it does not predict the confirmation write's completion time.
+Confirmation is a separate bounded-size write, never a new stop attempt, census,
+signal, renewed grace period or corrective success-to-pending publication.
+
+An exact replay of this recorded terminal outcome returns the same stopped result,
+including its original timestamp and signal counts, without another state write,
+process check, census or signal. It retains the original account, dispatcher,
+boot, generation, execution and request custody checks. The recorded historical
+result does not expire when the original stop deadline passes. A different request
+identity or any different request bytes is refused. Zero generation remains
+uninitialised and refused.
+
+The original invocation still accounts for confirmation, lock release, Store close,
+stdout setup and response preparation against its original deadlines. It returns
+pending if those costs cross a cutoff. If the terminal observation was already
+installed, a later exact replay can return that recorded past outcome even when
+the confirmation call was interrupted, failed after installation, or lost its
+reply. No claim is made that confirmation, stdout or caller delivery completed
+within the stop bound. Without an installed terminal observation, interruption or
+uncertainty stays conservative: an unconfirmed completion returns pending without
+census, signals or another publication. Historical optimistic `absent` records and
+records without an exact byte binding stay on hold without new effects; they are
+never upgraded to replayable success.
+Ordinary pending stops without a completion candidate retain the original bounded
 continuation/narrowing behavior above. These are cooperative source checks;
 response delivery and kernel/storage hangs still require native qualification.
 

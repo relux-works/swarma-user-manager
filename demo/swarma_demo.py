@@ -939,14 +939,36 @@ def launch_locked(roster, uid, request, plan, store, backend, started):
         return record, observed
 
 
-def stop(roster, uid, request, store, backend, started=None):
-    record, finished_at = stop_locked(roster, uid, request, store, backend, started)
+def stop(roster, uid, request, store, backend, started=None, request_bytes=None):
+    wire = encoded(request) if request_bytes is None else request_bytes
+    if decode(wire, False)[0] != request:
+        refuse('request_invalid')
+    record, finished_at = stop_locked(roster, uid, request, store, backend, started, digest(wire))
+    published = record
     # Both the transition lock and the outer stop lease have been released.
     record = copy.deepcopy(record)
     evidence = record['stop']
     if finished_at is not None:
         evidence['outcome'] = 'absent'
         evidence['finished_at'] = finished_at
+    complete(record, False, backend.clock())
+    if (evidence['outcome'] == 'absent' and evidence.get('request_digest') is not None
+            and not record.get('_terminal_replay')):
+        # The pending publication and both original lock releases have actually
+        # completed within the original bounds. Record that observed outcome;
+        # this is not a prediction of this confirmation write's completion time.
+        gen = record['account']['generation']
+        with store.locked(gen + '.stop.lock'), store.locked():
+            saved = store.read(gen)
+            if saved['stop'].get('terminal_outcome'):
+                refuse('state_conflict')
+            if encoded(saved) != encoded(published):
+                refuse('state_conflict')
+            complete(record, False, backend.clock())
+            if evidence['outcome'] == 'absent':
+                saved['stop']['terminal_outcome'] = {
+                    k: evidence[k] for k in ('finished_at', 'elapsed_seconds')}
+                store.write(gen, saved)
     return complete(record, False, backend.clock())
 
 
@@ -958,6 +980,8 @@ def complete(record, launching, finished):
         if finished >= origin + RECEIPT:
             record['launch_outcome'] = 'unknown'
     else:
+        if record.get('_terminal_replay'):
+            return record  # a recorded result does not acquire a new deadline
         evidence = record['stop']
         evidence['elapsed_seconds'] = finished - evidence['started_mono']
         stop_bounds(evidence, finished)
@@ -990,7 +1014,7 @@ def stop_transition(store, backend, deadline):
         yield
 
 
-def stop_locked(roster, uid, request, store, backend, started=None):
+def stop_locked(roster, uid, request, store, backend, started=None, wire_digest=None):
     authorize(roster, uid)
     args = request['args']
     row = target(roster, args['generation'])
@@ -1008,6 +1032,27 @@ def stop_locked(roster, uid, request, store, backend, started=None):
             if prior is not None:
                 if prior['request'] != request:
                     refuse('request_id_conflict')
+                if prior.get('request_digest') is None:
+                    # No original byte binding: neither replay nor continuation
+                    # can infer permission from an equivalent decoded request.
+                    prior['outcome'] = 'pending'
+                    prior['finished_at'] = None
+                    return record, None
+                if prior['request_digest'] != wire_digest:
+                    refuse('request_id_conflict')
+                terminal = prior.get('terminal_outcome')
+                if terminal is not None:
+                    closed(terminal, ('finished_at', 'elapsed_seconds'))
+                    elapsed = terminal['elapsed_seconds']
+                    if (type(terminal['finished_at']) is not str or not terminal['finished_at'] or
+                            type(elapsed) not in (int, float) or not 0 <= elapsed < STOP_WHOLE or
+                            (prior['kill_mono'] is not None and
+                             prior['started_mono'] + elapsed >= prior['kill_mono'] + FINAL_SCAN)):
+                        refuse('state_unavailable')
+                    prior.update(terminal, outcome='absent', deadline_missed=False,
+                                 final_scan_deadline_missed=False)
+                    record['_terminal_replay'] = True
+                    return record, terminal['finished_at']
                 if prior['outcome'] == 'absent' or 'completion_publication' in prior:
                     # Even historical optimistic absence is unconfirmed here.
                     # Recovery never promotes a pre-write timestamp to a final
@@ -1016,7 +1061,8 @@ def stop_locked(roster, uid, request, store, backend, started=None):
                     prior['finished_at'] = None
                     return record, None
             else:
-                prior = {'request': request, 'started_at': utc(), 'started_mono': admitted,
+                prior = {'request': request, 'request_digest': wire_digest,
+                         'started_at': utc(), 'started_mono': admitted,
                          'grace_seconds': args.get('grace_seconds', 10), 'kill_mono': None,
                          'outcome': 'pending', 'events': [], 'signalled': 0, 'killed': 0,
                          'last_scan_complete': False, 'remaining': None,
@@ -1113,8 +1159,8 @@ def stop_loop(roster, row, record, store, backend):
         backend.sleep(min(0.25, final_end - now))
     candidate = evidence['outcome'] == 'absent'
     finished_at = evidence['finished_at'] if candidate else None
-    # Persist no terminal success. If publication fails or the service crashes,
-    # a reload can only see pending; it cannot depend on a corrective write.
+    # This publication stays pending. Only after its completion and both lock
+    # releases can the wrapper record a separately observed terminal outcome.
     evidence['outcome'] = 'pending'
     evidence['finished_at'] = None
     evidence['elapsed_seconds'] = None
@@ -1437,11 +1483,12 @@ def main(argv=None):
             roster = load_roster()
             authorize(roster, uid)
             launching = entry == LAUNCHER
-            request, plan = decode(intake(0, LAUNCH_MAX if launching else STOP_MAX, started), launching)
+            request_bytes = intake(0, LAUNCH_MAX if launching else STOP_MAX, started)
+            request, plan = decode(request_bytes, launching)
             request_id = request['request_id']
             store = Store()
             backend = Native(roster)
-            record = launch(roster, uid, request, plan, store, backend, started) if launching else stop(roster, uid, request, store, backend, started)
+            record = launch(roster, uid, request, plan, store, backend, started) if launching else stop(roster, uid, request, store, backend, started, request_bytes)
         finally:
             if store is not None:
                 store.close()

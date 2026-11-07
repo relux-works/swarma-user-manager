@@ -57,7 +57,8 @@ class MainCompletionTests(unittest.TestCase):
                     d.launch(r, 1101, f.launch_request(), b'opaque', s, b, 100.)
                     b.members.clear()
                     rec = s.read(gen)
-                    rec['stop'] = dict(request=request, started_at=d.utc(), started_mono=100.,
+                    rec['stop'] = dict(request=request, request_digest=d.digest(d.encoded(request)),
+                                       started_at=d.utc(), started_mono=100.,
                                        grace_seconds=0, kill_mono=first_kill, outcome='pending',
                                        events=[], signalled=0, killed=0, last_scan_complete=False,
                                        remaining=None, finished_at=None, elapsed_seconds=None)
@@ -67,6 +68,10 @@ class MainCompletionTests(unittest.TestCase):
 
                 published = []
                 def publication(value, write):
+                    if (value.get('stop') or {}).get('terminal_outcome'):
+                        write()
+                        events.append('terminal-recorded')
+                        return
                     self.assertFalse(published, 'no corrective publication')
                     write()
                     candidate = (value.get('launch_publication') if kind == 'launch'
@@ -220,7 +225,8 @@ class MainCompletionTests(unittest.TestCase):
                     b.now = bound + .5
                     result = (d.launch(r, 1101, request, b'opaque', s, b, b.now) if kind == 'launch'
                               else d.stop(r, 1101, request, s, b, started=b.now))
-                    self.assertFalse(d.response(request['request_id'], result, kind == 'launch')['ok'])
+                    self.assertEqual(d.response(request['request_id'], result, kind == 'launch')['ok'],
+                                     bool(durable.get('stop') and durable['stop'].get('terminal_outcome')))
                     self.assertEqual((root / (gen + '.json')).read_bytes(), before)
                     self.assertEqual(len(b.calls), calls)
                     self.assertEqual(b.spawn_count, 1)

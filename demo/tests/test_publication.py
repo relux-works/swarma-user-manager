@@ -142,7 +142,7 @@ class PublicationTests(unittest.TestCase):
                 self.assertFalse(d.response('launch', replay, True)['ok'])
                 self.assertEqual(b.spawn_count, 1)
 
-    def test_timely_reply_requires_completed_publication_recovery_is_unconfirmed(self):
+    def test_timely_stop_records_terminal_outcome_launch_remains_unconfirmed(self):
         with self.setup_disk() as (r, s, b, root):
             launched = d.launch(r, 1101, launch_request(), b'opaque', s, b, 100.)
             self.assertTrue(d.response('launch', launched, True)['ok'])
@@ -152,8 +152,11 @@ class PublicationTests(unittest.TestCase):
             self.assertTrue(d.response('stop', stopped, False)['ok'])
             self.assertEqual(stopped['stop']['elapsed_seconds'], 2.)
             self.assertEqual(self.reload(s, root)['stop']['outcome'], 'pending')
+            self.assertIn('terminal_outcome', self.reload(s, root)['stop'])
+            s.hook = lambda *_: self.fail('terminal replay wrote state')
             replay = d.stop(r, 1101, stop_request(0), s, b)
-            self.assertFalse(d.response('stop', replay, False)['ok'])
+            self.assertTrue(d.response('stop', replay, False)['ok'])
+            self.assertEqual(d.response('stop', replay, False), d.response('stop', stopped, False))
 
 
 class FrozenTreeTests(unittest.TestCase):

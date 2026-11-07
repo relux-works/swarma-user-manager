@@ -60,7 +60,8 @@ class CompletionTests(unittest.TestCase):
                 d.launch(r, 1101, fixtures.launch_request(), b'opaque', s, b, 100.)
                 b.members.clear()
                 rec = s.read(gen)
-                rec['stop'] = dict(request=fixtures.stop_request(0), started_at=d.utc(),
+                rec['stop'] = dict(request=fixtures.stop_request(0),
+                                   request_digest=d.digest(d.encoded(fixtures.stop_request(0))), started_at=d.utc(),
                                    started_mono=100., grace_seconds=0, kill_mono=first_kill,
                                    outcome='pending', events=[], signalled=0, killed=0,
                                    last_scan_complete=False, remaining=None,
@@ -72,6 +73,9 @@ class CompletionTests(unittest.TestCase):
             publications = []
             def published(value, write):
                 nonlocal final
+                if (value.get('stop') or {}).get('terminal_outcome'):
+                    write()  # records the already observed, timely completion
+                    return
                 self.assertFalse(final, 'no follow-up correction write')
                 write()
                 candidate = value.get('launch_publication') if mode == 'launch' else value.get('stop', {}).get('completion_publication')
@@ -86,7 +90,8 @@ class CompletionTests(unittest.TestCase):
                 else:
                     rec = d.stop(r, 1101, fixtures.stop_request(0), s, b, started=b.now)
             self.assertEqual(len(publications), 1)
-            self.assertEqual(len(closes), 1 if mode == 'launch' else 2)
+            terminal = s.read(gen).get('stop') and s.read(gen)['stop'].get('terminal_outcome')
+            self.assertEqual(len(closes), 1 if mode == 'launch' else 4 if terminal else 2)
             self.assertFalse(s.transition)
             self.assertFalse(s.leases)
             elapsed = rec['launch_elapsed_seconds'] if mode == 'launch' else rec['stop']['elapsed_seconds']
@@ -120,7 +125,7 @@ class CompletionTests(unittest.TestCase):
                 replay = d.launch(r, 1101, fixtures.launch_request(), b'opaque', s, b, b.now)
             else:
                 replay = d.stop(r, 1101, fixtures.stop_request(0), s, b, started=b.now)
-            self.assertFalse(d.response(mode, replay, mode == 'launch')['ok'])
+            self.assertEqual(d.response(mode, replay, mode == 'launch')['ok'], bool(terminal))
             self.assertEqual(b.spawn_count, 1)
             self.assertEqual(len(b.calls), calls)
 

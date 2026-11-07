@@ -875,7 +875,7 @@ class StateTests(unittest.TestCase):
                 before = len(runner.calls)
                 replay = d.stop(r, r['dispatcher']['uid'], request, store, runner)
                 self.assertEqual(replay['stop']['started_mono'], 100)
-                self.assertEqual(replay['stop']['outcome'], 'pending')
+                self.assertEqual(replay['stop']['outcome'], 'pending' if partial else 'absent')
                 if not partial:
                     self.assertEqual(len(runner.calls), before)
 
