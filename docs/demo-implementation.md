@@ -126,7 +126,9 @@ The approved copy is the exact baseline Git tree with these two entries excluded
 Both have target `../../agents/skills/swarma-user-manager`. The operator reads the complete path/mode/blob manifest from immutable Git
 objects at the full baseline revision, including directory paths. The descriptor
 walk compares every retained regular file with that manifest using its Git blob
-hash and executable mode, and rejects extra, missing or mismatched entries. Git
+hash and executable mode (the owner execute bit, as in Git), and rejects extra,
+missing or mismatched entries. Copy permissions and digest classification use
+that same owner bit; private copies normalize files to 0600 or 0700. Git
 status is an additional refusal check, never the content authority: ignored files,
 assume-unchanged and skip-worktree flags cannot hide copy changes. Apply repeats
 the object comparison while copying, so a change after preflight also refuses.
@@ -214,9 +216,10 @@ launch `unknown` and stop `pending`, with an `unconfirmed` publication marker fo
 a completed candidate. It stores elapsed time observed **before** publication as
 `observed_elapsed_seconds`; final `launch_elapsed_seconds` / `elapsed_seconds`
 remain null on disk because the write cannot attest its own completion time.
-After the actual final write and lock release, this invocation measures elapsed
+After the actual final write, transition-lock release and (for stop) outer
+stop-lease release, this invocation measures elapsed
 time again. Only a timely invocation can return receipt-seen or absence success;
-a final write crossing the original 10 s launch, 45 s whole-stop or first-KILL+5 s
+a final write or required release crossing the original 10 s launch, 45 s whole-stop or first-KILL+5 s
 cutoff returns unknown/pending with the actual elapsed time in its return value.
 No durable terminal success is published and then optimistically corrected.
 

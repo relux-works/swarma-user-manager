@@ -330,7 +330,7 @@ def manifest(source, deadline, destination=None, owner=None, expected=None):
                         blob_hasher = hashlib.sha1(b'blob ' + str(info.st_size).encode() + b'\0', usedforsecurity=False)
                         out = None
                         if destination:
-                            out = os.open(os.path.join(destination, path), os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o700 if info.st_mode & 0o111 else 0o600)
+                            out = os.open(os.path.join(destination, path), os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o700 if info.st_mode & stat.S_IXUSR else 0o600)
                         try:
                             while True:
                                 if time.monotonic() >= deadline:
@@ -353,7 +353,7 @@ def manifest(source, deadline, destination=None, owner=None, expected=None):
                             after = os.fstat(fd)
                             if size != info.st_size or (after.st_size, after.st_mtime_ns, after.st_ctime_ns) != (info.st_size, info.st_mtime_ns, info.st_ctime_ns):
                                 refuse('copy_changed')
-                            mode = '100755' if info.st_mode & 0o111 else '100644'
+                            mode = '100755' if info.st_mode & stat.S_IXUSR else '100644'
                             if expected is not None and expected[path] != (mode, blob_hasher.hexdigest()):
                                 refuse('copy_source_revision')
                             if out is not None:
@@ -361,7 +361,7 @@ def manifest(source, deadline, destination=None, owner=None, expected=None):
                         finally:
                             if out is not None:
                                 os.close(out)
-                        entries.append([path, 'executable' if info.st_mode & 0o111 else 'file', size, hasher.hexdigest()])
+                        entries.append([path, 'executable' if info.st_mode & stat.S_IXUSR else 'file', size, hasher.hexdigest()])
                 finally:
                     os.close(fd)
         walk(root, '', 0)
@@ -715,6 +715,18 @@ def new_record(roster, row, request, started):
 
 
 def launch(roster, uid, request, plan, store, backend, started):
+    record, observed = launch_locked(roster, uid, request, plan, store, backend, started)
+    # The transition context has exited, including its descriptor close. These
+    # are invocation-only facts; no durable success or corrective write follows.
+    record = copy.deepcopy(record)
+    finished = backend.clock()
+    origin = record['launch_started_mono']
+    record['launch_elapsed_seconds'] = finished - origin
+    record['launch_outcome'] = observed if finished < origin + RECEIPT else 'unknown'
+    return record
+
+
+def launch_locked(roster, uid, request, plan, store, backend, started):
     authorize(roster, uid)
     row = target(roster, request['generation'])
     deadline = started + RECEIPT
@@ -733,7 +745,7 @@ def launch(roster, uid, request, plan, store, backend, started):
             # No installed record proves completion of its own publication.
             old['launch_outcome'] = 'unknown'
             old['launch_elapsed_seconds'] = None
-            return old  # preserved attempt/receipt only; never a second start
+            return old, 'unknown'  # preserved attempt/receipt only; never a second start
         backend.launch_check(row, deadline)
         members, complete = backend.scan(row, min(deadline, backend.clock() + FINAL_SCAN))
         if not complete or members:
@@ -763,14 +775,24 @@ def launch(roster, uid, request, plan, store, backend, started):
         record['launch_publication'] = {'status': 'unconfirmed',
                                         'observed_elapsed_seconds': backend.clock() - started}
         store.write(row['generation'], record)
-        record = copy.deepcopy(record)
-        record['launch_elapsed_seconds'] = backend.clock() - started
-        if backend.clock() < deadline:
-            record['launch_outcome'] = observed
-        return record
+        return record, observed
 
 
 def stop(roster, uid, request, store, backend, started=None):
+    record, finished_at = stop_locked(roster, uid, request, store, backend, started)
+    # Both the transition lock and the outer stop lease have been released.
+    record = copy.deepcopy(record)
+    evidence = record['stop']
+    finished = backend.clock()
+    evidence['elapsed_seconds'] = finished - evidence['started_mono']
+    stop_bounds(evidence, finished)
+    if finished_at is not None and not evidence['deadline_missed'] and not evidence['final_scan_deadline_missed']:
+        evidence['outcome'] = 'absent'
+        evidence['finished_at'] = finished_at
+    return record
+
+
+def stop_locked(roster, uid, request, store, backend, started=None):
     authorize(roster, uid)
     args = request['args']
     row = target(roster, args['generation'])
@@ -793,9 +815,7 @@ def stop(roster, uid, request, store, backend, started=None):
                     # publication time, and never signals a completed candidate.
                     prior['outcome'] = 'pending'
                     prior['finished_at'] = None
-                    prior['elapsed_seconds'] = backend.clock() - prior['started_mono']
-                    stop_bounds(prior, backend.clock())
-                    return record
+                    return record, None
             else:
                 prior = {'request': request, 'started_at': utc(), 'started_mono': backend.clock() if started is None else started,
                          'grace_seconds': args.get('grace_seconds', 10), 'kill_mono': None,
@@ -904,15 +924,7 @@ def stop_loop(roster, row, record, store, backend):
                                              'observed_elapsed_seconds': backend.clock() - origin}
     with store.locked():
         store.write(row['generation'], record)
-    record = copy.deepcopy(record)
-    evidence = record['stop']
-    finished = backend.clock()
-    evidence['elapsed_seconds'] = finished - origin
-    stop_bounds(evidence, finished)
-    if candidate and not evidence['deadline_missed'] and not evidence['final_scan_deadline_missed']:
-        evidence['outcome'] = 'absent'
-        evidence['finished_at'] = finished_at
-    return record
+    return record, finished_at
 
 
 def stop_bounds(evidence, now):
