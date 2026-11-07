@@ -123,8 +123,15 @@ The approved copy is the exact baseline Git tree with these two entries excluded
 | `.claude/skills/swarma-user-manager` | `120000` | `de4c19a2c482d19fed882eca9fd6df09de71040b` |
 | `.codex/skills/swarma-user-manager` | `120000` | `de4c19a2c482d19fed882eca9fd6df09de71040b` |
 
-Both have target `../../agents/skills/swarma-user-manager`. The descriptor walk
-matches the exact path, link mode and Git blob hash without following the link,
+Both have target `../../agents/skills/swarma-user-manager`. The operator reads the complete path/mode/blob manifest from immutable Git
+objects at the full baseline revision, including directory paths. The descriptor
+walk compares every retained regular file with that manifest using its Git blob
+hash and executable mode, and rejects extra, missing or mismatched entries. Git
+status is an additional refusal check, never the content authority: ignored files,
+assume-unchanged and skip-worktree flags cannot hide copy changes. Apply repeats
+the object comparison while copying, so a change after preflight also refuses.
+The descriptor walk matches each excluded link by exact path, mode and Git blob
+hash without following the link,
 and records each as `excluded-by-freeze` in the copy manifest. The real directory
 `agents/skills/swarma-user-manager` remains regular copied source. A different
 link, changed target, regular-file replacement or special file refuses before
@@ -187,7 +194,7 @@ lock is released during enumeration, signalling and waits. Signals use pidfds
 and revalidate the entire process incarnation and UID/GID tuple. Scope includes
 detached sessions and children surviving the original PID. Reused receipt PID,
 foreign identity, partial scans, signal errors and quiet-window reappearance
-retain pending evidence. Terminal absence replay does not signal.
+retain pending evidence. Recovery of an absence candidate does not signal.
 
 Normal stop finishes within its original 45 s budget or returns pending. It
 persists the first KILL time before action and permits no new final-scan budget
@@ -201,6 +208,30 @@ a TERM refusal if identity/NSS checks cross the original grace cutoff. An ordina
 call that reaches its cutoff returns pending; a later call may use bounded safe
 narrowing without renewing census or claiming timely absence. Ordinary continuation cannot turn late
 or unknown observations into timely absence. Stop removes no account or data.
+
+Final launch and stop publication is conservative. Protected disk state keeps
+launch `unknown` and stop `pending`, with an `unconfirmed` publication marker for
+a completed candidate. It stores elapsed time observed **before** publication as
+`observed_elapsed_seconds`; final `launch_elapsed_seconds` / `elapsed_seconds`
+remain null on disk because the write cannot attest its own completion time.
+After the actual final write and lock release, this invocation measures elapsed
+time again. Only a timely invocation can return receipt-seen or absence success;
+a final write crossing the original 10 s launch, 45 s whole-stop or first-KILL+5 s
+cutoff returns unknown/pending with the actual elapsed time in its return value.
+No durable terminal success is published and then optimistically corrected.
+
+A crash, storage error or lost response can therefore lose the successful reply,
+but cannot turn an unchecked publication into a durable success on retry. Launch
+retry returns preserved receipt/attempt facts with unknown outcome and never
+forks. Stop retry of an unconfirmed completion returns pending without census,
+signals or another publication, retaining the original request, grace origin and
+first-KILL cutoff. It requires manual reconciliation/disposal, even if the prior
+invocation returned success. Historical terminal records from earlier demo
+versions are also treated as unconfirmed on recovery. This is a deliberate
+availability cost: no durable terminal replay guarantee is claimed by this demo.
+Ordinary pending stops without a completion candidate retain the bounded
+continuation/narrowing behavior above. These are cooperative source checks;
+response delivery and kernel/storage hangs still require native qualification.
 
 The demo local state/error details are not a new production journal or
 `effect.observe` API. Evidence records have finite byte/event/work bounds;
@@ -223,7 +254,9 @@ production packages are changed or downloaded by these checks.
 
 The fixtures cover strict callers/rosters/plans, one-attempt and lost-reply
 fences, receipt ordering, pidfd refusal/positive controls, escaped children,
-partial/late/quiet-race stops, real 256 MiB/20,000-entry copy limits, no-follow
+partial/late/quiet-race stops, real Store publication faults followed by descriptor
+reopen and retry at both original cutoffs, launch publication crossing ten seconds,
+ignored/index-hidden source changes, real 256 MiB/20,000-entry copy limits, no-follow
 copies, independent Git state, read-only sealed maximum plans and continued
 output draining. The fork/exec/descriptor positive control runs as an ordinary
 UID with a synthetic root/drop stage. The real demo executor's offline control

@@ -537,7 +537,7 @@ class AttemptTests(unittest.TestCase):
         original_write = self.store.write
         def cost(gen, value):
             original_write(gen, value)
-            if value['stop']['outcome'] == 'absent':
+            if value['stop'].get('completion_publication'):
                 self.runner.now = value['stop']['started_mono'] + d.STOP_WHOLE
         self.store.write = cost
         result = self.end()
@@ -839,11 +839,13 @@ class StateTests(unittest.TestCase):
                 loaded = store.read(gen)
                 self.assertGreater(len(loaded['stop']['events']), 64)
                 self.assertLessEqual(len(loaded['stop']['events']), 256)
-                self.assertEqual(loaded, json.loads(d.encoded(record)))
+                self.assertEqual(loaded['stop']['outcome'], 'pending')
+                self.assertIsNone(loaded['stop']['elapsed_seconds'])
+                self.assertEqual(loaded['stop']['events'], json.loads(d.encoded(record))['stop']['events'])
                 before = len(runner.calls)
                 replay = d.stop(r, r['dispatcher']['uid'], request, store, runner)
                 self.assertEqual(replay['stop']['started_mono'], 100)
-                self.assertEqual(replay['stop']['outcome'], 'pending' if partial else 'absent')
+                self.assertEqual(replay['stop']['outcome'], 'pending')
                 if not partial:
                     self.assertEqual(len(runner.calls), before)
 
@@ -920,6 +922,7 @@ class OperatorTests(unittest.TestCase):
                 patches.enter_context(mock.patch.object(p.os, 'chown', side_effect=lambda path, uid, gid, **kw: ownership.append((path, uid, gid))))
                 patches.enter_context(mock.patch.object(p.demo, 'Store', SyntheticStore))
                 patches.enter_context(mock.patch.object(p, 'manifest', return_value=copied))
+                patches.enter_context(mock.patch.object(p, 'frozen_manifest', return_value={}))
                 patches.enter_context(mock.patch.object(p, 'fresh_git', return_value={'scope': 'synthetic'}))
                 patches.enter_context(mock.patch.object(p, 'chown_private'))
                 temporary = patches.enter_context(mock.patch.object(tempfile, 'TemporaryDirectory'))
@@ -1058,9 +1061,15 @@ class CopyTests(unittest.TestCase):
             self.assertEqual(result['stderr_bytes_drained'], 2 * d.OUTPUT_MAX)
             self.assertTrue(result['output_over_cap'])
             self.assertFalse(result['drain_incomplete'])
-            timeout = p.command(['/usr/bin/python3', '-I', '-S', '-c', 'import time; time.sleep(10)'], home, timeout=0.1)
+            # Exercise deadline/termination dispatch without delivering a real
+            # signal. The private child exits naturally; exit 0 is its real exit,
+            # while timeout and the synthetic kill request remain separate facts.
+            with mock.patch.object(p.os, 'killpg') as terminate:
+                timeout = p.command(['/usr/bin/python3', '-I', '-S', '-c', 'import time; time.sleep(0.15)'], home, timeout=0.05)
+                terminate.assert_called_once()
+                self.assertEqual(terminate.call_args.args[1], 9)
             self.assertTrue(timeout['timeout'])
-            self.assertEqual(timeout['exit'], -9)
+            self.assertEqual(timeout['exit'], 0)
             self.assertLess(timeout['elapsed_seconds'], 1.5)
 
     def test_fresh_git_has_no_hooks_remotes_helpers_or_global_config(self):

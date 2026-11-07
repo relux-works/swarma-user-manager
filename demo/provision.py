@@ -89,6 +89,38 @@ def git_args(source):
             '-c', 'credential.helper=', '-c', 'protocol.allow=never', '-C', source]
 
 
+def frozen_manifest(source, home, log=None):
+    # ls-tree reads immutable objects by full revision, never index flags or
+    # ignored-file policy. Include trees so empty extra directories also refuse.
+    receipt = command(git_args(source) + ['ls-tree', '-r', '-t', '-z', '--full-tree', demo.BASE], home)
+    if log is not None:
+        log.append(receipt)
+    if (receipt['exit'] != 0 or receipt['timeout'] or receipt['drain_incomplete'] or
+            receipt['output_over_cap'] or not receipt['stdout'].endswith('\0')):
+        demo.refuse('copy_source_revision')
+    expected = {}
+    for entry in receipt['stdout'][:-1].split('\0'):
+        header, path = entry.split('\t', 1)
+        mode, kind, blob = header.split(' ')
+        if (mode not in ('040000', '100644', '100755', '120000') or
+                kind != ('tree' if mode == '040000' else 'blob') or
+                not demo.re.fullmatch('[0-9a-f]{40}', blob) or
+                not path or path.startswith('/') or path != os.path.normpath(path) or
+                '..' in path.split('/') or path in expected or
+                any(ord(c) < 32 or ord(c) > 126 for c in path)):
+            demo.refuse('copy_source_revision')
+        if mode == '120000' and demo.COPY_EXCLUSIONS.get(path) != blob:
+            demo.refuse('path_is_link')
+        expected[path] = (mode, blob)
+        if len(expected) > demo.ENTRY_MAX:
+            demo.refuse('copy_bound_exceeded')
+    if any(expected.get(path) != ('120000', blob) for path, blob in demo.COPY_EXCLUSIONS.items()):
+        demo.refuse('copy_source_revision')
+    if expected.get('agents/skills/swarma-user-manager', (None,))[0] != '040000':
+        demo.refuse('copy_source_revision')
+    return expected
+
+
 def source_check(source, home, log=None):
     if not os.path.isabs(source) or os.path.realpath(source) != source:
         demo.refuse('path_is_link')
@@ -117,7 +149,8 @@ def source_check(source, home, log=None):
         log.extend(receipts)
     if receipts[0]['exit'] != 0 or receipts[0]['stdout'].strip() != demo.BASE or receipts[1]['exit'] != 0 or receipts[1]['stdout'] or any(r['timeout'] or r['output_over_cap'] for r in receipts):
         demo.refuse('copy_source_revision')
-    copied = manifest(source, time.monotonic() + 30)
+    objects = frozen_manifest(source, home, log)
+    copied = manifest(source, time.monotonic() + 30, expected=objects)
     expected = [{'path': path, 'mode': '120000', 'blob': blob,
                  'status': 'excluded-by-freeze'} for path, blob in sorted(demo.COPY_EXCLUSIONS.items())]
     if copied['excluded'] != expected:
@@ -245,7 +278,8 @@ def main():
                     os.chown(path, row['uid'], row['gid'], follow_symlinks=False)
                 destination = row['workspace'] + '/source'
                 os.mkdir(destination, 0o700)
-                actual = manifest(args.source, time.monotonic() + 30, destination)
+                actual = manifest(args.source, time.monotonic() + 30, destination,
+                                  expected=frozen_manifest(args.source, home, report['commands']))
                 if actual != copied:
                     demo.refuse('copy_changed')
                 report['commands'].append(fresh_git(destination, home))

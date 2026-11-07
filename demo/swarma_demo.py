@@ -6,6 +6,7 @@ No import of repository code occurs in an installed privileged invocation.
 """
 import base64
 import ctypes
+import copy
 import datetime
 import errno
 import fcntl
@@ -253,7 +254,7 @@ def read_bounded(fd, cap):
     refuse('state_unavailable')
 
 
-def manifest(source, deadline, destination=None, owner=None):
+def manifest(source, deadline, destination=None, owner=None, expected=None):
     """Descriptor-relative copy with two exact frozen source-link exclusions.
 
     The copied regular content digest excludes these links; the source manifest
@@ -261,6 +262,7 @@ def manifest(source, deadline, destination=None, owner=None):
     """
     root = os.open(source, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
     total, count, entries, excluded = 0, 0, [], []
+    seen = set()
     try:
         def walk(parent, relative, depth):
             nonlocal total, count
@@ -280,6 +282,9 @@ def manifest(source, deadline, destination=None, owner=None):
                     refuse('copy_bound_exceeded')
                 path = relative + '/' + name if relative else name
                 before = os.stat(name, dir_fd=parent, follow_symlinks=False)
+                if expected is not None and path not in expected:
+                    refuse('copy_source_revision')
+                seen.add(path)
                 if stat.S_ISLNK(before.st_mode):
                     if owner is not None or path not in COPY_EXCLUSIONS:
                         refuse('path_is_link')
@@ -291,6 +296,8 @@ def manifest(source, deadline, destination=None, owner=None):
                         refuse('copy_changed')
                     if blob != COPY_EXCLUSIONS[path]:
                         refuse('path_is_link')
+                    if expected is not None and expected[path] != ('120000', blob):
+                        refuse('copy_source_revision')
                     excluded.append({'path': path, 'mode': '120000', 'blob': blob,
                                      'status': 'excluded-by-freeze'})
                     continue
@@ -307,6 +314,8 @@ def manifest(source, deadline, destination=None, owner=None):
                     if owner is not None and (info.st_uid != owner or info.st_gid != owner or stat.S_IMODE(info.st_mode) & 0o077):
                         refuse('copy_changed')
                     if stat.S_ISDIR(info.st_mode):
+                        if expected is not None and expected[path][0] != '040000':
+                            refuse('copy_source_revision')
                         if destination:
                             os.mkdir(os.path.join(destination, path), 0o700)
                         entries.append([path, 'directory'])
@@ -318,6 +327,7 @@ def manifest(source, deadline, destination=None, owner=None):
                         if total > COPY_MAX:
                             refuse('copy_bound_exceeded')
                         hasher, size = hashlib.sha256(), 0
+                        blob_hasher = hashlib.sha1(b'blob ' + str(info.st_size).encode() + b'\0', usedforsecurity=False)
                         out = None
                         if destination:
                             out = os.open(os.path.join(destination, path), os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o700 if info.st_mode & 0o111 else 0o600)
@@ -332,6 +342,7 @@ def manifest(source, deadline, destination=None, owner=None):
                                 if size > info.st_size:
                                     refuse('copy_changed')
                                 hasher.update(chunk)
+                                blob_hasher.update(chunk)
                                 if out is not None:
                                     view = memoryview(chunk)
                                     while view:
@@ -342,6 +353,9 @@ def manifest(source, deadline, destination=None, owner=None):
                             after = os.fstat(fd)
                             if size != info.st_size or (after.st_size, after.st_mtime_ns, after.st_ctime_ns) != (info.st_size, info.st_mtime_ns, info.st_ctime_ns):
                                 refuse('copy_changed')
+                            mode = '100755' if info.st_mode & 0o111 else '100644'
+                            if expected is not None and expected[path] != (mode, blob_hasher.hexdigest()):
+                                refuse('copy_source_revision')
                             if out is not None:
                                 os.fsync(out)
                         finally:
@@ -351,6 +365,8 @@ def manifest(source, deadline, destination=None, owner=None):
                 finally:
                     os.close(fd)
         walk(root, '', 0)
+        if expected is not None and seen != set(expected):
+            refuse('copy_source_revision')
         return {'digest': digest(encoded(entries)), 'entries': count, 'bytes': total, 'excluded': excluded}
     finally:
         os.close(root)
@@ -713,7 +729,11 @@ def launch(roster, uid, request, plan, store, backend, started):
         if old != reservation:
             if old['request_digest'] != digest(encoded(request)) or old['account'] != row or old['boot_id'] != roster['boot_id']:
                 refuse('execution_already_started')
-            return old  # preserved facts only; never a second physical start
+            # Earlier versions could durably cache an unchecked final success.
+            # No installed record proves completion of its own publication.
+            old['launch_outcome'] = 'unknown'
+            old['launch_elapsed_seconds'] = None
+            return old  # preserved attempt/receipt only; never a second start
         backend.launch_check(row, deadline)
         members, complete = backend.scan(row, min(deadline, backend.clock() + FINAL_SCAN))
         if not complete or members:
@@ -734,10 +754,19 @@ def launch(roster, uid, request, plan, store, backend, started):
             record['launch_outcome'] = 'unknown'
             record['launch_failure'] = exc.detail if isinstance(exc, NativeFailure) else exc.code if isinstance(exc, Refusal) else {'type': type(exc).__name__, 'errno': getattr(exc, 'errno', None)}
         record['native_evidence'] = getattr(backend, 'launch_evidence', [])
-        record['launch_elapsed_seconds'] = backend.clock() - started
-        if backend.clock() >= deadline:
-            record['launch_outcome'] = 'unknown'
+        observed = record['launch_outcome']
+        # A durable value cannot attest the completion time of its own write.
+        # Keep recovery conservative; only this invocation can observe that the
+        # final publication completed in time. No success-then-rollback window.
+        record['launch_outcome'] = 'unknown'
+        record['launch_elapsed_seconds'] = None
+        record['launch_publication'] = {'status': 'unconfirmed',
+                                        'observed_elapsed_seconds': backend.clock() - started}
         store.write(row['generation'], record)
+        record = copy.deepcopy(record)
+        record['launch_elapsed_seconds'] = backend.clock() - started
+        if backend.clock() < deadline:
+            record['launch_outcome'] = observed
         return record
 
 
@@ -758,8 +787,15 @@ def stop(roster, uid, request, store, backend, started=None):
             if prior is not None:
                 if prior['request'] != request:
                     refuse('request_id_conflict')
-                if prior['outcome'] == 'absent':
-                    return record  # terminal replay must never signal
+                if prior['outcome'] == 'absent' or 'completion_publication' in prior:
+                    # Even historical optimistic absence is unconfirmed here.
+                    # Recovery never promotes a pre-write timestamp to a final
+                    # publication time, and never signals a completed candidate.
+                    prior['outcome'] = 'pending'
+                    prior['finished_at'] = None
+                    prior['elapsed_seconds'] = backend.clock() - prior['started_mono']
+                    stop_bounds(prior, backend.clock())
+                    return record
             else:
                 prior = {'request': request, 'started_at': utc(), 'started_mono': backend.clock() if started is None else started,
                          'grace_seconds': args.get('grace_seconds', 10), 'kill_mono': None,
@@ -856,21 +892,33 @@ def stop_loop(roster, row, record, store, backend):
         if now >= final_end:
             break
         backend.sleep(min(0.25, final_end - now))
-    evidence['elapsed_seconds'] = backend.clock() - origin
-    if evidence['elapsed_seconds'] >= STOP_WHOLE:
-        evidence['outcome'] = 'pending'
+    candidate = evidence['outcome'] == 'absent'
+    finished_at = evidence['finished_at'] if candidate else None
+    # Persist no terminal success. If publication fails or the service crashes,
+    # a reload can only see pending; it cannot depend on a corrective write.
+    evidence['outcome'] = 'pending'
+    evidence['finished_at'] = None
+    evidence['elapsed_seconds'] = None
+    if candidate:
+        evidence['completion_publication'] = {'status': 'unconfirmed',
+                                             'observed_elapsed_seconds': backend.clock() - origin}
     with store.locked():
         store.write(row['generation'], record)
-        finished = backend.clock()
-        final_end = min(deadline, evidence['kill_mono'] + FINAL_SCAN) if evidence['kill_mono'] is not None else deadline
-        if evidence['outcome'] == 'absent' and finished >= final_end:
-            evidence['outcome'] = 'pending'
-            evidence['finished_at'] = None
-            evidence['elapsed_seconds'] = finished - origin
-            evidence['deadline_missed'] = finished >= deadline
-            evidence['final_scan_deadline_missed'] = evidence['kill_mono'] is not None and finished >= evidence['kill_mono'] + FINAL_SCAN
-            store.write(row['generation'], record)
+    record = copy.deepcopy(record)
+    evidence = record['stop']
+    finished = backend.clock()
+    evidence['elapsed_seconds'] = finished - origin
+    stop_bounds(evidence, finished)
+    if candidate and not evidence['deadline_missed'] and not evidence['final_scan_deadline_missed']:
+        evidence['outcome'] = 'absent'
+        evidence['finished_at'] = finished_at
     return record
+
+
+def stop_bounds(evidence, now):
+    evidence['deadline_missed'] = now >= evidence['started_mono'] + STOP_WHOLE
+    evidence['final_scan_deadline_missed'] = (evidence['kill_mono'] is not None and
+                                            now >= evidence['kill_mono'] + FINAL_SCAN)
 
 
 def late_narrow(row, record, store, backend):
