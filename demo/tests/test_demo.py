@@ -790,10 +790,13 @@ class StateTests(unittest.TestCase):
                 return types.SimpleNamespace(st_uid=0, st_gid=0, st_mode=info.st_mode,
                                              st_nlink=info.st_nlink)
             with mock.patch.object(d.os, 'fstat', side_effect=ownership):
-                try:
-                    yield state, Path(root)
-                finally:
-                    state.close()
+                with mock.patch.object(d.os, 'fchown') as chown:
+                    try:
+                        yield state, Path(root)
+                        for call in chown.call_args_list:
+                            self.assertEqual(call.args[1:], (0, 0))
+                    finally:
+                        state.close()
 
     def test_real_state_lock_and_atomic_record_publication(self):
         with self.fixture() as (store, root):
@@ -821,11 +824,11 @@ class StateTests(unittest.TestCase):
             receipts = root / 'receipts'
             receipts.mkdir(mode=0o700)
             def opened(path, **kwargs):
-                self.assertEqual(path, d.STATE + '/receipts/' + gen)
+                self.assertEqual(path, gen)
                 return os.open(receipts, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
             receipt = dict(execution_id='EX-fixture', epoch=3, pid=42, start_time=900,
                            boot_id=roster()['boot_id'], session_id=42)
-            with mock.patch.object(d, 'protected', side_effect=opened):
+            with mock.patch.object(d, 'receipt_directory', side_effect=opened):
                 store.receipt(gen, 'EX-fixture', receipt)
                 self.assertEqual(json.loads((receipts / 'EX-fixture.json').read_bytes()), receipt)
                 self.assertEqual(stat.S_IMODE((receipts / 'EX-fixture.json').stat().st_mode), 0o644)
@@ -928,6 +931,10 @@ class OperatorTests(unittest.TestCase):
                     pass
             command_lines, directories, ownership = [], [], []
             def command(argv, home, timeout=5):
+                for row in r['accounts']:
+                    if argv[-1] == row['name']:
+                        self.assertIn((d.RECEIPT_ROOT + '/' + row['generation'], 0o750), directories)
+                        self.assertIn((d.RECEIPT_ROOT + '/' + row['generation'], 0, 1101), ownership)
                 command_lines.append(argv)
                 return {'exit': 0, 'timeout': False, 'output_over_cap': False,
                         'scope': 'synthetic command interception; never executed'}
@@ -961,6 +968,15 @@ class OperatorTests(unittest.TestCase):
             self.assertEqual([argv[-1] for argv in command_lines[2:]], [name for name in d.NAMES for _ in range(2)])
             self.assertIn((d.DISPATCHER_HOME, 0o700), directories)
             self.assertIn((d.DISPATCHER_HOME, 1101, 1101), ownership)
+            self.assertIn((d.STATE, 0o700), directories)
+            self.assertIn((d.STATE, 0, 0), ownership)
+            self.assertNotIn((d.STATE + '/receipts', 0o700), directories)
+            self.assertIn((d.RECEIPT_ROOT, 0o750), directories)
+            self.assertIn((d.RECEIPT_ROOT, 0, 1101), ownership)
+            for row in r['accounts']:
+                path = d.RECEIPT_ROOT + '/' + row['generation']
+                self.assertIn((path, 0o750), directories)
+                self.assertIn((path, 0, 1101), ownership)
             self.assertEqual(json.loads(record.read_bytes())['outcome'], 'provisioned_not_launched')
 
     def test_apply_transition_refusal_is_recorded_without_account_commands(self):

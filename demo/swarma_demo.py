@@ -26,6 +26,7 @@ from dataclasses import dataclass
 BASE = '7d705966aa92acaebea2d55060dcb84ddf7e5031'
 ROSTER = '/etc/swarma-demo/roster.json'
 STATE = '/var/lib/swarma-demo-user-manager'
+RECEIPT_ROOT = '/run/swarma-demo/receipts'
 LAUNCHER = '/usr/local/libexec/swarma/swarma-user-launcher'
 HELPER = '/usr/local/libexec/swarma/swarma-user-manager'
 EXECUTOR = '/usr/local/libexec/swarma/swarma-demo-executor'
@@ -214,7 +215,7 @@ def no_acl(fd):
         refuse('state_unavailable')
 
 
-def protected(path, flags=os.O_RDONLY, mode=None, owner=0, directory=False):
+def protected(path, flags=os.O_RDONLY, mode=None, owner=0, directory=False, group=None):
     """Walk from /, refusing links and writable/unowned ancestors, on descriptors."""
     if not path.startswith('/') or os.path.normpath(path) != path or path == '/':
         refuse('path_is_link')
@@ -235,7 +236,7 @@ def protected(path, flags=os.O_RDONLY, mode=None, owner=0, directory=False):
         fd = os.open(path.rsplit('/', 1)[-1], flags | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK | (os.O_DIRECTORY if directory else 0), dir_fd=parent)
         try:
             info = os.fstat(fd)
-            if info.st_uid != owner or info.st_gid != owner or (mode is not None and stat.S_IMODE(info.st_mode) != mode):
+            if info.st_uid != owner or info.st_gid != (owner if group is None else group) or (mode is not None and stat.S_IMODE(info.st_mode) != mode):
                 refuse('state_unavailable')
             if not (stat.S_ISDIR(info.st_mode) if directory else stat.S_ISREG(info.st_mode) and info.st_nlink == 1):
                 refuse('state_unavailable')
@@ -549,6 +550,36 @@ def write_launch_record(roster, row, request, plan):
                     os.close(staging)
 
 
+def receipt_directory_metadata(info):
+    return (stat.S_ISDIR(info.st_mode) and info.st_uid == 0 and
+            info.st_gid == DISPATCHER_ID and stat.S_IMODE(info.st_mode) == 0o750)
+
+
+def receipt_file_metadata(info):
+    return (stat.S_ISREG(info.st_mode) and info.st_uid == 0 and
+            info.st_gid == 0 and stat.S_IMODE(info.st_mode) == 0o644 and
+            info.st_nlink == 1)
+
+
+def receipt_directory(gen):
+    if not generation(gen):
+        refuse('request_invalid')
+    root = protected(RECEIPT_ROOT, mode=0o750, directory=True, group=DISPATCHER_ID)
+    try:
+        child = os.open(gen, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,
+                        dir_fd=root)
+        try:
+            if not receipt_directory_metadata(os.fstat(child)):
+                refuse('state_unavailable')
+            no_acl(child)
+            return child
+        except BaseException:
+            os.close(child)
+            raise
+    finally:
+        os.close(root)
+
+
 class Store:
     def __init__(self):
         self.fd = protected(STATE, mode=0o700, directory=True)
@@ -603,7 +634,9 @@ class Store:
 
 
     def receipt(self, gen, execution, value):
-        directory = protected(STATE + '/receipts/' + gen, mode=0o700, directory=True)
+        if not identifier(execution):
+            refuse('request_invalid')
+        directory = receipt_directory(gen)
         temporary = execution + '.new'
         try:
             try:
@@ -614,8 +647,16 @@ class Store:
                 refuse('execution_already_started')
             fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o644, dir_fd=directory)
             try:
+                # The invocation may have inherited another effective group.
+                # Pin root:root explicitly before exposing the receipt.
+                os.fchown(fd, 0, 0)
                 os.fchmod(fd, 0o644)
+                if not receipt_file_metadata(os.fstat(fd)):
+                    refuse('state_unavailable')
+                no_acl(fd)
                 data = encoded(value)
+                if len(data) > 4096:
+                    refuse('state_unavailable')
                 while data:
                     size = os.write(fd, data)
                     if size <= 0:
@@ -626,7 +667,7 @@ class Store:
                 os.close(fd)
             # The root-only transition lock excludes competing publications.
             # A crash leaves the intent/temporary reserved, never a new start.
-            os.rename(temporary, execution + '.json', src_dir_fd=directory, dst_dir_fd=directory)
+            rename_exclusive(directory, temporary, directory, execution + '.json')
             os.fsync(directory)
         finally:
             os.close(directory)

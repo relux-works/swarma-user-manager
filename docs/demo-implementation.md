@@ -31,6 +31,8 @@ This file does not revise the documentation branch or implement the dispatcher.
 | Decoded/encoded plan | At most 48 KiB / 64 KiB, opaque bytes |
 | Intake | One closed JSON document; launch 80 KiB / helper 16 KiB, 5 s |
 | Launch receipt | Within the original 10 s envelope; otherwise unknown |
+| Receipt root | `/run/swarma-demo/receipts`, root:1101 0750; each admitted generation directory has the same owner/group/mode |
+| Private attempt state | `/var/lib/swarma-demo-user-manager`, root:root 0700; never a receipt traversal parent |
 | Stop | Default grace 10 s, maximum 30 s, then KILL; quiet 2 s; final scan within 5 s of KILL; whole stop at most 45 s |
 | Output | stdout and stderr independently retain at most 1 MiB, continue draining excess |
 | Clocks | Monotonic durations/deadlines, UTC evidence timestamps |
@@ -184,11 +186,32 @@ require manual reconciliation or disposal; no automatic rearming is available.
 Launch validates the roster/caller, private paths and source-copy digest, checks
 zero account processes, verifies the fixed executor's SHA-256 through a retained
 ELF descriptor, and stages the complete plan in a sealed memfd reopened read only.
-It starts a session and persists a root-owned 0644 receipt at
-`STATE/receipts/GENERATION/EXECUTION.json` while the child is still root and
+It starts a session and persists a root:root 0644 receipt at
+`/run/swarma-demo/receipts/GENERATION/EXECUTION.json` while the child is still root and
 waiting behind a barrier. The receipt fields remain exactly
 `execution_id,epoch,pid,start_time,boot_id,session_id`. The attempt record also
 retains the original request, caller/account binding and timing evidence.
+
+The separately configured dispatcher `receipt_root` must be exactly
+`/run/swarma-demo/receipts`. Provisioning exclusively creates that directory and
+all admitted generation directories as root:1101 0750 before any first launch.
+The dispatcher can traverse and read receipts through its fixed service group;
+it cannot write either directory or any receipt. Private state stays 0700.
+The launcher never creates missing generation directories. The `/run` tree is
+volatile: reboot loses receipt evidence and requires manual reconciliation and
+fresh admission, never automatic rearming or reconstruction from private state.
+An existing receipt tree, including a partial provisioning run, refuses reuse.
+
+Compatibility is pinned to dispatcher PR17 commit
+`c9d0f4205eae47d2fcf2803524d3948e876647e5`,
+`internal/demolaunch/files_linux.go:pinDirectory` and
+`internal/demolaunch/engine_linux.go:receiptMetadata`.
+Every ancestor must be root-owned and not group/other writable; the receipt
+root and generation leaf must be root:1101 0750. Each receipt is a regular
+single-link root:root 0644 file, at most 4096 bytes, published by exclusive atomic
+rename after file sync, followed by directory sync. Group-writable directories,
+nonroot-owned files and 0600 receipt files are refused. Existing private-state
+receipts are not migrated or adopted.
 
 Before releasing the root child barrier, the launcher also publishes the P4
 launch record at `/run/swarma-demo/launch-records/EXECUTION.json`. This separate
@@ -208,8 +231,9 @@ snapshot and account, and reuses the existing closed launch decoder to bind the
 executor and plan. No request chooses a root directory, account UID, digest or
 qualification flag. The ordinary verified sudo/caller gate still applies.
 
-The later installer must prepare `/run/swarma-demo` and its `launch-records`
-directory as root:root 0755 on the same filesystem. The writer never creates or
+Provisioning creates `/run/swarma-demo` as root:root 0755. The later installer
+must validate that parent and prepare its `launch-records` directory as
+root:root 0755 on the same filesystem. The writer never creates or
 repairs them. It reuses the protected no-follow descriptor walk, including
 ancestor ownership, non-writability and ACL checks. A root-created exclusive
 0600 temporary in the parent directory is written completely, changed to 0444,

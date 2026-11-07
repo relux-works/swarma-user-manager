@@ -49,10 +49,10 @@ class MainCompletionTests(unittest.TestCase):
             request = f.launch_request() if kind == 'launch' else f.stop_request(0)
 
             def protected(path, **kwargs):
-                self.assertEqual(path, d.STATE + '/receipts/' + gen)
+                self.assertEqual(path, gen)
                 return os.open(receipts, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
 
-            with mock.patch.object(d, 'protected', protected):
+            with mock.patch.object(d, 'receipt_directory', protected):
                 if kind != 'launch':
                     d.launch(r, 1101, f.launch_request(), b'opaque', s, b, 100.)
                     b.members.clear()

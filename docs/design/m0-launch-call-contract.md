@@ -284,7 +284,11 @@ qualification authority. Earlier repeated reviews of the same production change
 do not become multiple independent seats. P1 demo launcher/helper/operator-script
 implementation is separately reviewed by two fresh seats. P2 dispatcher code
 holding both NOPASSWD rules also counts as privileged-path code: it requires
-fresh independent Muse Wonder Full xhigh and gpt-6.1-sol xhigh reviews of its exact
-candidate. A demo run requires the pending VM access route, separately scoped
+two fresh independent reviews of its exact candidate. **Dated departure,
+2026-11-07:** the owner-scoped P2 review route excludes Codex for that dispatcher
+lane, superseding the earlier Muse plus Codex pairing in this paragraph. This
+exclusion applies to P2 only; P1 user-manager implementation still needs its own
+two fresh independent seats and exact-head marker before publication, without
+extending the P2 model exclusion to P1. A demo run requires the pending VM access route, separately scoped
 VM/operator execution authorization and evidence for the accepted matrix.
 Q1–Q4 remain open; collected demo evidence is not production acceptance.

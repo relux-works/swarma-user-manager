@@ -255,14 +255,27 @@ def main():
                 os.mkdir(parent, 0o755)
                 os.chmod(parent, 0o755)
             os.mkdir(demo.STATE, 0o700)
-            os.mkdir(demo.STATE + '/receipts', 0o700)
+            os.chown(demo.STATE, 0, 0, follow_symlinks=False)
+            os.chmod(demo.STATE, 0o700)
+            # Public receipt traversal never exposes the private state tree.
+            # Exclusive creation refuses stale/partial provisioning, including
+            # after reboot: volatile receipt paths require a fresh admitted run.
+            os.mkdir('/run/swarma-demo', 0o755)
+            os.chmod('/run/swarma-demo', 0o755)
+            os.chown('/run/swarma-demo', 0, 0, follow_symlinks=False)
+            os.mkdir(demo.RECEIPT_ROOT, 0o750)
+            os.chown(demo.RECEIPT_ROOT, 0, demo.DISPATCHER_ID, follow_symlinks=False)
+            os.chmod(demo.RECEIPT_ROOT, 0o750)
             for row in roster['accounts']:
                 reservation = {'format': 'swarma-user-manager demo-reservation/1', 'account': row,
                                'dispatcher': roster['dispatcher'], 'boot_id': roster['boot_id']}
                 store = demo.Store()
                 try:
                     store.write(row['generation'], reservation)
-                    os.mkdir(demo.STATE + '/receipts/' + row['generation'], 0o700)
+                    receipt_path = demo.RECEIPT_ROOT + '/' + row['generation']
+                    os.mkdir(receipt_path, 0o750)
+                    os.chown(receipt_path, 0, demo.DISPATCHER_ID, follow_symlinks=False)
+                    os.chmod(receipt_path, 0o750)
                 finally:
                     store.close()
                 for command_line in (['/usr/sbin/groupadd', '--gid', str(row['gid']), row['name']],
