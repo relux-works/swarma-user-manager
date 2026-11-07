@@ -1,6 +1,6 @@
 # Logbook
 
-## 2026-10-11 — TASK-261011-1kho6b: R-UM1 contract alignment
+## 2026-10-11 — R-UM1 contract alignment
 
 Documentation now distinguishes root correlation from downstream effect IDs, writes the start receipt before dropping privileges, and routes stop through receipt/process identity checks in `exec.stop`. The launch diagram uses managed UID 30412. D-DONOR-PROVISIONING assigns donor provisioning to a separate component; variant B remains disabled until its specification exists. D-WIRE-NAMES prefixes request/result kinds with the repository name; the README reference follows the spec.
 
