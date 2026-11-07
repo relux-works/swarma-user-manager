@@ -216,12 +216,26 @@ launch `unknown` and stop `pending`, with an `unconfirmed` publication marker fo
 a completed candidate. It stores elapsed time observed **before** publication as
 `observed_elapsed_seconds`; final `launch_elapsed_seconds` / `elapsed_seconds`
 remain null on disk because the write cannot attest its own completion time.
-After the actual final write, transition-lock release and (for stop) outer
-stop-lease release, this invocation measures elapsed
-time again. Only a timely invocation can return receipt-seen or absence success;
-a final write or required release crossing the original 10 s launch, 45 s whole-stop or first-KILL+5 s
-cutoff returns unknown/pending with the actual elapsed time in its return value.
+The operation wrappers refresh invocation-local elapsed time after the actual
+final write, transition-lock release and (for stop) outer stop-lease release.
+The entrypoint then closes its Store directory descriptor, configures stdout,
+and prepares both the candidate and conservative JSON responses, including their
+encoded bytes. Only after all this work does it sample the clock again, refresh
+the invocation-local record and select one of those prepared responses. No
+cleanup, state access or serialization follows that final sample. Reaching the
+original 10 s launch, 45 s whole-stop or first-KILL+5 s cutoff selects
+unknown/pending; the in-memory elapsed time includes all work through that sample.
+The wire schema remains unchanged and does not expose these elapsed fields.
 No durable terminal success is published and then optimistically corrected.
+
+An operation error still runs Store cleanup before a refusal is prepared; a
+cleanup error also refuses with unavailable evidence. A response preparation
+error cannot emit the prepared success: it attempts a fixed failure response or
+exits 1 without a response if serialization remains unavailable. The selected
+bytes are submitted by one nonblocking write. A write error or short write exits
+1 and leaves the caller uncertain. The final sample defines cooperative response
+selection, not a deadline guarantee for scheduling, syscall completion, stdout
+delivery or caller receipt. Those latencies require native qualification.
 
 A crash, storage error or lost response can therefore lose the successful reply,
 but cannot turn an unchecked publication into a durable success on retry. Launch

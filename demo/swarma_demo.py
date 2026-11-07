@@ -719,11 +719,8 @@ def launch(roster, uid, request, plan, store, backend, started):
     # The transition context has exited, including its descriptor close. These
     # are invocation-only facts; no durable success or corrective write follows.
     record = copy.deepcopy(record)
-    finished = backend.clock()
-    origin = record['launch_started_mono']
-    record['launch_elapsed_seconds'] = finished - origin
-    record['launch_outcome'] = observed if finished < origin + RECEIPT else 'unknown'
-    return record
+    record['launch_outcome'] = observed
+    return complete(record, True, backend.clock())
 
 
 def launch_locked(roster, uid, request, plan, store, backend, started):
@@ -783,12 +780,26 @@ def stop(roster, uid, request, store, backend, started=None):
     # Both the transition lock and the outer stop lease have been released.
     record = copy.deepcopy(record)
     evidence = record['stop']
-    finished = backend.clock()
-    evidence['elapsed_seconds'] = finished - evidence['started_mono']
-    stop_bounds(evidence, finished)
-    if finished_at is not None and not evidence['deadline_missed'] and not evidence['final_scan_deadline_missed']:
+    if finished_at is not None:
         evidence['outcome'] = 'absent'
         evidence['finished_at'] = finished_at
+    return complete(record, False, backend.clock())
+
+
+def complete(record, launching, finished):
+    """Refresh invocation-only facts; never promote an unresolved result."""
+    if launching:
+        origin = record['launch_started_mono']
+        record['launch_elapsed_seconds'] = finished - origin
+        if finished >= origin + RECEIPT:
+            record['launch_outcome'] = 'unknown'
+    else:
+        evidence = record['stop']
+        evidence['elapsed_seconds'] = finished - evidence['started_mono']
+        stop_bounds(evidence, finished)
+        if evidence['deadline_missed'] or evidence['final_scan_deadline_missed']:
+            evidence['outcome'] = 'pending'
+            evidence['finished_at'] = None
     return record
 
 
@@ -1215,39 +1226,68 @@ def main(argv=None):
     started = time.monotonic()
     request_id = None
     store = None
+    answer = None
     try:
-        import sys
-        args = sys.argv[1:] if argv is None else argv
-        entry = os.path.abspath(sys.argv[0])
-        if entry not in (LAUNCHER, HELPER):
-            refuse('qualification_required')
-        close_except({0, 1, 2})
-        uid = verified_invocation(args, os.environ)
-        os.environ.clear()
-        os.environ.update(PATH='/usr/bin:/bin', LANG='C.UTF-8')
-        os.chdir('/')
-        os.umask(0o077)
-        roster = load_roster()
-        authorize(roster, uid)
-        launching = entry == LAUNCHER
-        request, plan = decode(intake(0, LAUNCH_MAX if launching else STOP_MAX, started), launching)
-        request_id = request['request_id']
-        store = Store()
-        backend = Native(roster)
-        record = launch(roster, uid, request, plan, store, backend, started) if launching else stop(roster, uid, request, store, backend, started)
-        answer = response(request_id, record, launching)
+        try:
+            import sys
+            args = sys.argv[1:] if argv is None else argv
+            entry = os.path.abspath(sys.argv[0])
+            if entry not in (LAUNCHER, HELPER):
+                refuse('qualification_required')
+            close_except({0, 1, 2})
+            uid = verified_invocation(args, os.environ)
+            os.environ.clear()
+            os.environ.update(PATH='/usr/bin:/bin', LANG='C.UTF-8')
+            os.chdir('/')
+            os.umask(0o077)
+            roster = load_roster()
+            authorize(roster, uid)
+            launching = entry == LAUNCHER
+            request, plan = decode(intake(0, LAUNCH_MAX if launching else STOP_MAX, started), launching)
+            request_id = request['request_id']
+            store = Store()
+            backend = Native(roster)
+            record = launch(roster, uid, request, plan, store, backend, started) if launching else stop(roster, uid, request, store, backend, started)
+        finally:
+            if store is not None:
+                store.close()
     except Refusal as exc:
         answer = {'request_id': request_id, 'ok': False, 'error': {'code': exc.code, 'message': 'Demo request refused.'}}
     except (OSError, ValueError, KeyError, TypeError, IndexError):
         answer = {'request_id': request_id, 'ok': False, 'error': {'code': 'state_unavailable', 'message': 'Demo evidence unavailable; reconcile manually.'}}
-    finally:
-        if store is not None:
-            store.close()
     try:
         os.set_blocking(1, False)
-        os.write(1, encoded(answer) + b'\n')
-    except (BlockingIOError, BrokenPipeError):
-        return 1  # lost response is unknown to the caller, never a retry permit
+        if answer is None:
+            # Prepare both wire alternatives before the final clock sample.
+            # Serialization and stdout setup consume the original budgets too.
+            candidate = response(request_id, record, launching)
+            candidate_wire = encoded(candidate) + b'\n'
+            unresolved = copy.deepcopy(record)
+            if launching:
+                unresolved['launch_outcome'] = 'unknown'
+            else:
+                unresolved['stop']['outcome'] = 'pending'
+                unresolved['stop']['finished_at'] = None
+            pending = response(request_id, unresolved, launching)
+            pending_wire = encoded(pending) + b'\n'
+            complete(record, launching, backend.clock())
+            timely = (record['launch_outcome'] == 'receipt_seen' if launching
+                      else record['stop']['outcome'] == 'absent')
+            answer, wire = (candidate, candidate_wire) if timely else (pending, pending_wire)
+        else:
+            wire = encoded(answer) + b'\n'
+    except (Refusal, OSError, ValueError, KeyError, TypeError, IndexError, RecursionError):
+        # A preparation failure cannot emit a partially prepared success.
+        answer = {'request_id': request_id, 'ok': False, 'error': {'code': 'state_unavailable', 'message': 'Demo response unavailable; reconcile manually.'}}
+        try:
+            wire = encoded(answer) + b'\n'
+        except (Refusal, OSError, ValueError, TypeError, RecursionError):
+            return 1
+    try:
+        if os.write(1, wire) != len(wire):
+            return 1
+    except OSError:
+        return 1  # lost/partial response is unknown, never a retry permit
     return 0 if answer['ok'] else 1
 
 
