@@ -286,7 +286,7 @@ implementation is separately reviewed by two fresh seats. P2 dispatcher code
 holding both NOPASSWD rules also counts as privileged-path code: it requires
 two fresh independent reviews of its exact candidate. **Muse Wonder Full xhigh**
 is preferred; **Claude Opus 5.5 xhigh** or **gpt-6.1-sol xhigh** are legitimate
-seats under the 2026-11-06 owner ruling. Muse is unavailable on agents1 until
+seats under the 2026-11-06 owner ruling. Muse is unavailable to the source custodian until
 2026-11-09 00:00Z. The dispatcher lane's preference to decline Codex for its own
 PR is a lane choice, not an owner exclusion; there is no newer owner rule.
 P1 user-manager implementation still needs its own two fresh independent seats
