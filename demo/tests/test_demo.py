@@ -313,7 +313,7 @@ class BoundaryTests(unittest.TestCase):
                 st = original_stat(fd)
                 return types.SimpleNamespace(st_uid=0, st_gid=0, st_mode=stat.S_IFREG | 0o4755,
                                              st_dev=st.st_dev, st_ino=st.st_ino, st_nlink=1)
-            with mock.patch.object(d.os, 'getuid', return_value=0), mock.patch.object(d.os, 'geteuid', return_value=0), mock.patch.object(d.os, 'getppid', return_value=500), mock.patch.object(d.os, 'readlink', return_value='/usr/bin/sudo'), mock.patch.object(d.os, 'stat', return_value=types.SimpleNamespace(st_uid=0)), mock.patch.object(d, 'protected', side_effect=lambda _: original_open(expected, os.O_RDONLY | os.O_CLOEXEC)), mock.patch.object(d.os, 'open', side_effect=fixture_open), mock.patch.object(d.os, 'fstat', side_effect=fixture_fstat):
+            with mock.patch.object(d.os, 'getuid', return_value=0), mock.patch.object(d.os, 'geteuid', return_value=0), mock.patch.object(d.os, 'getppid', return_value=500), mock.patch.object(d.os, 'readlink', return_value='/usr/bin/sudo'), mock.patch.object(d.os, 'stat', return_value=types.SimpleNamespace(st_uid=0)), mock.patch.object(d, 'sudo_executable', side_effect=lambda _: original_open(expected, os.O_RDONLY | os.O_CLOEXEC)), mock.patch.object(d.os, 'open', side_effect=fixture_open), mock.patch.object(d.os, 'fstat', side_effect=fixture_fstat):
                 self.assertEqual(d.verified_invocation([], {'SUDO_UID': '1101'}), 1101)
                 actual_target[0] = other
                 self.assert_refusal('not_invoked_by_sudo', d.verified_invocation, [], {'SUDO_UID': '1101'})
@@ -964,10 +964,13 @@ class OperatorTests(unittest.TestCase):
                 self.assertEqual(p.main(), 0)
             self.assertEqual(len(command_lines), 8)
             self.assertEqual(command_lines[0], ['/usr/sbin/groupadd', '--gid', '1101', 'swarma-demo-dispatcher'])
-            self.assertEqual(command_lines[1], ['/usr/sbin/useradd', '--uid', '1101', '--gid', '1101', '--groups', '', '--no-create-home', '--no-user-group', '--no-log-init', '--home-dir', '/var/lib/swarma-demo-dispatcher', '--shell', '/usr/sbin/nologin', '--password', '!', 'swarma-demo-dispatcher'])
+            self.assertEqual(command_lines[1], ['/usr/sbin/useradd', '--uid', '1101', '--gid', '1101', '--groups', '', '--no-create-home', '--no-user-group', '--no-log-init', '--home-dir', '/var/lib/swarma-demo-dispatcher-home', '--shell', '/usr/sbin/nologin', '--password', '!', 'swarma-demo-dispatcher'])
             self.assertEqual([argv[-1] for argv in command_lines[2:]], [name for name in d.NAMES for _ in range(2)])
             self.assertIn((d.DISPATCHER_HOME, 0o700), directories)
             self.assertIn((d.DISPATCHER_HOME, 1101, 1101), ownership)
+            self.assertNotEqual(d.DISPATCHER_HOME, d.DISPATCHER_STATE)
+            self.assertIn((d.DISPATCHER_STATE, 0o700), directories)
+            self.assertIn((d.DISPATCHER_STATE, 1101, 1101), ownership)
             self.assertIn((d.STATE, 0o700), directories)
             self.assertIn((d.STATE, 0, 0), ownership)
             self.assertNotIn((d.STATE + '/receipts', 0o700), directories)

@@ -20,7 +20,7 @@ import select
 import signal
 import stat
 import time
-from contextlib import contextmanager
+from contextlib import contextmanager, ExitStack
 from dataclasses import dataclass
 
 BASE = '7d705966aa92acaebea2d55060dcb84ddf7e5031'
@@ -46,7 +46,9 @@ BOOT = re.compile(r'[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\Z')
 NAMES = ('swarma-demo-01', 'swarma-demo-02', 'swarma-demo-03')
 OPERATOR = {'name': 'agent', 'uid': 1001, 'gid': 1001}
 DISPATCHER_NAME, DISPATCHER_ID = 'swarma-demo-dispatcher', 1101
-DISPATCHER_HOME = '/var/lib/swarma-demo-dispatcher'
+DISPATCHER_STATE = '/var/lib/swarma-demo-dispatcher'
+DISPATCHER_HOME = '/var/lib/swarma-demo-dispatcher-home'
+SUDO_ENTRYPOINTS = ('/usr/bin/sudo', '/usr/bin/sudo-rs')
 # Frozen Git entries only; never follow or flatten these links.
 COPY_EXCLUSIONS = dict.fromkeys(('.claude/skills/swarma-user-manager',
                                 '.codex/skills/swarma-user-manager'),
@@ -433,6 +435,42 @@ def load_roster():
     return obj
 
 
+def sudo_executable(image):
+    """Pin an image reached only through a fixed sudo entrypoint.
+
+    Alternatives links may select the image, but every link and containing
+    directory must remain root-owned. Never trust a caller's executable path.
+    """
+    for entry in SUDO_ENTRYPOINTS:
+        path = entry
+        for _ in range(8):
+            if len(path) > 4095 or not path.startswith('/'):
+                refuse('not_invoked_by_sudo')
+            directory, leaf = os.path.split(path)
+            parent = protected(directory, directory=True)
+            try:
+                if stat.S_IMODE(os.fstat(parent).st_mode) & 0o022:
+                    refuse('not_invoked_by_sudo')
+                info = os.stat(leaf, dir_fd=parent, follow_symlinks=False)
+                if stat.S_ISLNK(info.st_mode):
+                    if info.st_uid != 0 or info.st_gid != 0:
+                        refuse('not_invoked_by_sudo')
+                    link = os.readlink(leaf, dir_fd=parent)
+                    after = os.stat(leaf, dir_fd=parent, follow_symlinks=False)
+                    if (info.st_dev, info.st_ino, info.st_ctime_ns) != (after.st_dev, after.st_ino, after.st_ctime_ns):
+                        refuse('not_invoked_by_sudo')
+                    path = os.path.normpath(os.path.join(directory, link))
+                    continue
+            except FileNotFoundError:
+                break
+            finally:
+                os.close(parent)
+            if path == image:
+                return protected(path)
+            break
+    refuse('not_invoked_by_sudo')
+
+
 def verified_invocation(argv, environ):
     if argv:
         refuse('argv_not_allowed')
@@ -444,13 +482,13 @@ def verified_invocation(argv, environ):
     parent = os.getppid()
     proc = '/proc/' + str(parent)
     name = os.readlink(proc + '/exe')
-    if name not in ('/usr/bin/sudo', '/usr/bin/sudo-rs') or os.stat(proc).st_uid != 0:
+    if os.stat(proc).st_uid != 0:
         refuse('not_invoked_by_sudo')
-    expected = protected(name)
+    expected = sudo_executable(name)
     actual = os.open(proc + '/exe', os.O_RDONLY | os.O_CLOEXEC)
     try:
         a, b = os.fstat(expected), os.fstat(actual)
-        if stat.S_IMODE(a.st_mode) & 0o022 or not a.st_mode & 0o111 or (a.st_dev, a.st_ino) != (b.st_dev, b.st_ino) or os.getppid() != parent:
+        if a.st_uid != 0 or a.st_gid != 0 or not stat.S_ISREG(a.st_mode) or stat.S_IMODE(a.st_mode) & 0o022 or not a.st_mode & 0o111 or (a.st_dev, a.st_ino) != (b.st_dev, b.st_ino) or os.getppid() != parent:
             refuse('not_invoked_by_sudo')
     finally:
         os.close(expected)
@@ -929,14 +967,38 @@ def complete(record, launching, finished):
     return record
 
 
+@contextmanager
+def stop_transition(store, backend, deadline):
+    # Receipt files become visible while launch still owns transition exclusion.
+    # Retry acquisition only, never the protected body or any physical effect.
+    with ExitStack() as held:
+        while True:
+            if backend.clock() >= deadline:
+                refuse('request_timeout')
+            try:
+                held.enter_context(store.locked())
+                if backend.clock() >= deadline:
+                    refuse('request_timeout')
+                break
+            except Refusal as exc:
+                if exc.code != 'state_conflict':
+                    raise
+            remaining = deadline - backend.clock()
+            if remaining <= 0:
+                refuse('request_timeout')
+            backend.sleep(min(0.01, remaining))
+        yield
+
+
 def stop_locked(roster, uid, request, store, backend, started=None):
     authorize(roster, uid)
     args = request['args']
     row = target(roster, args['generation'])
+    admitted = backend.clock() if started is None else started
     # Per-account stop lease is distinct from the transition lock. No transition
     # lock is held during census, signals, grace waits or quiet-window waits.
     with store.locked(row['generation'] + '.stop.lock'):
-        with store.locked():
+        with stop_transition(store, backend, admitted + STOP_WHOLE):
             record = store.read(row['generation'])
             if record['account'] != row or record['dispatcher'] != roster['dispatcher'] or record['boot_id'] != roster['boot_id']:
                 refuse('target_not_owned')
@@ -954,7 +1016,7 @@ def stop_locked(roster, uid, request, store, backend, started=None):
                     prior['finished_at'] = None
                     return record, None
             else:
-                prior = {'request': request, 'started_at': utc(), 'started_mono': backend.clock() if started is None else started,
+                prior = {'request': request, 'started_at': utc(), 'started_mono': admitted,
                          'grace_seconds': args.get('grace_seconds', 10), 'kill_mono': None,
                          'outcome': 'pending', 'events': [], 'signalled': 0, 'killed': 0,
                          'last_scan_complete': False, 'remaining': None,

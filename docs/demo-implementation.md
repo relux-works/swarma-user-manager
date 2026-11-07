@@ -25,6 +25,7 @@ This file does not revise the documentation branch or implement the dispatcher.
 | Workspaces | `/srv/swarma-demo/work/NAME`, account-owned 0700 |
 | Home/work parent roots | root:root 0755 |
 | Dispatcher state | `/var/lib/swarma-demo-dispatcher`, service-owned 0700; owned by the separate dispatcher implementation |
+| Dispatcher home | `/var/lib/swarma-demo-dispatcher-home`, service-owned 0700; separate from the state directory |
 | Private copy | Fresh source at the exact baseline, 256 MiB, 20,000 entries; exactly two frozen link exclusions below; all other links, hardlinks and special files refused |
 | Launcher | `/usr/local/libexec/swarma/swarma-user-launcher`, root:root 0755 |
 | Helper | `/usr/local/libexec/swarma/swarma-user-manager`, root:root 0755 |
@@ -60,8 +61,12 @@ qualified interface and a reviewed source change.
 The admitted operator is account `agent`, UID/GID **1001:1001**, with its
 existing lab sudo authority. The demo dispatcher is `swarma-demo-dispatcher`,
 UID/GID **1101:1101**, nologin, with no supplementary groups and service-owned
-0700 home `/var/lib/swarma-demo-dispatcher`. The operator procedure creates that
-service identity; it refuses pre-existing users/groups instead of adopting them.
+0700 home `/var/lib/swarma-demo-dispatcher-home`. The dispatcher state remains
+`/var/lib/swarma-demo-dispatcher`: its closed inventory must contain only dispatcher
+records, never home dotfiles. The operator procedure exclusively creates both
+directories and that service identity; it refuses pre-existing users/groups
+instead of adopting them. This layout requires fresh admitted provisioning;
+ordinary helper invocations do not migrate an existing account or directory.
 These identities are distinct and outside the worker range. The roster's
 `owning_dispatcher` is this service name, bound to its pinned numeric UID by the
 single dispatcher record. No other service identity is created by this P1 cut.
@@ -96,6 +101,11 @@ and process-call bounds, and interpreter/executable/descriptor behavior.
 
 The helpers require real/effective root plus a numeric `SUDO_UID` and a matching
 root-owned sudo parent executable inode. The UID must match the pinned dispatcher.
+The expected image is resolved from only `/usr/bin/sudo` or `/usr/bin/sudo-rs`,
+through a bounded root-owned alternatives-link chain. Every containing directory
+is protected, and the final regular, executable, non-writable root-owned file must
+match the opened parent image's device and inode. An arbitrary root executable,
+an untrusted link/directory, an inode mismatch or a changed parent still refuses.
 The operator and worker UIDs cannot launch or use this ordinary stop interface.
 The demo helper accepts **only** `exec.stop`; create, retire, bump, observation and
 arbitrary commands are unreachable. There is no R-ALLSTOP operator wire adapter.
@@ -276,6 +286,12 @@ independently inspect the current incarnation and approved image. This runtime
 witness is **NOT RUN**.
 
 Stop persists its original request, grace origin and deadline before signalling.
+If the dispatcher observes the receipt while launch still holds transition
+exclusion, initial stop admission retries only lock acquisition within the
+invocation's original 45 s bound. The stop clock starts before this wait; no
+protected body, intent publication or signal is retried by the acquisition loop.
+Failure to acquire before that bound returns `request_timeout` without a stop
+effect. Existing stop evidence retains its original grace and first-KILL clocks.
 A separate per-account stop lease serializes continuation; the shared transition
 lock is released during enumeration, signalling and waits. Signals use pidfds
 and revalidate the entire process incarnation and UID/GID tuple. Scope includes

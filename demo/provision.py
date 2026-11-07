@@ -246,9 +246,10 @@ def main():
                 report['commands'].append(result)
                 if result['exit'] != 0 or result['timeout'] or result['output_over_cap']:
                     demo.refuse('account_creation_unknown')
-            os.mkdir(demo.DISPATCHER_HOME, 0o700)
-            os.chmod(demo.DISPATCHER_HOME, 0o700)
-            os.chown(demo.DISPATCHER_HOME, demo.DISPATCHER_ID, demo.DISPATCHER_ID, follow_symlinks=False)
+            for directory in (demo.DISPATCHER_HOME, demo.DISPATCHER_STATE):
+                os.mkdir(directory, 0o700)
+                os.chmod(directory, 0o700)
+                os.chown(directory, demo.DISPATCHER_ID, demo.DISPATCHER_ID, follow_symlinks=False)
             # State is O_EXCL provisioning ownership. Existing state, including
             # a partial/failed run, is never removed or automatically resumed.
             for parent in ('/srv/swarma-demo', '/srv/swarma-demo/home', '/srv/swarma-demo/work', '/etc/swarma-demo'):
