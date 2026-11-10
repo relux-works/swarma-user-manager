@@ -165,7 +165,7 @@ func TestRootBootstrapExclusive(t *testing.T) {
 	}
 }
 
-// Proves foreign entries, symlink homes other filesystems and same-device bind mounts refuse before deleting a valid neighboring file.
+// Proves foreign entries, writable directories, symlink homes, other filesystems and same-device bind mounts refuse before deleting a valid neighboring file.
 func TestRootHomeDeletionRefusals(t *testing.T) {
 	p, r, dir := rootFixture(t)
 	h, e := openHomeRoot(p)
@@ -187,6 +187,25 @@ func TestRootHomeDeletionRefusals(t *testing.T) {
 		t.Fatal("refusal deleted valid neighbor")
 	}
 	if e = os.Remove(foreign); e != nil {
+		t.Fatal(e)
+	}
+	unsafeDir := filepath.Join(r.Identity.Home, "unsafe-dir")
+	if e = os.Mkdir(unsafeDir, 0700); e != nil {
+		t.Fatal(e)
+	}
+	if e = os.Chown(unsafeDir, int(r.Identity.UID), int(r.Identity.UID)); e != nil {
+		t.Fatal(e)
+	}
+	if e = os.Chmod(unsafeDir, 0777); e != nil {
+		t.Fatal(e)
+	}
+	if e = h.remove(&r); e == nil {
+		t.Fatal("writable directory admitted")
+	}
+	if b, err := os.ReadFile(filepath.Join(r.Identity.Home, "bootstrap")); err != nil || string(b) != "keep" {
+		t.Fatal("writable-directory refusal deleted valid neighbor")
+	}
+	if e = os.Remove(unsafeDir); e != nil {
 		t.Fatal(e)
 	}
 	mount := filepath.Join(r.Identity.Home, "mount")

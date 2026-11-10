@@ -4,10 +4,10 @@
 curator-run station lifecycle qualify. It is not the station helper described in
 [spec/helper.md](../../spec/helper.md).
 
-**Activation blocked pending the enforcement launch fence.** Current systemd
-property readback happens after payload launch and cannot prove that best-effort
-BPF attachment or controller setup succeeded before execution. See
-[UNRESOLVED_QUESTIONS.md](UNRESOLVED_QUESTIONS.md) before deploying this head.
+**Activation requires exact-head hosted evidence and accepted delta review.**
+The prestart enforcement fence below replaces reliance on systemd configuration
+readback. Its source availability is not runtime qualification; see
+[UNRESOLVED_QUESTIONS.md](UNRESOLVED_QUESTIONS.md) before deploying a new head.
 
 The Linux entry point serves the v1 r4 protocol with durable state, account and
 home lifecycle, expiry, transient systemd units and both egress layers. It
@@ -67,6 +67,48 @@ drop. The Linux integration refuses pre-existing unowned resources, reads back i
 unit properties and the complete NFT ruleset, and retains the protocol's destroy
 order. Hosted network probes separately establish effective enforcement.
 
+## Mandatory prestart fence
+
+Install this same binary at `/usr/libexec/swarma-slotd-demo`, root-owned and not
+group/other writable, with executable permission and protected ancestors. Before
+launch the daemon checks that its kernel-held executable bytes match that file.
+`ExecStartPre=+/usr/libexec/swarma-slotd-demo --enforcement-fence N TOKEN` runs
+before the unchanged policy `ExecStart` argv. The `+` applies only to this trusted
+root verifier; the payload retains its slot UID and hardening. Fence mode has no
+payload execution or account mutation operation and is not setuid.
+
+The daemon syncs a canonical root-only request under
+`/run/swarma-slotd-demo-fences/N.json`. The helper accepts only its slot/token,
+requires the exact owned activating unit, its own `ControlPID` and actual unified
+cgroup, and reads that cgroup's `cpu.max`, `memory.max` and `pids.max`. Quota ratios
+must match exactly; unsupported controller precision fails closed. Parent limits
+may further restrict a slot; they cannot grant more than these child limits.
+
+For both directly attached IP hooks it inspects the real BPF programs and every
+allow-map prefix/value. The map's exact address union must equal policy, even
+when adjacent hosts coalesce into prefixes. A closed deny-any/allow-precedence
+reference program is translated by the same kernel using those verified maps;
+its full translated instructions must equal the attached program. This temporary
+reference is never attached or executed. Extra/unknown programs, accounting or
+inherited address forms outside that closed representation refuse activation.
+This requires privileged BPF query/load access on little-endian Linux; unsupported
+or unreadable results refuse rather than fall back to property readback.
+
+The helper also strictly re-verifies the owned NFT table. It publishes a
+nonce-bound protected result before returning; systemd must observe prestart
+success before executing the payload. Private exit codes 80–87 respectively are
+`fence_input`, `fence_cgroup`, `fence_limits`, `fence_bpf_missing`,
+`fence_bpf_policy`, `fence_nft`, `fence_bpf_unsupported`, `fence_bpf_unknown`.
+They remain journal diagnostics; wire failures use the existing `internal` code
+and leave the slot failed without lifecycle-resource deletion.
+
+Guarded root fixtures plant missing BPF, widened maps, incorrect program code,
+wrong limits, absent NFT and actual syscall errors before the real verifier.
+Each requires its specific refusal and an absent payload execution sentinel,
+beside a valid launch. These fault hooks exist only in the copied test binary.
+The systemd-only network control removes its owned NFT layer after a successful
+production fence and releases an inert gated probe; production has no bypass.
+
 ## linuxos reuse
 
 `internal/linuxos` remains unchanged. Account creation uses `Allocate` with an
@@ -80,8 +122,10 @@ Allocation from a demo receipt. Descriptor traversal uses `openat2` beneath
 pinned roots, refusing symlinks and descendant mount crossings, including bind
 mounts on the same device. Bootstrap creation is exclusive, mode 0600, chowned
 and synced. Home deletion preflights bounded contents before unlinking and
-refuses foreign owners, group/other writable entries, hard links, special files
-and mounts.
+refuses foreign owners, writable or ACL-bearing parent directories and mounts.
+Owned symlinks, sockets, FIFOs and hardlinked files are unlink-only leaves;
+their targets and contents are never opened. Safe owner changes to directory
+permissions do not prevent retirement after slot processes are proven absent.
 
 A synced account-create intent precedes account tools. Successful creation is
 followed by fresh protected passwd/group/shadow/gshadow reads and independent
@@ -135,7 +179,7 @@ root UID and exact, forwarded `GITHUB_ACTIONS=true` and
 used to admit a workstation or self-hosted runner.
 
 Root tests cover real account/home/state recovery, missing or changed receipt
-refusal, exclusive bootstrap, foreign/symlink/mounted content, active-unit
+refusal, exclusive bootstrap, foreign leaves, symlink homes and mounted content, active-unit
 refusal, actual service peer credentials and clean restart. TCP/UDP IPv4/IPv6
 probes compare no filters, systemd address filtering alone, per-UID NFT filtering
 alone and both together; an unrelated-UID control excludes a global firewall
@@ -154,5 +198,5 @@ as workflow artifacts for seven days.
 | nft | Install, observe and remove the owned per-UID table | Fixed `/usr/sbin/nft`, generated rules on stdin | Bounded private readback and counters |
 | Account tools | Create and receipt-gated retirement | Closed linuxos vectors; fixed `/usr/sbin/userdel` and `/usr/sbin/groupdel` | Protected local databases |
 
-All tools run without a shell, with empty environment and cwd `/`. Diagnostics
+External account/systemd/nft tools run without a shell, with empty environment and cwd `/`. Diagnostics
 stay out of protocol responses. No command in this README provisions a real host.

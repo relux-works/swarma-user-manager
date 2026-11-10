@@ -18,11 +18,16 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
 
 // The copied test executable is an inert, non-root fixture payload. This path
 // runs only as an explicit subprocess; it cannot select or enable root tests.
 func TestMain(m *testing.M) {
+	if len(os.Args) > 1 && os.Args[1] == "--enforcement-fence" {
+		os.Exit(testFenceEntry(os.Args[2:]))
+	}
 	if len(os.Args) > 1 && os.Args[1] == "slotd-test-probe" {
 		if os.Geteuid() == 0 {
 			os.Exit(90)
@@ -34,11 +39,13 @@ func TestMain(m *testing.M) {
 
 type probeTarget struct{ Network, Address string }
 type probeSpec struct {
-	Socket  string
-	Frame   string
-	Report  string
-	Targets []probeTarget
-	Hold    bool
+	Socket     string
+	Frame      string
+	Report     string
+	Targets    []probeTarget
+	Hold       bool
+	Gate       string
+	LeafTarget string
 }
 
 func runProbe(args []string) int {
@@ -48,6 +55,18 @@ func runProbe(args []string) int {
 	var spec probeSpec
 	if json.Unmarshal([]byte(args[0]), &spec) != nil || !filepath.IsAbs(spec.Report) {
 		return 92
+	}
+	if spec.Gate != "" {
+		deadline := time.Now().Add(10 * time.Second)
+		for {
+			if _, err := os.Stat(spec.Gate); err == nil {
+				break
+			}
+			if time.Now().After(deadline) {
+				return 99
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
 	}
 	if spec.Socket != "" {
 		c, e := net.DialTimeout("unix", spec.Socket, time.Second)
@@ -87,7 +106,11 @@ func runProbe(args []string) int {
 	if e != nil {
 		return 93
 	}
-	if e = os.WriteFile(spec.Report, b, 0600); e != nil {
+	if spec.LeafTarget != "" {
+		if e = writeLeafReport(spec, b); e != nil {
+			return 94
+		}
+	} else if e = os.WriteFile(spec.Report, b, 0600); e != nil {
 		return 94
 	}
 	if spec.Hold {
@@ -96,6 +119,46 @@ func runProbe(args []string) int {
 		}
 	}
 	return 0
+}
+
+func writeLeafReport(spec probeSpec, b []byte) error {
+	home := filepath.Dir(spec.Report)
+	report, err := os.OpenFile(spec.Report, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+	if err != nil {
+		return err
+	}
+	defer report.Close()
+	if err = os.Symlink(spec.LeafTarget, filepath.Join(home, "symlink")); err != nil {
+		return err
+	}
+	if err = unix.Mkfifo(filepath.Join(home, "fifo"), 0600); err != nil {
+		return err
+	}
+	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: filepath.Join(home, "socket"), Net: "unix"})
+	if err != nil {
+		return err
+	}
+	listener.SetUnlinkOnClose(false)
+	if err = listener.Close(); err != nil {
+		return err
+	}
+	file := filepath.Join(home, "writable")
+	if err = os.WriteFile(file, []byte("leaf"), 0600); err != nil {
+		return err
+	}
+	if err = os.Chmod(file, 0666); err != nil {
+		return err
+	}
+	if err = os.Link(file, filepath.Join(home, "hardlink")); err != nil {
+		return err
+	}
+	if err = os.Chmod(home, 0500); err != nil {
+		return err
+	}
+	if _, err = report.Write(b); err != nil {
+		return err
+	}
+	return report.Sync()
 }
 func fixturePayload(t *testing.T, dir string) string {
 	t.Helper()
@@ -202,6 +265,7 @@ func checkProbe(t *testing.T, got, want []bool) {
 }
 func setProbePolicy(t *testing.T, p *policy, dir string, spec probeSpec) {
 	t.Helper()
+	fixtureFenceBinary(t)
 	path := fixturePayload(t, dir)
 	b, e := os.ReadFile(path)
 	if e != nil {
@@ -477,7 +541,11 @@ func TestRootEgressLayers(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			p, r, dir := rootFixture(t)
 			report := filepath.Join(r.Identity.Home, "network-report")
-			setProbePolicy(t, &p, dir, probeSpec{Report: report, Targets: targets, Hold: mode == "systemd" || mode == "both"})
+			gate := ""
+			if mode == "systemd" {
+				gate = filepath.Join(r.Identity.Home, "network-release")
+			}
+			setProbePolicy(t, &p, dir, probeSpec{Report: report, Targets: targets, Hold: mode == "systemd" || mode == "both", Gate: gate})
 			p.Egress = nil
 			for _, target := range targets[:4] {
 				host, port, _ := net.SplitHostPort(target.Address)
@@ -524,7 +592,7 @@ func TestRootEgressLayers(t *testing.T) {
 			if err = h.create(&r, []byte("inert"), persist); err != nil {
 				t.Fatal(err)
 			}
-			if mode == "nft" || mode == "both" {
+			if mode == "nft" || mode == "both" || mode == "systemd" {
 				if err = installNFT(ctx, p, &r, persist); err != nil {
 					dumpFixtureNFT(t, &r)
 					t.Fatal(err)
@@ -533,6 +601,17 @@ func TestRootEgressLayers(t *testing.T) {
 			if mode == "systemd" || mode == "both" {
 				if err = startUnit(ctx, p, &r, persist, time.Now()); err != nil {
 					t.Fatal(err)
+				}
+				if mode == "systemd" {
+					// Production always launches through both-layer verification. This
+					// isolated fixture removes only its receipt-owned NFT table after
+					// the fence passes, before releasing the inert network probe.
+					if err = removeNFT(ctx, p, &r); err != nil {
+						t.Fatal(err)
+					}
+					if err = os.WriteFile(gate, []byte("release"), 0600); err != nil {
+						t.Fatal(err)
+					}
 				}
 			} else {
 				probeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)

@@ -19,8 +19,31 @@ type toolInvocation struct {
 	Stdin []byte
 }
 
-// startInvocation constructs a transient-service vector only. The caller must
-// first verify the actual payload bytes and install both egress layers.
+// Policy permits at most three decimal places. A milli-percent is exactly ten
+// microseconds of quota per second; no floating-point rounding is involved.
+func cpuQuotaMicros(value string) (int64, error) {
+	if !cpuPattern.MatchString(value) {
+		return 0, errors.New("invalid CPU quota")
+	}
+	whole, fraction, _ := strings.Cut(strings.TrimSuffix(value, "%"), ".")
+	n, err := strconv.ParseInt(whole, 10, 64)
+	if err != nil {
+		return 0, err
+	}
+	fraction += strings.Repeat("0", 3-len(fraction))
+	f, err := strconv.ParseInt(fraction, 10, 64)
+	if err != nil {
+		return 0, err
+	}
+	result := (n*1000 + f) * 10
+	if result <= 0 {
+		return 0, errors.New("invalid CPU quota")
+	}
+	return result, nil
+}
+
+// startInvocation constructs a transient-service vector only. Production first
+// verifies payload bytes/NFT and adds its mandatory ExecStartPre kernel fence.
 func startInvocation(p policy, slot string, current record, now time.Time) (toolInvocation, error) {
 	id, err := p.identity(slot)
 	if err != nil {
@@ -66,22 +89,6 @@ func stopInvocation(p policy, slot string) (toolInvocation, error) {
 		return toolInvocation{}, err
 	}
 	return toolInvocation{Path: systemctlPath, Args: []string{"--system", "--no-ask-password", "stop", "--", id.Unit}}, nil
-}
-
-func inspectUnitInvocation(p policy, slot string) (toolInvocation, error) {
-	id, err := p.identity(slot)
-	if err != nil {
-		return toolInvocation{}, err
-	}
-	return toolInvocation{Path: systemctlPath, Args: []string{"--system", "--no-ask-password", "show", "--property=LoadState,ActiveState,SubState,ControlGroup", "--", id.Unit}}, nil
-}
-
-func installNFTInvocation(p policy, slot string) (toolInvocation, error) {
-	rules, err := nftRuleset(p, slot)
-	if err != nil {
-		return toolInvocation{}, err
-	}
-	return toolInvocation{Path: nftPath, Args: []string{"--file", "-"}, Stdin: rules}, nil
 }
 
 func deleteNFTInvocation(p policy, slot string) (toolInvocation, error) {

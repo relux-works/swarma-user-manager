@@ -26,9 +26,15 @@ type socketReceipt struct {
 }
 
 func atomicPrivate(dir *os.File, name string, b []byte) (err error) {
+	return atomicPrivateBounded(dir, name, b, 64*1024)
+}
+func atomicPrivateBounded(dir *os.File, name string, b []byte, limit int) (err error) {
+	if len(b) > limit {
+		return errors.New("private record too large")
+	}
 	existing, e := childFD(dir, name, unix.O_RDONLY|unix.O_NONBLOCK, 0)
 	if e == nil {
-		_, e = readProtectedFD(existing, 0600, 64*1024)
+		_, e = readProtectedFD(existing, 0600, limit)
 		existing.Close()
 	}
 	if e != nil && !errors.Is(e, unix.ENOENT) {

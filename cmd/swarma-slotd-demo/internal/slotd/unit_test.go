@@ -7,6 +7,24 @@ import (
 	"time"
 )
 
+// Proves fractional policy percentages map to exact integer microseconds, including the prior 1.001% float truncation witness.
+func TestCPUQuotaMicros(t *testing.T) {
+	for _, tc := range []struct {
+		input string
+		want  int64
+	}{{"1.001%", 10010}, {"0.001%", 10}, {"0.1%", 1000}, {"100%", 1000000}, {"250.5%", 2505000}, {"999999.999%", 9999999990}} {
+		got, err := cpuQuotaMicros(tc.input)
+		if err != nil || got != tc.want {
+			t.Fatalf("%s: %d, %v", tc.input, got, err)
+		}
+	}
+	for _, input := range []string{"0%", "0.000%", "infinity", "1.0001%", "-1%"} {
+		if _, err := cpuQuotaMicros(input); err == nil {
+			t.Fatal("invalid CPU quota accepted")
+		}
+	}
+}
+
 // Proves the generated vector contains every mandated cap/hardening property and preserves literal payload argv; no unit is started.
 func TestStartInvocation(t *testing.T) {
 	p, err := parsePolicy(examplePolicy(t))
@@ -90,7 +108,7 @@ func TestSystemdWordQuoting(t *testing.T) {
 	}
 }
 
-// Proves stop/query/delete vectors use fixed executables and exact derived resource names, refusing noncanonical slots.
+// Proves stop/delete vectors use fixed executables and exact derived resource names, refusing noncanonical slots.
 func TestLifecycleInvocations(t *testing.T) {
 	p, err := parsePolicy(examplePolicy(t))
 	if err != nil {
@@ -102,7 +120,6 @@ func TestLifecycleInvocations(t *testing.T) {
 		args  []string
 	}{
 		{stopInvocation, systemctlPath, []string{"--system", "--no-ask-password", "stop", "--", "swarma-slot-17.service"}},
-		{inspectUnitInvocation, systemctlPath, []string{"--system", "--no-ask-password", "show", "--property=LoadState,ActiveState,SubState,ControlGroup", "--", "swarma-slot-17.service"}},
 		{deleteNFTInvocation, nftPath, []string{"delete", "table", "inet", "swarma_slot_17"}},
 	} {
 		got, err := tc.build(p, "17")
@@ -112,16 +129,5 @@ func TestLifecycleInvocations(t *testing.T) {
 		if got, err := tc.build(p, "017"); err == nil || got.Path != "" {
 			t.Fatal("invalid slot produced a vector")
 		}
-	}
-	nft, err := installNFTInvocation(p, "17")
-	if err != nil {
-		t.Fatal(err)
-	}
-	rules, err := nftRuleset(p, "17")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if nft.Path != nftPath || !reflect.DeepEqual(nft.Args, []string{"--file", "-"}) || !reflect.DeepEqual(nft.Stdin, rules) {
-		t.Fatalf("unexpected nft input: %+v", nft)
 	}
 }

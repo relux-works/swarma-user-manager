@@ -4,15 +4,12 @@ The demo-local filesystem and receipt-backed restart-retirement contract is
 implemented without changing `internal/linuxos`. Its previous API integration
 gaps no longer block this implementation.
 
-Activation is currently blocked: systemd's configured unit properties do not
-prove that its best-effort BPF attachment and controller writes succeeded. The
-current implementation starts the payload before reading those properties.
-A passing supported-runner test cannot close a per-unit installation-failure
-window. A mandatory launch fence must establish actual limits and the required
-filter attachments before the payload executes, with guarded refusal tests and
-a payload execution sentinel. The frozen `ExecStart=payload argv` and fixed-tool
-contract needs an explicit fence-helper or launcher decision before that change.
-Do not deploy this head while that review finding is unresolved.
+The approved prestart fence is implemented but needs exact-head hosted evidence
+and accepted delta review before activation. It verifies actual limits, complete
+policy-bound BPF programs/maps and NFT before the unchanged payload ExecStart;
+configuration-property readback alone is not enforcement evidence. Guarded
+missing/incorrect enforcement controls require a payload execution sentinel to
+remain absent. No deployment qualification follows from compile or vet success.
 
 1. Gather passing portable and guarded root workflow evidence for the exact
    reviewed head, including both effective egress layers. Authored tests,
@@ -26,3 +23,10 @@ Do not deploy this head while that review finding is unresolved.
    ambiguous partial create needs explicit reconciliation outside the wire API.
 
 The service remains demo-only and carries only the v1 r4 protocol guarantees.
+
+The expiry scanner still revalidates all records every 200 ms. It is bounded to
+the protocol's slot range, but its performance at high slot counts is unmeasured;
+a cache/scheduling change is a separate follow-up with recovery/coherency tests.
+The protocol owner confirmed that r4 omits `slot` when no well-formed slot was
+carried, and the station manager client agrees. The response section now states
+that rule explicitly; no wire or client behavior changed.

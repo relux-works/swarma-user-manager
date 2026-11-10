@@ -14,7 +14,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-var unitPropertyNames = []string{"LoadState", "ActiveState", "SubState", "ControlGroup", "Description", "User", "Group", "Type", "WorkingDirectory", "CPUQuotaPerSecUSec", "MemoryMax", "TasksMax", "RuntimeMaxUSec", "NoNewPrivileges", "ProtectSystem", "ProtectHome", "PrivateTmp", "PrivateDevices", "ProtectKernelTunables", "ProtectKernelModules", "ProtectControlGroups", "RestrictSUIDSGID", "LockPersonality", "CapabilityBoundingSet", "IPAddressDeny", "IPAddressAllow", "Slice", "BindPaths", "BindReadOnlyPaths"}
+var unitPropertyNames = []string{"LoadState", "ActiveState", "SubState", "ControlPID", "ControlGroup", "Description", "User", "Group", "Type", "WorkingDirectory", "CPUQuotaPerSecUSec", "MemoryMax", "TasksMax", "RuntimeMaxUSec", "NoNewPrivileges", "ProtectSystem", "ProtectHome", "PrivateTmp", "PrivateDevices", "ProtectKernelTunables", "ProtectKernelModules", "ProtectControlGroups", "RestrictSUIDSGID", "LockPersonality", "CapabilityBoundingSet", "IPAddressDeny", "IPAddressAllow", "Slice", "BindPaths", "BindReadOnlyPaths"}
 
 func unitProperties(ctx context.Context, id slotIdentity) (map[string]string, error) {
 	b, e := runFixedTool(ctx, toolInvocation{Path: systemctlPath, Args: []string{"--system", "--no-ask-password", "--no-pager", "--all", "--plain", "--full", "--output=json", "list-units", "--", id.Unit}})
@@ -207,8 +207,8 @@ func verifyUnitProperties(v map[string]string, p policy, r *durableRecord) error
 	if e != nil {
 		return e
 	}
-	percent, _ := strconv.ParseFloat(strings.TrimSuffix(p.Caps.CPUQuota, "%"), 64)
-	if quota != time.Duration(percent*float64(time.Second)/100) {
+	wantQuota, quotaErr := cpuQuotaMicros(p.Caps.CPUQuota)
+	if quotaErr != nil || quota.Microseconds() != wantQuota {
 		return errors.New("installed CPU quota mismatch")
 	}
 	runtime, e := parseSystemdTime(v["RuntimeMaxUSec"])
@@ -261,13 +261,23 @@ func startUnit(ctx context.Context, p policy, r *durableRecord, persist func() e
 	if e = persist(); e != nil {
 		return e
 	}
+	fenceRoot, e := writeFenceRequest(p, r)
+	if e != nil {
+		return e
+	}
+	defer fenceRoot.Close()
 	inv, e := startInvocation(p, r.Slot, r.Binding, now)
 	if e != nil {
 		return e
 	}
-	inv.Args = append([]string{"--property=Description=" + unitMarker(r), "--property=Slice=system.slice", "--collect"}, inv.Args...)
-	if _, e = runFixedTool(ctx, inv); e != nil {
+	prestart := "+" + fenceBinaryPath + " --enforcement-fence " + r.Slot + " " + r.UnitToken
+	inv.Args = append([]string{"--property=Description=" + unitMarker(r), "--property=Slice=system.slice", "--property=IPAccounting=no", "--property=Delegate=no", "--property=ExecStartPre=" + prestart, "--collect"}, inv.Args...)
+	_, launchErr := runFixedTool(ctx, inv)
+	if e = readFenceResult(fenceRoot, r); e != nil {
 		return e
+	}
+	if launchErr != nil {
+		return launchErr
 	}
 	values, e = unitProperties(ctx, r.Identity)
 	if e != nil {

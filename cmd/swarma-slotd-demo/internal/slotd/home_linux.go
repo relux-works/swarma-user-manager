@@ -110,6 +110,9 @@ func writeBootstrap(home *os.File, uid uint32, b []byte) error {
 	return home.Sync()
 }
 func (h *homeRoot) openOwned(r *durableRecord) (*os.File, error) {
+	return h.openOwnedMode(r, false)
+}
+func (h *homeRoot) openOwnedMode(r *durableRecord, deleting bool) (*os.File, error) {
 	if r.Home == nil {
 		return nil, errors.New("home lacks creation receipt")
 	}
@@ -118,7 +121,11 @@ func (h *homeRoot) openOwned(r *durableRecord) (*os.File, error) {
 		return nil, e
 	}
 	st, e := fdStat(f)
-	if e == nil && (stamp(st) != *r.Home || st.Uid != r.Identity.UID || st.Gid != r.Identity.UID || st.Mode&07777 != 0700) {
+	modeOK := st.Mode&07777 == 0700
+	if deleting {
+		modeOK = st.Mode&0022 == 0
+	}
+	if e == nil && (stamp(st) != *r.Home || st.Uid != r.Identity.UID || st.Gid != r.Identity.UID || !modeOK) {
 		e = errors.New("home receipt mismatch")
 	}
 	if e == nil {
@@ -148,8 +155,9 @@ func openBelow(root *os.File, relative string, flags int) (*os.File, error) {
 	return os.NewFile(uintptr(fd), relative), nil
 }
 
-// Preflight enumerates every entry before the first unlink. A foreign owner,
-// alias, symlink, special file or mount refuses without deleting the prefix.
+// Preflight enumerates every entry before the first unlink. Non-directory
+// leaves are unlink-only: no target, contents or device is opened. Foreign
+// owners, writable/ACL-bearing parent directories and mounts refuse the plan.
 func deletionPlan(root *os.File, uid uint32) ([]deletionEntry, error) {
 	mount, e := mountID(root)
 	if e != nil {
@@ -184,8 +192,8 @@ func deletionPlan(root *os.File, uid uint32) ([]deletionEntry, error) {
 				return me
 			}
 			typ := st.Mode & unix.S_IFMT
-			if st.Uid != uid || st.Gid != uid || st.Mode&0022 != 0 || m != mount || (typ != unix.S_IFREG && typ != unix.S_IFDIR) || (typ == unix.S_IFREG && st.Nlink != 1) {
-				return errors.New("foreign, aliased or unsupported home entry")
+			if st.Uid != uid || st.Gid != uid || m != mount || (typ == unix.S_IFDIR && st.Mode&0022 != 0) {
+				return errors.New("foreign or unsafe home entry")
 			}
 			rel := path.Join(prefix, name)
 			out = append(out, deletionEntry{rel, stamp(st), typ == unix.S_IFDIR})
@@ -197,6 +205,9 @@ func deletionPlan(root *os.File, uid uint32) ([]deletionEntry, error) {
 				after, e := fdStat(child)
 				if e == nil && stamp(after) != stamp(st) {
 					e = errors.New("entry changed")
+				}
+				if e == nil {
+					e = noACL(child)
 				}
 				if e == nil {
 					e = walk(child, rel, depth+1)
@@ -215,7 +226,7 @@ func deletionPlan(root *os.File, uid uint32) ([]deletionEntry, error) {
 	return out, nil
 }
 func (h *homeRoot) preflight(r *durableRecord) error {
-	f, e := h.openOwned(r)
+	f, e := h.openOwnedMode(r, true)
 	if errors.Is(e, unix.ENOENT) {
 		return nil
 	}
@@ -227,7 +238,7 @@ func (h *homeRoot) preflight(r *durableRecord) error {
 	return e
 }
 func (h *homeRoot) remove(r *durableRecord) error {
-	f, e := h.openOwned(r)
+	f, e := h.openOwnedMode(r, true)
 	if errors.Is(e, unix.ENOENT) {
 		return nil
 	}
@@ -273,7 +284,7 @@ func (h *homeRoot) remove(r *durableRecord) error {
 			return e
 		}
 	}
-	current, e := h.openOwned(r)
+	current, e := h.openOwnedMode(r, true)
 	if e != nil {
 		return e
 	}

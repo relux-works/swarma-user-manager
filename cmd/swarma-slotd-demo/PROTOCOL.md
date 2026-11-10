@@ -51,7 +51,7 @@ On failure:
 ```
 
 - Field order is fixed: `v`, `ok`, `slot`, then `state` or `error`, then `not_after`, `payload_sha256`, `bootstrap_sha256`. There is no whitespace and no other field.
-- `slot` is echoed whenever the request carried a well-formed slot.
+- `slot` is echoed whenever the request carried a well-formed slot; it is omitted when the request's slot is absent or malformed.
 - `not_after`, `payload_sha256` and `bootstrap_sha256` are present exactly when the slot has a stored record, that is, in every state except `absent`.
   - `payload_sha256` is the policy payload digest bound into the record at `create`. A record whose binding no longer matches the current policy is never started; `start` returns `invalid_state`.
   - `bootstrap_sha256` is the SHA-256 of the decoded bootstrap bytes. For an empty bootstrap it is the SHA-256 of the empty string.

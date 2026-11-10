@@ -6,6 +6,7 @@ import (
 	"context"
 	"flag"
 	"log"
+	"os"
 	"os/signal"
 	"syscall"
 
@@ -13,6 +14,9 @@ import (
 )
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "--enforcement-fence" {
+		os.Exit(slotd.EnforcementFence(os.Args[2:]))
+	}
 	policy := flag.String("policy", "/etc/swarma-slotd-demo/policy.json", "root-owned demo policy file")
 	flag.Parse()
 	if flag.NArg() != 0 {
