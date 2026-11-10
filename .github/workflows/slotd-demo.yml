@@ -134,6 +134,7 @@ jobs:
           /usr/bin/busctl --version > "$scratch/evidence/busctl-version.log"
           /usr/sbin/nft --version > "$scratch/evidence/nft-version.log"
           go test -c -o "$scratch/slotd-root.test" ./cmd/swarma-slotd-demo/internal/slotd
+          go build -o "$scratch/slotd-daemon" ./cmd/swarma-slotd-demo
           cd cmd/swarma-slotd-demo/internal/slotd
           sudo -n /usr/bin/env -i PATH="$PATH" \
             HOME="$HOME" USERPROFILE="$USERPROFILE" \
@@ -142,7 +143,7 @@ jobs:
             TMPDIR="$TMPDIR" TMP="$TMP" TEMP="$TEMP" \
             GOENV=off GOROOT="$GOROOT" GOTOOLCHAIN=local GOWORK=off GOMAXPROCS=2 \
             GITHUB_ACTIONS="$GITHUB_ACTIONS" RUNNER_ENVIRONMENT="$RUNNER_ENVIRONMENT" \
-            SLOTD_ROOT_TESTS=1 \
+            SLOTD_ROOT_TESTS=1 SLOTD_INSTALL_BINARY="$scratch/slotd-daemon" \
             "$scratch/slotd-root.test" -test.v -test.run='^TestRoot' -test.timeout=5m \
             2>&1 | go tool test2json -p slotd-root | tee "$scratch/evidence/root-tests.jsonl"
           python3 - "$scratch/evidence/root-tests.jsonl" <<'PY'
@@ -150,7 +151,7 @@ jobs:
           events = [json.loads(line) for line in open(sys.argv[1])]
           assert not any(e.get("Action") in ("skip", "fail") for e in events)
           passed = {e["Test"] for e in events if e.get("Action") == "pass" and "Test" in e}
-          assert {"TestRootRecordStore", "TestRootBootstrapExclusive", "TestRootHomeDeletionRefusals", "TestRootLifecycleRestart", "TestRootEgressLayers", "TestRootServiceRestart", "TestRootGate", "TestRootNFTOwnershipCreation", "TestRootInvalidHomeStartup", "TestRootEnforcementFence", "TestRootPayloadLeaves"} <= passed
+          assert {"TestRootRecordStore", "TestRootBootstrapExclusive", "TestRootHomeDeletionRefusals", "TestRootLifecycleRestart", "TestRootEgressLayers", "TestRootServiceRestart", "TestRootGate", "TestRootNFTOwnershipCreation", "TestRootInvalidHomeStartup", "TestRootEnforcementFence", "TestRootPayloadLeaves", "TestRootInstallPackage"} <= passed
           assert {"TestRootStationDescriptorCustody", "TestRootStationDestroyPreflight", "TestRootStationMissingJournalState", "TestRootStationCreationBoundaries"} <= passed
           assert {"TestRootStationMetadataRefusals", "TestRootStationMountRefusal"} <= passed
           assert "TestRootStationCrossUIDAccess" in passed

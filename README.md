@@ -14,6 +14,14 @@ covers one host and its exact build; admission remained unconfigured. Production
 lifecycle under load, complete inventory and A3 automatic requalification remain
 outside those passes.
 
+## Demo slot service
+
+The temporary [slot daemon](cmd/swarma-slotd-demo/README.md) has a separate
+[station install package and runbook](deploy/slotd-demo/README.md). Its installer
+uses explicit protected policy/artifact inputs, supports read-only `--check`,
+and installs without starting. This does not qualify the production station
+backend or deploy anything by publication.
+
 ## Host qualification protocol
 
 The proposed [self-service protocol](spec/host-qualification-protocol.md) defines

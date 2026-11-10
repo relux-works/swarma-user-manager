@@ -1,0 +1,31 @@
+# Installed root:root 0644. Host policy and payload are separately provisioned.
+[Unit]
+Description=Swarma demo station slot lifecycle
+After=local-fs.target nss-user-lookup.target
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+[Service]
+Type=exec
+User=root
+Group=root
+UMask=0077
+WorkingDirectory=/
+ExecStart=/usr/libexec/swarma-slotd-demo -policy /etc/swarma-slotd-demo/policy.json
+Restart=on-failure
+RestartSec=2
+TimeoutStopSec=45
+KillMode=control-group
+StandardInput=null
+StandardOutput=journal
+StandardError=journal
+Environment=PATH=/usr/sbin:/usr/bin LANG=C LC_ALL=C
+UnsetEnvironment=LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT GLIBC_TUNABLES GCONV_PATH LOCPATH
+NoNewPrivileges=yes
+RestrictRealtime=yes
+LockPersonality=yes
+# Keep host account databases, mounts, /proc, netlink and systemd visible.
+# Payload sandboxing and caps belong to each separate transient slot unit.
+
+[Install]
+WantedBy=multi-user.target

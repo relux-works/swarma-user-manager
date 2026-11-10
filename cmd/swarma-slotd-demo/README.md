@@ -26,6 +26,11 @@ record; transition destinations are plans that may be persisted only after the
 required effects are proven. Create freshness must be checked after acquiring
 the nonblocking slot lock. Expiry planning excludes failed records.
 
+The [station install package](../../deploy/slotd-demo/README.md) supplies the
+daemon unit, explicit artifact/policy checks, first-install script, stop command
+and rt-stations runbook. Its read-only `--install-check POLICY GROUP` mode checks
+prerequisites without opening state or starting services.
+
 ## Policy
 
 [policy.example.json](policy.example.json) is inert: the payload digest is a
