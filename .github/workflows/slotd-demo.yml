@@ -1,9 +1,16 @@
-name: Slot demo portable contract
+name: Slot demo lifecycle
 
 on:
   pull_request:
   push:
     branches: [main, slotd-demo]
+  workflow_dispatch:
+    inputs:
+      root_tests:
+        description: Run root fixtures on this disposable hosted runner
+        required: true
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -61,4 +68,93 @@ jobs:
         with:
           name: slotd-demo-portable-evidence
           path: ${{ env.SLOTD_CI_EVIDENCE }}
+          retention-days: 7
+  root:
+    needs: portable
+    # The delivery owner publishes this branch. PRs and main pushes never run
+    # privileged fixtures. All actual runner markers are forwarded unchanged.
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/slotd-demo') || (github.event_name == 'workflow_dispatch' && inputs.root_tests)
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
+        with:
+          go-version: '1.26.10'
+          cache: false
+      - name: Verify disposable runner and required host tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_ACTIONS" = true
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test "$(cat /proc/1/comm)" = systemd
+          test "$(stat -fc %T /sys/fs/cgroup)" = cgroup2fs
+          sudo -n apt-get update
+          sudo -n apt-get install -y --no-install-recommends nftables
+          test -x /usr/bin/systemd-run
+          test -x /usr/bin/systemctl
+          test -x /usr/sbin/nft
+          test -x /usr/sbin/useradd
+          test -x /usr/sbin/userdel
+          test -x /usr/sbin/groupadd
+          test -x /usr/sbin/groupdel
+      - name: Build and run isolated root fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir -p .temp
+          scratch="$(mktemp -d "$(pwd -P)/.temp/slotd-root-ci.XXXXXXXX")"
+          scratch="$(cd "$scratch" && pwd -P)"
+          mkdir -p "$scratch"/{home,work,config,cache,go-build,go-mod,go-path,tmp,evidence}
+          rsync -a --exclude=.git --exclude=.temp ./ "$scratch/work/"
+          go_binary="$(command -v go)"
+          go_root="$(cd "$(dirname "$go_binary")/.." && pwd -P)"
+          echo "SLOTD_ROOT_EVIDENCE=$scratch/evidence" >> "$GITHUB_ENV"
+          env -i PATH="$go_root/bin:/usr/bin:/bin" \
+            HOME="$scratch/home" USERPROFILE="$scratch/home" \
+            XDG_CONFIG_HOME="$scratch/config" XDG_CACHE_HOME="$scratch/cache" \
+            GOCACHE="$scratch/go-build" GOMODCACHE="$scratch/go-mod" GOPATH="$scratch/go-path" \
+            TMPDIR="$scratch/tmp" TMP="$scratch/tmp" TEMP="$scratch/tmp" \
+            GOENV=off GOROOT="$go_root" GOTOOLCHAIN=local GOWORK=off GOMAXPROCS=2 \
+            GOPROXY=https://proxy.golang.org GOSUMDB=sum.golang.org \
+            GITHUB_ACTIONS="$GITHUB_ACTIONS" RUNNER_ENVIRONMENT="$RUNNER_ENVIRONMENT" \
+            bash --noprofile --norc -s -- "$scratch" <<'SH'
+          set -euo pipefail
+          scratch="$1"
+          cd "$scratch/work"
+          go version | tee "$scratch/evidence/go-version.log"
+          test "$(go env GOVERSION)" = go1.26.10
+          uname -srm > "$scratch/evidence/platform.log"
+          /usr/bin/systemctl --version > "$scratch/evidence/systemd-version.log"
+          /usr/sbin/nft --version > "$scratch/evidence/nft-version.log"
+          go test -c -o "$scratch/slotd-root.test" ./cmd/swarma-slotd-demo/internal/slotd
+          cd cmd/swarma-slotd-demo/internal/slotd
+          sudo -n /usr/bin/env -i PATH="$PATH" \
+            HOME="$HOME" USERPROFILE="$USERPROFILE" \
+            XDG_CONFIG_HOME="$XDG_CONFIG_HOME" XDG_CACHE_HOME="$XDG_CACHE_HOME" \
+            GOCACHE="$GOCACHE" GOMODCACHE="$GOMODCACHE" GOPATH="$GOPATH" \
+            TMPDIR="$TMPDIR" TMP="$TMP" TEMP="$TEMP" \
+            GOENV=off GOROOT="$GOROOT" GOTOOLCHAIN=local GOWORK=off GOMAXPROCS=2 \
+            GITHUB_ACTIONS="$GITHUB_ACTIONS" RUNNER_ENVIRONMENT="$RUNNER_ENVIRONMENT" \
+            SLOTD_ROOT_TESTS=1 \
+            "$scratch/slotd-root.test" -test.v -test.run='^TestRoot' -test.timeout=5m \
+            2>&1 | go tool test2json -p slotd-root | tee "$scratch/evidence/root-tests.jsonl"
+          python3 - "$scratch/evidence/root-tests.jsonl" <<'PY'
+          import json, sys
+          events = [json.loads(line) for line in open(sys.argv[1])]
+          assert not any(e.get("Action") in ("skip", "fail") for e in events)
+          passed = {e["Test"] for e in events if e.get("Action") == "pass" and "Test" in e}
+          assert {"TestRootRecordStore", "TestRootBootstrapExclusive", "TestRootHomeDeletionRefusals", "TestRootLifecycleRestart", "TestRootEgressLayers", "TestRootServiceRestart", "TestRootGate"} <= passed
+          PY
+          SH
+      - name: Preserve root evidence
+        if: always() && env.SLOTD_ROOT_EVIDENCE != ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: slotd-demo-root-evidence
+          path: ${{ env.SLOTD_ROOT_EVIDENCE }}
           retention-days: 7

@@ -56,6 +56,9 @@ func runFixedTool(ctx context.Context, invocation toolInvocation) ([]byte, error
 	if err != nil {
 		return nil, err
 	}
+	if _, err := readProtected(invocation.Path, 0, 64*1024*1024); err != nil {
+		return nil, err
+	}
 	var stdout, stderr boundedOutput
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	err = cmd.Run()
