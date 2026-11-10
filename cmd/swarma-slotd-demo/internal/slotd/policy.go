@@ -131,7 +131,9 @@ func (p policy) validate() error {
 	if p.UIDBase == 0 || uint64(p.UIDBase)+9999 >= uint64(^uint32(0)) || (p.UIDBase <= 65534 && uint64(p.UIDBase)+9999 >= 65534) {
 		return errors.New("invalid slot UID range")
 	}
-	if !cleanAbsolutePath(p.HomeRoot) || !cleanAbsolutePath(p.Socket) || len(p.Socket) >= 108 || strings.HasPrefix(p.Socket, p.HomeRoot+"/") || p.Socket == p.HomeRoot {
+	// Home paths become passwd fields. Reject their delimiter before groupadd
+	// can succeed ahead of a predictable useradd argument rejection.
+	if !cleanAbsolutePath(p.HomeRoot) || strings.ContainsRune(p.HomeRoot, ':') || !cleanAbsolutePath(p.Socket) || len(p.Socket) >= 108 || strings.HasPrefix(p.Socket, p.HomeRoot+"/") || p.Socket == p.HomeRoot {
 		return errors.New("invalid home or socket path")
 	}
 	if !cleanAbsolutePath(p.Payload.Path) || strings.HasPrefix(p.Payload.Path, p.HomeRoot+"/") || !digestPattern.MatchString(p.Payload.SHA256) || len(p.Payload.Argv) == 0 || len(p.Payload.Argv) > 128 || p.Payload.Argv[0] != p.Payload.Path {

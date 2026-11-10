@@ -4,6 +4,11 @@
 curator-run station lifecycle qualify. It is not the station helper described in
 [spec/helper.md](../../spec/helper.md).
 
+**Activation blocked pending the enforcement launch fence.** Current systemd
+property readback happens after payload launch and cannot prove that best-effort
+BPF attachment or controller setup succeeded before execution. See
+[UNRESOLVED_QUESTIONS.md](UNRESOLVED_QUESTIONS.md) before deploying this head.
+
 The Linux entry point serves the v1 r4 protocol with durable state, account and
 home lifecycle, expiry, transient systemd units and both egress layers. It
 requires root, systemd 254 or newer, unified cgroups, nftables and protected
@@ -38,6 +43,8 @@ to 256 rules.
   the uint32 sentinel. The Linux create path refuses current name/UID/GID collisions.
 - Paths are absolute, normalized and free of control characters. The socket
   must fit Linux's pathname socket limit and be outside the slot home root.
+  `home_root` also excludes `:` because derived homes become passwd fields;
+  invalid values are refused before any account or service startup effects.
 - `payload.sha256` is 64 lowercase hexadecimal characters. `argv` includes the
   executable as its first element, exactly equal to `payload.path`; the file
   must be outside the slot home root. At most 128 arguments and 32 KiB of argv

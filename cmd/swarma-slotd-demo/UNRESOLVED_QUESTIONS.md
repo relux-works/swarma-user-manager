@@ -4,6 +4,16 @@ The demo-local filesystem and receipt-backed restart-retirement contract is
 implemented without changing `internal/linuxos`. Its previous API integration
 gaps no longer block this implementation.
 
+Activation is currently blocked: systemd's configured unit properties do not
+prove that its best-effort BPF attachment and controller writes succeeded. The
+current implementation starts the payload before reading those properties.
+A passing supported-runner test cannot close a per-unit installation-failure
+window. A mandatory launch fence must establish actual limits and the required
+filter attachments before the payload executes, with guarded refusal tests and
+a payload execution sentinel. The frozen `ExecStart=payload argv` and fixed-tool
+contract needs an explicit fence-helper or launcher decision before that change.
+Do not deploy this head while that review finding is unresolved.
+
 1. Gather passing portable and guarded root workflow evidence for the exact
    reviewed head, including both effective egress layers. Authored tests,
    compile-only binaries and source inspection are not this evidence.

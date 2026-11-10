@@ -88,6 +88,7 @@ func TestPolicyValidation(t *testing.T) {
 		"home root":                func(p *policy) { p.HomeRoot = "/" },
 		"home dot":                 func(p *policy) { p.HomeRoot = "/var/../homes" },
 		"home control":             func(p *policy) { p.HomeRoot = "/var/homes\n" },
+		"home passwd delimiter":    func(p *policy) { p.HomeRoot = "/var/lib/demo:homes" },
 		"socket in home":           func(p *policy) { p.Socket = p.HomeRoot + "/sock" },
 		"socket too long":          func(p *policy) { p.Socket = "/" + strings.Repeat("x", 107) },
 		"payload relative":         func(p *policy) { p.Payload.Path = "run" },
@@ -129,6 +130,34 @@ func TestPolicyValidation(t *testing.T) {
 				t.Fatal("invalid encoded policy accepted")
 			}
 		})
+	}
+}
+
+// Proves passwd field delimiters are rejected at any home-root component, beside valid neighboring paths.
+func TestPolicyHomeFieldPaths(t *testing.T) {
+	p, err := parsePolicy(examplePolicy(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, root := range []string{"/var/lib/demo-homes", "/var/lib/demo.homes", "/var/lib/demo_homes"} {
+		p.HomeRoot = root
+		b, err := json.Marshal(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err = parsePolicy(b); err != nil {
+			t.Fatalf("valid home refused: %v", err)
+		}
+	}
+	for _, root := range []string{"/var/lib/demo:homes", "/var:/lib/demo-homes", "/var/lib/:demo-homes", "/var/lib/demo-homes:"} {
+		p.HomeRoot = root
+		b, err := json.Marshal(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err = parsePolicy(b); err == nil || err.Error() != "invalid home or socket path" {
+			t.Fatalf("home delimiter did not get the intended refusal: %v", err)
+		}
 	}
 }
 

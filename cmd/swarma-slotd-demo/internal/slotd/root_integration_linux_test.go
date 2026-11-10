@@ -733,6 +733,63 @@ func TestRootServiceRestart(t *testing.T) {
 	}
 }
 
+// Proves a protected colon-home policy is rejected before state/socket/account effects; TestRootServiceRestart is the valid startup control.
+func TestRootInvalidHomeStartup(t *testing.T) {
+	p, r, dir := rootFixture(t)
+	p.CallerUser = "runner"
+	p.HomeRoot = filepath.Join(dir, "demo:homes")
+	p.Socket = filepath.Join(dir, "socket", "sock")
+	if err := os.Mkdir(p.HomeRoot, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(p.HomeRoot, 0755); err != nil {
+		t.Fatal(err)
+	}
+	r.Identity.Home = filepath.Join(p.HomeRoot, r.Identity.Name)
+	before, err := observeAccounts(context.Background(), r.Identity)
+	if err != nil || !before.empty() {
+		t.Fatalf("fixture identity must initially be absent: %v", err)
+	}
+	const stateRoot = "/var/lib/swarma-slotd-demo"
+	if _, err = os.Lstat(stateRoot); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("fixed test state path must initially be absent")
+	}
+	// The fixture proved this path absent. Remove only a test-created artifact
+	// if a broken startup crosses the policy boundary.
+	t.Cleanup(func() {
+		if err := os.RemoveAll(stateRoot); err != nil {
+			t.Error(err)
+		}
+	})
+	b, err := json.Marshal(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	policyPath := filepath.Join(dir, "invalid-policy.json")
+	if err = os.WriteFile(policyPath, b, 0640); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.Chmod(policyPath, 0640); err != nil {
+		t.Fatal(err)
+	}
+	// Cancellation bounds an accidentally accepted startup; it cannot satisfy
+	// the required specific policy error.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err = Run(ctx, policyPath); err == nil || err.Error() != "invalid home or socket path" {
+		t.Errorf("startup did not reject the invalid policy: %v", err)
+	}
+	for _, path := range []string{stateRoot, filepath.Dir(p.Socket), r.Identity.Home} {
+		if _, err = os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("invalid-policy startup created an artifact: %v", err)
+		}
+	}
+	after, err := observeAccounts(context.Background(), r.Identity)
+	if err != nil || !after.empty() {
+		t.Errorf("invalid-policy startup changed fixture account/group absence: %v", err)
+	}
+}
+
 // Diagnostics are bounded to this test's generated inert table, never a host
 // ruleset or an account database. They expose native printer differences while
 // production ownership comparison remains fail-closed.
