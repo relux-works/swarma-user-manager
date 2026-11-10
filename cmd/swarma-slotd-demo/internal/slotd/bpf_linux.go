@@ -100,6 +100,12 @@ func inspectProgram(fd int) (kernelProgram, error) {
 	p.code = make([]byte, n)
 	ids := make([]byte, m*4)
 	defer pinBytes(p.code, ids)()
+	// Returned lengths/counts are also next-call inputs. Reusing the complete
+	// first response requests JIT bytes/symbols without their buffers (EFAULT).
+	// Request only the bounded translated code and map IDs that we inspect.
+	i = make([]byte, 128)
+	put32(i, 20, n)
+	put32(i, 52, m)
 	put64(i, 32, ptr64(p.code))
 	put64(i, 56, ptr64(ids))
 	if err := bpfInfo(fd, i); err != nil {

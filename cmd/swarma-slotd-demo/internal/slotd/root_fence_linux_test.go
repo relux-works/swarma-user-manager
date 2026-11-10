@@ -263,6 +263,34 @@ func plantFenceFault(kind string, q fenceRequest) error {
 // Proves the real ExecStartPre gate precedes payload execution: actual kernel BPF removal/map widening, wrong limit, missing NFT and syscall failures all retain the payload sentinel's absence beside a valid launch.
 func TestRootEnforcementFence(t *testing.T) {
 	requireHostedRoot(t)
+	t.Run("info_query_buffers", func(t *testing.T) {
+		// Proves the old returned-info reuse requests unbuffered JIT output and
+		// fails specifically with EFAULT; the bounded fresh request must succeed
+		// for that same real, unattached kernel program. No payload is executed.
+		fd, err := loadReference(firewallInstructions(-1, -1, false))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer unix.Close(fd)
+		info := make([]byte, 128)
+		if err = bpfInfo(fd, info); err != nil {
+			t.Fatal(err)
+		}
+		n := get32(info, 20)
+		if n == 0 || n > 8192 || get32(info, 52) != 0 || get32(info, 104) == 0 {
+			t.Fatal("kernel did not supply the regression witness metadata")
+		}
+		code := make([]byte, n)
+		defer pinBytes(code)()
+		put64(info, 32, ptr64(code))
+		if err = bpfInfo(fd, info); !errors.Is(err, unix.EFAULT) {
+			t.Fatalf("unbuffered returned-info reuse: %v, want EFAULT", err)
+		}
+		program, err := inspectProgram(fd)
+		if err != nil || len(program.code) != int(n) || len(program.maps) != 0 {
+			t.Fatalf("bounded code-only query: %v", err)
+		}
+	})
 	for _, tc := range []struct {
 		kind string
 		want error
