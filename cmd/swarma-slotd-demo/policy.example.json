@@ -1,0 +1,20 @@
+{
+  "caller_user": "demo-caller",
+  "uid_base": 200000,
+  "home_root": "/var/lib/demo-slot-homes",
+  "socket": "/run/swarma-slotd-demo/sock",
+  "payload": {
+    "path": "/opt/demo-payload/bin/run",
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "argv": ["/opt/demo-payload/bin/run"]
+  },
+  "caps": {
+    "cpu_quota": "100%",
+    "memory_max": "2G",
+    "tasks_max": 256
+  },
+  "egress": [
+    {"addr": "192.0.2.10", "port": 443, "proto": "tcp"},
+    {"addr": "2001:db8::10", "port": 443, "proto": "tcp"}
+  ]
+}

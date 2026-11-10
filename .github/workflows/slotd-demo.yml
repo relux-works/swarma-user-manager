@@ -1,0 +1,64 @@
+name: Slot demo portable contract
+
+on:
+  pull_request:
+  push:
+    branches: [main, slotd-demo]
+
+permissions:
+  contents: read
+
+jobs:
+  portable:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
+        with:
+          go-version: '1.26.10'
+          cache: false
+      - name: Verify portable contract in isolated scratch
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir -p .temp
+          scratch="$(mktemp -d "$(pwd -P)/.temp/slotd-ci.XXXXXXXX")"
+          scratch="$(cd "$scratch" && pwd -P)"
+          mkdir -p "$scratch"/{home,work,config,cache,go-build,go-mod,go-path,tmp,evidence}
+          rsync -a --exclude=.git --exclude=.temp ./ "$scratch/work/"
+          go_binary="$(command -v go)"
+          go_root="$(cd "$(dirname "$go_binary")/.." && pwd -P)"
+          echo "SLOTD_CI_EVIDENCE=$scratch/evidence" >> "$GITHUB_ENV"
+          env -i PATH="$go_root/bin:/usr/bin:/bin" \
+            HOME="$scratch/home" USERPROFILE="$scratch/home" \
+            XDG_CONFIG_HOME="$scratch/config" XDG_CACHE_HOME="$scratch/cache" \
+            GOCACHE="$scratch/go-build" GOMODCACHE="$scratch/go-mod" GOPATH="$scratch/go-path" \
+            TMPDIR="$scratch/tmp" TMP="$scratch/tmp" TEMP="$scratch/tmp" \
+            GOENV=off GOROOT="$go_root" GOTOOLCHAIN=local GOWORK=off GOMAXPROCS=2 \
+            GOPROXY=https://proxy.golang.org GOSUMDB=sum.golang.org \
+            bash --noprofile --norc -s -- "$scratch" <<'SH'
+          set -euo pipefail
+          scratch="$1"
+          cd "$scratch/work"
+          go version | tee "$scratch/evidence/go-version.log"
+          test "$(go env GOVERSION)" = go1.26.10
+          go env GOROOT GOCACHE GOMODCACHE > "$scratch/evidence/go-paths.log"
+          printf 'TMPDIR=%s\n' "$TMPDIR" >> "$scratch/evidence/go-paths.log"
+          gofmt -l cmd/swarma-slotd-demo | tee "$scratch/evidence/gofmt.log"
+          test ! -s "$scratch/evidence/gofmt.log"
+          go vet ./... 2>&1 | tee "$scratch/evidence/vet.log"
+          go test -json -count=1 -timeout=2m ./cmd/swarma-slotd-demo/... 2>&1 | tee "$scratch/evidence/portable-tests.jsonl"
+          GOOS=linux GOARCH=amd64 go test -c \
+            -o "$scratch/evidence/slotd-demo.test" ./cmd/swarma-slotd-demo/internal/slotd
+          SH
+      - name: Preserve evidence
+        if: always() && env.SLOTD_CI_EVIDENCE != ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: slotd-demo-portable-evidence
+          path: ${{ env.SLOTD_CI_EVIDENCE }}
+          retention-days: 7
