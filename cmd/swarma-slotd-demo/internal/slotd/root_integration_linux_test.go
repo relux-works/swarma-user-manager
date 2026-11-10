@@ -543,7 +543,9 @@ func TestRootEgressLayers(t *testing.T) {
 			report := filepath.Join(r.Identity.Home, "network-report")
 			gate := ""
 			if mode == "systemd" {
-				gate = filepath.Join(r.Identity.Home, "network-release")
+				// This root-written control belongs to the fixture, outside the
+				// slot-owned home whose foreign-entry refusal must remain strict.
+				gate = filepath.Join(dir, "network-release")
 			}
 			setProbePolicy(t, &p, dir, probeSpec{Report: report, Targets: targets, Hold: mode == "systemd" || mode == "both", Gate: gate})
 			p.Egress = nil
