@@ -19,6 +19,16 @@ func ownedNFTRules(p policy, slot, token string) ([]byte, error) {
 	}
 	return []byte(strings.Replace(string(b), "{\n", "{\n comment \"slotd-demo:"+token+"\"\n", 1)), nil
 }
+
+// The creation command itself must carry table userdata. Adding a declaration
+// after an empty exclusive create does not update the kernel's table comment.
+func exclusiveNFTRules(p policy, slot, token string) ([]byte, error) {
+	rules, e := ownedNFTRules(p, slot, token)
+	if e != nil {
+		return nil, e
+	}
+	return append([]byte("create "), rules...), nil
+}
 func normalizeNFT(b []byte) string {
 	return strings.Join(strings.Fields(strings.ReplaceAll(string(b), ";", " ")), " ")
 }
@@ -97,14 +107,13 @@ func installNFT(ctx context.Context, p policy, r *durableRecord, persist func() 
 	if e = persist(); e != nil {
 		return e
 	}
-	rules, e := ownedNFTRules(p, r.Slot, r.NFTToken)
+	rules, e := exclusiveNFTRules(p, r.Slot, r.NFTToken)
 	if e != nil {
 		return e
 	}
-	// The exclusive create and population are one nft transaction. A racing table
-	// cannot be merged into or flushed by the declarative ruleset that follows.
-	input := append([]byte("create table inet "+r.Identity.Table+"\n"), rules...)
-	if _, e = runFixedTool(ctx, toolInvocation{Path: nftPath, Args: []string{"--file", "-"}, Stdin: input}); e != nil {
+	// A single exclusive declaration carries ownership and population in one
+	// transaction. An existing table is never adopted, merged into or flushed.
+	if _, e = runFixedTool(ctx, toolInvocation{Path: nftPath, Args: []string{"--file", "-"}, Stdin: rules}); e != nil {
 		return e
 	}
 	if e = verifyNFT(ctx, p, r); e != nil {

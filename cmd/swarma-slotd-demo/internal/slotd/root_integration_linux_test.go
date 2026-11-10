@@ -278,6 +278,7 @@ func TestRootLifecycleRestart(t *testing.T) {
 		if createdRecord != nil {
 			r = *createdRecord
 		}
+		dumpFixtureNFT(t, &r)
 		t.Fatal(code)
 	}
 	r = *createdRecord
@@ -525,6 +526,7 @@ func TestRootEgressLayers(t *testing.T) {
 			}
 			if mode == "nft" || mode == "both" {
 				if err = installNFT(ctx, p, &r, persist); err != nil {
+					dumpFixtureNFT(t, &r)
 					t.Fatal(err)
 				}
 			}
@@ -586,6 +588,7 @@ func TestRootEgressLayers(t *testing.T) {
 					t.Fatal(err)
 				}
 				if err = installNFT(ctx, p, &r, persist); err != nil {
+					dumpFixtureNFT(t, &r)
 					t.Fatal(err)
 				}
 			}
@@ -728,4 +731,101 @@ func TestRootServiceRestart(t *testing.T) {
 		}
 		stop()
 	}
+}
+
+// Diagnostics are bounded to this test's generated inert table, never a host
+// ruleset or an account database. They expose native printer differences while
+// production ownership comparison remains fail-closed.
+func dumpFixtureNFT(t *testing.T, r *durableRecord) {
+	t.Helper()
+	if r.NFTToken == "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	b, e := runFixedTool(ctx, toolInvocation{Path: nftPath, Args: []string{"--stateless", "--numeric", "--numeric-priority", "list", "table", "inet", r.Identity.Table}})
+	t.Logf("inert fixture NFT readback: %q; read error: %v", b, e)
+}
+
+// Proves the original empty-create/declaration transaction loses its ownership
+// comment and is rejected; single-declaration creation passes, while a different
+// receipt token still refuses. The old table is an explicitly planted fixture.
+func TestRootNFTOwnershipCreation(t *testing.T) {
+	p, r, dir := rootFixture(t)
+	h, e := openHomeRoot(p)
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer h.close()
+	effects := &linuxEffects{policy: p, homes: h}
+	ctx := context.Background()
+	if e = effects.prepareCreate(ctx, &r); e != nil {
+		t.Fatal(e)
+	}
+	s, e := openStoreAt(p, filepath.Join(dir, "state"))
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer s.close()
+	r.NFTToken, e = randomToken()
+	if e != nil {
+		t.Fatal(e)
+	}
+	r.NFTPolicy = append([]egressRule{}, p.Egress...)
+	r.Phase = "nft-install"
+	if e = s.save(&r); e != nil {
+		t.Fatal(e)
+	}
+	rules, e := ownedNFTRules(p, r.Slot, r.NFTToken)
+	if e != nil {
+		t.Fatal(e)
+	}
+	old := append([]byte("create table inet "+r.Identity.Table+"\n"), rules...)
+	if _, e = runFixedTool(ctx, toolInvocation{Path: nftPath, Args: []string{"--file", "-"}, Stdin: old}); e != nil {
+		t.Fatal(e)
+	}
+	planted := true
+	t.Cleanup(func() {
+		if planted {
+			inv, err := deleteNFTInvocation(p, r.Slot)
+			if err == nil {
+				_, err = runFixedTool(context.Background(), inv)
+			}
+			if err != nil {
+				t.Error(err)
+			}
+		}
+	})
+	dumpFixtureNFT(t, &r)
+	if e = verifyNFT(ctx, p, &r); e == nil {
+		t.Fatal("known missing-ownership plant was admitted")
+	}
+	inv, e := deleteNFTInvocation(p, r.Slot)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if _, e = runFixedTool(ctx, inv); e != nil {
+		t.Fatal(e)
+	}
+	planted = false
+	if e = installNFT(ctx, p, &r, func() error { return s.save(&r) }); e != nil {
+		dumpFixtureNFT(t, &r)
+		t.Fatal(e)
+	}
+	planted = true
+	if e = verifyNFT(ctx, p, &r); e != nil {
+		t.Fatal(e)
+	}
+	other := r
+	other.NFTToken = strings.Repeat("0", 32)
+	if other.NFTToken == r.NFTToken {
+		other.NFTToken = strings.Repeat("1", 32)
+	}
+	if e = verifyNFT(ctx, p, &other); e == nil {
+		t.Fatal("different ownership receipt admitted")
+	}
+	if e = removeNFT(ctx, p, &r); e != nil {
+		t.Fatal(e)
+	}
+	planted = false
 }

@@ -132,7 +132,9 @@ refusal, exclusive bootstrap, foreign/symlink/mounted content, active-unit
 refusal, actual service peer credentials and clean restart. TCP/UDP IPv4/IPv6
 probes compare no filters, systemd address filtering alone, per-UID NFT filtering
 alone and both together; an unrelated-UID control excludes a global firewall
-false positive. A bounded table mutation must fail full-ruleset readback before
+false positive. An old empty-create/declaration transaction is retained as a root regression
+witness: its missing ownership comment must fail readback, while a single
+exclusive declaration succeeds. A bounded table mutation must fail full-ruleset readback before
 the fixture restores its own table. Fixture cleanup uses only recorded ownership
 and the test's private scratch. Provider setup failures and skipped root tests
 are not passing qualification evidence. Logs and version information are retained

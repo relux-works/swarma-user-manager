@@ -69,3 +69,24 @@ func TestSystemdDuration(t *testing.T) {
 		}
 	}
 }
+
+// Proves the exclusive creation command carries ownership and all rules in its
+// first declaration; the former empty-create prefix cannot satisfy this shape.
+func TestExclusiveNFTCreation(t *testing.T) {
+	p, r := durableFixture(t)
+	token := strings.Repeat("a", 32)
+	b, e := exclusiveNFTRules(p, r.Slot, token)
+	if e != nil {
+		t.Fatal(e)
+	}
+	expected, e := ownedNFTRules(p, r.Slot, token)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if string(b) != "create "+string(expected) || strings.Count(string(b), "table inet ") != 1 || !strings.Contains(string(b), "{\n comment \"slotd-demo:"+token+"\"\n chain ") {
+		t.Fatal("ownership is not in exclusive creation")
+	}
+	if _, e := exclusiveNFTRules(p, r.Slot, "invalid"); e == nil {
+		t.Fatal("invalid ownership admitted")
+	}
+}

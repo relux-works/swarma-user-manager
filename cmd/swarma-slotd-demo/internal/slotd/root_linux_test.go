@@ -6,6 +6,8 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
+	"sync/atomic"
 	"testing"
 
 	"golang.org/x/sys/unix"
@@ -35,6 +37,9 @@ func TestRootGate(t *testing.T) {
 		}
 	}
 }
+
+var fixtureSlot atomic.Uint32
+
 func rootFixture(t *testing.T) (policy, durableRecord, string) {
 	t.Helper()
 	requireHostedRoot(t)
@@ -57,6 +62,10 @@ func rootFixture(t *testing.T) (policy, durableRecord, string) {
 	}
 	if e = os.Chmod(p.HomeRoot, 0755); e != nil {
 		t.Fatal(e)
+	}
+	r.Slot = strconv.FormatUint(uint64(7000+fixtureSlot.Add(1)), 10)
+	if !slotPattern.MatchString(r.Slot) {
+		t.Fatal("fixture slot range exhausted")
 	}
 	r.Identity, e = p.identity(r.Slot)
 	if e != nil {
