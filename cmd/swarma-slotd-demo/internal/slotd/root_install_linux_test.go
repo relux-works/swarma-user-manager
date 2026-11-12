@@ -547,7 +547,8 @@ func TestRootInstallRefusals(t *testing.T) {
 			return []string{installConfigPath}
 		})
 	}
-	refuse("config_dir_symlink", "OSError", func(t *testing.T) []string {
+	// O_DIRECTORY|O_NOFOLLOW on a symlink fails with ENOTDIR (hosted run 43193477998).
+	refuse("config_dir_symlink", "NotADirectoryError", func(t *testing.T) []string {
 		elsewhere := filepath.Join(f.dir, "config-elsewhere")
 		makeDir(t, elsewhere, 0755, 0, 0)
 		symlink(t, elsewhere, installConfigPath)
