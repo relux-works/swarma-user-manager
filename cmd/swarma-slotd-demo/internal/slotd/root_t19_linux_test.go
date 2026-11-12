@@ -1096,7 +1096,9 @@ func TestRootT19AlternateABI(t *testing.T) {
 	t19FixtureUnit(t, p, &r, "swarma-t19-abi-"+r.Slot+".service", t19SpecArgv(t19Spec{Report: neighbour, Families: true}), func(args []string) []string {
 		out := slices.DeleteFunc(slices.Clone(args), func(a string) bool { return a == "--property=SystemCallArchitectures=native" })
 		if len(out) != len(args)-1 {
-			t.Fatalf("production vector does not carry SystemCallArchitectures=native exactly once: %q", args)
+			// Not fatal: the production half below must still show what a
+			// vector without the restriction does to the 386 payload.
+			t.Errorf("production vector does not carry SystemCallArchitectures=native exactly once: %q", args)
 		}
 		return out
 	})
