@@ -134,9 +134,10 @@ locking and uncertainty/replay behavior belong to the actual payload consumer.
 
 ## Tools and evidence
 
-The existing slotd workflow is the execution route. Tests run only in explicitly
-opted-in disposable GitHub-hosted Linux, with the real runner markers and
-`SLOTD_ROOT_TESTS=1`; no tests run on the producer Mac. Static vet/build/compile
+The existing slotd workflow is the execution route. Portable tests run on any
+Linux/amd64 host without root. Root fixtures run only in explicitly opted-in
+disposable GitHub-hosted Linux, with the real runner markers and
+`SLOTD_ROOT_TESTS=1`. Static vet/build/compile
 must use physical absolute task-owned checkout/HOME/config/cache/temp paths.
 Task logs and provider evidence are retained under `.temp/slotd-dk5b/`.
 
@@ -145,7 +146,8 @@ retained inert turn, actual main-view read-only flags and writable binds, litera
 dash-leading model argv, signed-but-mismatched model refusal before any runtime
 creation, input mutation between prepare and pre-exec, and a real unit with an
 extra writable bind. Each pre-exec refusal requires the current token's actual
-`fence_input` result and no main/journal effects. These fixtures have not yet run.
+`fence_input` result and no main/journal effects. Their hosted result is recorded
+in the delivering pull request, never inferred from compilation.
 The copied test-binary main is an inert infrastructure probe; it does not qualify
 the actual payload consumer's TLS, model, DA1 turn validation or replay behavior.
 

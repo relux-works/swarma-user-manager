@@ -1,14 +1,13 @@
 # Deployment qualification still required
 
 The [DK5b typed profile](STATION-PAYLOAD.md) remains an implementation draft.
-Public bootstrap/model and staged-config adapters use the independently
-verified API composition landed at chain-lab `288d63e1`. Its published
-`single-use` module still requires an older `sealwatch` lacking `ValidateJSON`;
-a local upstream replace masked that external-consumer compile failure. The
-dependency owner must land the corrected public module graph before the final
-pin and draft can be qualified. A diagnostic selection of the real published
-sealwatch from the same signed commit permits scoped Linux vet, build and test
-compilation; no tests were executed. No typed Create/start qualification,
+Public bootstrap/model and staged-config adapters use the published chain-lab
+API with no local replace: `single-use` `v0.3.1-0.20261112085009-7ea1800ed187`
+(chain-lab main `7ea1800`, the corrected public module graph), which selects
+`sealwatch` `v0.2.1-0.20261111181054-288d63e191fe` with `ValidateJSON`. The
+earlier `288d63e1` pin selected `sealwatch v0.1.0` and failed to compile for an
+external consumer; that blocker is resolved. Portable tests run on Linux/amd64
+without root; root fixtures run only on the hosted runner. No typed Create/start qualification,
 deployment or automatic migration is claimed. Require real two-UID sandbox/custody and pre-exec refusal controls,
 interrupted Create/Destroy evidence, retained journal identity, exact composed
 payload consumer and independent review before activation. The separate install
@@ -45,3 +44,20 @@ a cache/scheduling change is a separate follow-up with recovery/coherency tests.
 The protocol owner confirmed that r4 omits `slot` when no well-formed slot was
 carried, and the station manager client agrees. The response section now states
 that rule explicitly; no wire or client behavior changed.
+
+## Slot egress scope (open)
+
+The slot reaches IP destinations only through the root policy allowlist, in two
+layers (systemd `IPAddressDeny=any` plus per-address allow, and the per-UID nft
+table ending in a counted drop). The typed policy requires the profile gateway as
+an exact TCP rule. Two parts of a "relay, wallet socket and model proxy only"
+egress contract are not enforced here and need an owner decision:
+
+1. The model proxy is reachable only if the operator lists it in `egress`. The
+   per-booking bootstrap `model_endpoint` may be a hostname, so slotd does not
+   derive or cross-check an egress rule from it.
+2. Unix-domain sockets are not filtered. The unit has no address-family or
+   `/run` path restriction, so the slot UID can connect to any socket whose file
+   mode admits it, not only the wallet socket; each service's own peer-credential
+   checks are the only remaining gate. Restricting that needs a declared
+   wallet-socket path in the root policy and new root fixtures.
