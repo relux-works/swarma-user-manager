@@ -4,12 +4,16 @@ package slotd
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/user"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
 
 // Proves the residue search finds a file owned by the UID anywhere below the
@@ -97,5 +101,148 @@ func TestAdoptedCallerOverlap(t *testing.T) {
 	decl.UID = uint32(uid)
 	if _, _, err = callerIdentity(p); err == nil || err.Error() != "caller overlaps slot identities" {
 		t.Fatalf("caller with the adopted UID: %v", err)
+	}
+}
+
+// Proves the system-crontab reader over a private /etc stand-in: a job line
+// scheduled as the account (by name, by numeric UID, with leading zeros, or
+// as "@keyword name") in crontab or in any cron.d file refuses with the
+// scheduled-entry error, while comments, environment lines (also quoted and
+// with blanks around "="), other users, a prefix-sharing user and a cron.d
+// subdirectory pass; a symlinked cron.d file is followed as cron does. An
+// unparsable job line, a FIFO (without blocking), an oversized file and
+// (when not root) an unreadable file or directory refuse with another error.
+func TestSystemCronScheduledAs(t *testing.T) {
+	const name, uid = "swarma-agent", uint32(61000)
+	etc := t.TempDir()
+	scheduled := func(step string, want error) {
+		t.Helper()
+		err := systemCronScheduledAs(etc, name, uid)
+		switch {
+		case want == nil && err != nil:
+			t.Fatalf("%s: valid neighbour refused: %v", step, err)
+		case want == errSystemCronScheduled && !errors.Is(err, errSystemCronScheduled):
+			t.Fatalf("%s: %v, want the scheduled-entry refusal", step, err)
+		case want != nil && want != errSystemCronScheduled && (err == nil || errors.Is(err, errSystemCronScheduled) || !strings.Contains(err.Error(), want.Error())):
+			t.Fatalf("%s: %v, want a fail-closed refusal", step, err)
+		}
+	}
+	write := func(p, b string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(etc, p), []byte(b), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	scheduled("no crontab, no cron.d", nil)
+	neighbours := "SHELL=/bin/sh\nMAILTO=swarma-agent\n\"QUOTED\" = swarma-agent\nCRON_TZ = UTC\n\n" +
+		"# 0 0 31 2 * swarma-agent /bin/true\n   # indented comment swarma-agent\n" +
+		"17 * * * * root cd / && run-parts --report /etc/cron.hourly\n" +
+		"0 0 31 2 * swarma-agent-other /bin/true\n@daily root /bin/true\n0 0 31 2 * 61001 /bin/true\n"
+	write("crontab", neighbours)
+	if err := os.Mkdir(filepath.Join(etc, "cron.d"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	write("cron.d/.placeholder", "# DO NOT EDIT OR REMOVE\n")
+	write("cron.d/neighbours", neighbours)
+	if err := os.Mkdir(filepath.Join(etc, "cron.d", "subdir"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	scheduled("valid neighbours", nil)
+	for _, line := range []string{"0 0 31 2 * swarma-agent /bin/true", "0 0 31 2 *\tswarma-agent\t/bin/true", "0 0 31 2 * 61000 /bin/true", "0 0 31 2 * 0061000 /bin/true", "@reboot swarma-agent /bin/true", "-*/5 * * * * swarma-agent /bin/true\r"} {
+		write("crontab", neighbours+line+"\n")
+		scheduled("crontab "+line, errSystemCronScheduled)
+		write("crontab", neighbours)
+		write("cron.d/job", line+"\n")
+		scheduled("cron.d "+line, errSystemCronScheduled)
+		if err := os.Remove(filepath.Join(etc, "cron.d", "job")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	scheduled("lines removed", nil)
+	// A symlinked cron.d entry is read through, as cron reads it.
+	target := filepath.Join(t.TempDir(), "job")
+	if err := os.WriteFile(target, []byte("0 0 31 2 * swarma-agent /bin/true\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, filepath.Join(etc, "cron.d", "linked")); err != nil {
+		t.Fatal(err)
+	}
+	scheduled("symlinked cron.d file", errSystemCronScheduled)
+	if err := os.Remove(filepath.Join(etc, "cron.d", "linked")); err != nil {
+		t.Fatal(err)
+	}
+	// Unknowns refuse.
+	write("cron.d/bad", "0 0 31 2 * swarma-agent\n")
+	scheduled("job line without a command", errors.New("unparsable"))
+	write("cron.d/bad", strings.Repeat("#", systemCronFileLimit+1))
+	scheduled("oversized file", errors.New("too large"))
+	if err := os.Remove(filepath.Join(etc, "cron.d", "bad")); err != nil {
+		t.Fatal(err)
+	}
+	if err := unix.Mkfifo(filepath.Join(etc, "cron.d", "fifo"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	scheduled("FIFO", errors.New("not a regular file"))
+	if err := os.Remove(filepath.Join(etc, "cron.d", "fifo")); err != nil {
+		t.Fatal(err)
+	}
+	scheduled("unknowns removed", nil)
+	if os.Getuid() == 0 {
+		t.Log("running as root: the unreadable-file and unreadable-directory cases are not exercised")
+		return
+	}
+	if err := os.Chmod(filepath.Join(etc, "cron.d", "neighbours"), 0); err != nil {
+		t.Fatal(err)
+	}
+	scheduled("unreadable cron.d file", errors.New("permission denied"))
+	if err := os.Chmod(filepath.Join(etc, "cron.d", "neighbours"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(filepath.Join(etc, "cron.d"), 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(filepath.Join(etc, "cron.d"), 0755) })
+	scheduled("unreadable cron.d", errors.New("permission denied"))
+	if err := os.Chmod(filepath.Join(etc, "cron.d"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(filepath.Join(etc, "crontab"), 0); err != nil {
+		t.Fatal(err)
+	}
+	scheduled("unreadable crontab", errors.New("permission denied"))
+}
+
+// Proves the key-path rule portably: a root-owned key under root-owned,
+// non-writable ancestors (/etc/passwd stands in) is admitted, while a key
+// whose ancestry includes a directory owned by the invoking (non-root)
+// account is refused as ancestry, even though the key file itself is
+// acceptable; a relative or ':'-bearing path is refused. The root suite
+// covers writable, foreign-owned and symlinked components.
+func TestAdoptedKeyAncestry(t *testing.T) {
+	id := slotIdentity{UID: 61000, SocketGID: 61001, KeyFile: "/etc/passwd"}
+	if err := verifyAdoptedKeyFile(id); err != nil {
+		t.Fatalf("root-owned key path refused: %v", err)
+	}
+	if os.Getuid() == 0 {
+		t.Log("running as root: the non-root-owned ancestor case is covered by TestRootAdoptedKeyAncestry")
+		return
+	}
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	id.UID = uint32(os.Getuid())
+	id.KeyFile = filepath.Join(dir, "agent.key")
+	if err := os.WriteFile(id.KeyFile, []byte("fixture agent key\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := verifyAdoptedKeyFile(id); err == nil || !strings.Contains(err.Error(), "ancestry") {
+		t.Fatalf("non-root-owned ancestor: %v", err)
+	}
+	for _, bad := range []string{"agent.key", "/etc/pass:wd"} {
+		id.KeyFile = bad
+		if err := verifyAdoptedKeyFile(id); err == nil {
+			t.Fatalf("%q admitted", bad)
+		}
 	}
 }

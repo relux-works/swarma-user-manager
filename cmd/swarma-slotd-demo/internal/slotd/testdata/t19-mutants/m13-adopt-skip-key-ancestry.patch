@@ -1,0 +1,22 @@
+Adoption narrowing mutant m13 (key-file ancestry): the walk from / to the
+key file is skipped; only the final component is inspected (r1 behaviour).
+Killed by TestRootAdoptedKeyAncestry (adoption over a group-writable key
+parent).
+
+--- a/cmd/swarma-slotd-demo/internal/slotd/adopted_linux.go
++++ b/cmd/swarma-slotd-demo/internal/slotd/adopted_linux.go
+@@ -218,13 +218,8 @@ func verifyAdoptedKeyFile(id slotIdentity) error {
+ 	if !cleanAbsolutePath(id.KeyFile) || strings.ContainsRune(id.KeyFile, ':') {
+ 		return errors.New("adopted key file refused")
+ 	}
+-	parent, err := verifyKeyAncestry(path.Dir(id.KeyFile))
+-	if err != nil {
+-		return err
+-	}
+-	defer unix.Close(parent)
+ 	var st unix.Stat_t
+-	if err := unix.Fstatat(parent, path.Base(id.KeyFile), &st, unix.AT_SYMLINK_NOFOLLOW); err != nil {
++	if err := unix.Lstat(id.KeyFile, &st); err != nil {
+ 		return err
+ 	}
+ 	if st.Mode&unix.S_IFMT != unix.S_IFREG || (st.Uid != id.UID && st.Uid != 0) || st.Mode&0022 != 0 {

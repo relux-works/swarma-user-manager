@@ -486,3 +486,251 @@ func TestRootAdoptedRetirement(t *testing.T) {
 	expectCode("clean retirement retry", "destroy", q2, "")
 	retired("rental 2")
 }
+
+// adoptedEngine is the real engine over a declared adopted slot, with the
+// apply/expect helpers of the lifecycle controls below.
+type adoptedEngine struct {
+	t       *testing.T
+	engine  *lifecycle
+	store   *recordStore
+	r       *durableRecord
+	h       adoptedHost
+	account string
+}
+
+func newAdoptedEngine(t *testing.T) (*adoptedEngine, string) {
+	t.Helper()
+	p, r, dir := rootFixture(t)
+	socket := "slotd-adopt-wp-" + t19Nonce()[:6]
+	socketGID := fixtureGroup(t, socket)
+	h := adoptedAccountFixture(t, dir, socket)
+	declareAdopted(t, &p, &r, h, socket, socketGID)
+	setT19Policy(t, &p, dir, t19SpecArgv(t19Spec{Report: filepath.Join(r.Identity.Home, "report"), Hold: true})...)
+	p.Egress = nil
+	a := &adoptedEngine{t: t, r: &r, h: h, account: passwdLine(t, h.Name)}
+	a.engine, a.store, _ = realEngine(t, p, a.r, dir)
+	a.engine.diagnostic = func(slot string, e error) { t.Logf("slot=%s private lifecycle cause: %v", slot, e) }
+	if a.account == "" {
+		t.Fatal("fixture account missing")
+	}
+	return a, dir
+}
+
+// expect applies op with a freshly issued request (5 s freshness window)
+// and requires the code; the account must be byte-identical afterwards.
+func (a *adoptedEngine) expect(step, op string, want errorCode) {
+	a.t.Helper()
+	q := currentCreate(a.t, a.r)
+	q.Op = op
+	q.NotAfter = time.Now().UTC().Add(20 * time.Minute).Truncate(time.Second)
+	got, code := a.engine.apply(context.Background(), q)
+	if got != nil {
+		*a.r = *got
+	}
+	if code != want {
+		a.t.Fatalf("%s: %s code %q, want %q", step, op, code, want)
+	}
+	if passwdLine(a.t, a.h.Name) != a.account {
+		a.t.Fatalf("%s: the adopted account was deleted or changed", step)
+	}
+}
+
+// gate runs the no-residue gate; want "" requires it to pass, otherwise the
+// error must contain want.
+func (a *adoptedEngine) gate(step, want string) {
+	a.t.Helper()
+	err := adoptedNoResidue(context.Background(), a.r.Identity)
+	if want == "" && err != nil {
+		a.t.Fatalf("%s: clean neighbour refused: %v", step, err)
+	}
+	if want != "" && (err == nil || !strings.Contains(err.Error(), want)) {
+		a.t.Fatalf("%s: gate %v, want %q", step, err, want)
+	}
+}
+
+// writeRootFile replaces p with b (0644, root-owned) and restores the
+// original bytes and mode at cleanup (removes p if it did not exist).
+func writeRootFile(t *testing.T, p string, b []byte) {
+	t.Helper()
+	orig, err := os.ReadFile(p)
+	existed := err == nil
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		t.Fatal(err)
+	}
+	mode := os.FileMode(0644)
+	if st, err := os.Stat(p); err == nil {
+		mode = st.Mode().Perm()
+	}
+	t.Cleanup(func() {
+		if existed {
+			if err := os.WriteFile(p, orig, mode); err != nil {
+				t.Errorf("restore %s: %v", p, err)
+			}
+		} else if err := os.Remove(p); err != nil && !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("remove %s: %v", p, err)
+		}
+	})
+	if err := os.WriteFile(p, b, mode); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestRootAdoptedSystemCron proves the system-crontab part of condition 10
+// through the public lifecycle: a root-owned /etc/cron.d line or /etc/crontab
+// line that schedules a job as the adopted account (by name or numeric UID)
+// refuses reuse with the record left destroyed, and fails a retirement with
+// the record left failed; removing the line restores the clean neighbour and
+// the account is never changed. Valid neighbours that must pass: a line for
+// another user, a comment naming the account and an environment line whose
+// value is the account. Plants use the never-firing schedule 0 0 31 2 * and
+// are removed (cron.d) or restored byte-for-byte (crontab) at cleanup.
+func TestRootAdoptedSystemCron(t *testing.T) {
+	a, _ := newAdoptedEngine(t)
+	name, uid := a.h.Name, strconv.FormatUint(uint64(a.h.UID), 10)
+	a.expect("rental 1", "create", "")
+	a.expect("rental 1", "destroy", "")
+	a.gate("clean retirement", "")
+
+	// cron.d: the valid neighbours pass, then each scheduled form refuses.
+	plant := "/etc/cron.d/slotd-adopt-" + t19Nonce()[:8]
+	if err := os.MkdirAll("/etc/cron.d", 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Remove(plant) })
+	neighbours := "# 0 0 31 2 * " + name + " /bin/true\nMAILTO=" + name + "\n0 0 31 2 * root /bin/true\n"
+	if err := os.WriteFile(plant, []byte(neighbours), 0644); err != nil {
+		t.Fatal(err)
+	}
+	a.gate("cron.d neighbours", "")
+	for _, line := range []string{"0 0 31 2 * " + name + " /bin/true\n", "0 0 31 2 * " + uid + " /bin/true\n", "@reboot " + name + " /bin/true\n"} {
+		if err := os.WriteFile(plant, []byte(neighbours+line), 0644); err != nil {
+			t.Fatal(err)
+		}
+		a.gate("cron.d "+line, "system cron entry remains")
+		a.expect("reuse over cron.d "+line, "create", internalError)
+		if a.r.Binding.State != destroyed {
+			t.Fatalf("refused reuse changed the record: %s", a.r.Binding.State)
+		}
+	}
+	if err := os.WriteFile(plant, []byte(neighbours), 0644); err != nil {
+		t.Fatal(err)
+	}
+	a.gate("cron.d line removed", "")
+
+	// /etc/crontab: a line for the account refuses reuse; restored, it passes.
+	orig, err := os.ReadFile("/etc/crontab")
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		t.Fatal(err)
+	}
+	writeRootFile(t, "/etc/crontab", append(slices.Clone(orig), []byte("\n0 0 31 2 * "+name+" /bin/true\n")...))
+	a.gate("crontab", "system cron entry remains")
+	a.expect("reuse over /etc/crontab", "create", internalError)
+	if a.r.Binding.State != destroyed {
+		t.Fatalf("refused reuse changed the record: %s", a.r.Binding.State)
+	}
+	writeRootFile(t, "/etc/crontab", orig)
+	a.gate("crontab restored", "")
+
+	// A line planted during a rental fails the retirement, forbids reuse
+	// until removed, and a retry then retires cleanly.
+	a.expect("rental 2", "create", "")
+	if err := os.WriteFile(plant, []byte(neighbours+"0 0 31 2 * "+name+" /bin/true\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	a.expect("retirement over a cron.d line", "destroy", internalError)
+	if a.r.Binding.State != failed {
+		t.Fatalf("retirement over a cron.d line left state %s", a.r.Binding.State)
+	}
+	a.expect("reuse after the failed retirement", "create", invalidState)
+	if err := os.Remove(plant); err != nil {
+		t.Fatal(err)
+	}
+	a.expect("clean retirement retry", "destroy", "")
+	a.gate("rental 2 retired", "")
+}
+
+// TestRootAdoptedKeyAncestry proves the key-path rule at adoption and at
+// start: beside the valid layout (every directory root-owned, not group or
+// other writable, no symlink), a group-writable parent, an other-writable
+// parent, a parent owned by the adopted UID and a symlinked component each
+// refuse; a writable parent refuses the public create (no record, no home)
+// and the public start (record failed), and restoring the layout admits.
+func TestRootAdoptedKeyAncestry(t *testing.T) {
+	a, dir := newAdoptedEngine(t)
+	keys := filepath.Join(dir, "keys-"+t19Nonce()[:6])
+	if err := os.Mkdir(keys, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(keys, 0755); err != nil {
+		t.Fatal(err)
+	}
+	key := filepath.Join(keys, "agent.key")
+	if err := os.WriteFile(key, []byte("fixture agent key\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chown(key, int(a.h.UID), int(a.h.UID)); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "keylink-"+t19Nonce()[:6])
+	if err := os.Symlink(keys, link); err != nil {
+		t.Fatal(err)
+	}
+	a.r.Identity.KeyFile = key
+	a.engine.policy.Adopted.KeyFile = key
+	check := func(step string, want bool) {
+		t.Helper()
+		err := verifyAdoptedKeyFile(a.r.Identity)
+		if want && err != nil {
+			t.Fatalf("%s: valid layout refused: %v", step, err)
+		}
+		if !want && (err == nil || !strings.Contains(err.Error(), "ancestry")) {
+			t.Fatalf("%s: %v, want an ancestry refusal", step, err)
+		}
+	}
+	chmod := func(mode os.FileMode) {
+		t.Helper()
+		if err := os.Chmod(keys, mode); err != nil {
+			t.Fatal(err)
+		}
+	}
+	check("valid layout", true)
+	chmod(0775)
+	check("group-writable parent", false)
+	chmod(0757)
+	check("other-writable parent", false)
+	chmod(0755)
+	check("parent restored", true)
+	if err := os.Chown(keys, int(a.h.UID), int(a.h.UID)); err != nil {
+		t.Fatal(err)
+	}
+	check("parent owned by the adopted UID", false)
+	if err := os.Chown(keys, 0, 0); err != nil {
+		t.Fatal(err)
+	}
+	check("parent owned by root again", true)
+	a.r.Identity.KeyFile = filepath.Join(link, "agent.key")
+	check("symlinked component", false)
+	a.r.Identity.KeyFile = key
+	check("same key without the symlink", true)
+
+	// Public lifecycle: create refuses over a writable parent and creates
+	// nothing; start refuses over it; the restored layout admits both.
+	chmod(0775)
+	a.expect("create over a writable key parent", "create", internalError)
+	if stored, err := a.store.load(a.r.Slot); err != nil || stored != nil {
+		t.Fatalf("refused adoption stored a record: %v %v", stored, err)
+	}
+	if _, err := os.Lstat(a.r.Identity.Home); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("refused adoption created the per-slot home: %v", err)
+	}
+	chmod(0755)
+	a.expect("create over the valid layout", "create", "")
+	chmod(0757)
+	a.expect("start over a writable key parent", "start", internalError)
+	if a.r.Binding.State != failed {
+		t.Fatalf("refused start left state %s", a.r.Binding.State)
+	}
+	chmod(0755)
+	a.expect("retirement", "destroy", "")
+	a.gate("retired", "")
+}

@@ -45,6 +45,10 @@ func (e *linuxEffects) prepareCreate(ctx context.Context, r *durableRecord, boot
 		if err := adoptedNoResidue(ctx, r.Identity); err != nil {
 			return err
 		}
+		// The key's whole path is checked at adoption, not only at start.
+		if err := verifyAdoptedKeyFile(r.Identity); err != nil {
+			return err
+		}
 	}
 	e.accounts.Lock()
 	defer e.accounts.Unlock()

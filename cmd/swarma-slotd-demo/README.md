@@ -286,10 +286,10 @@ suite drives it through literal v0 payloads):
 | Adoption verifies and never creates; the receipt hashes the existing lines | `createAccounts`, `prepareCreate` |
 | Fresh per-slot home `<home_root>/<name>`, owned by the UID, removed at retirement | `homeRoot` |
 | `SupplementaryGroups=<socket group>` explicitly, for the adopted slot only (v2 worker slots keep the empty value, v0 worker slots set none) | `slotSupplementaryGroups` |
-| The key file is bound read-only (no `-` prefix: a missing key fails the start); before start it must be a regular file owned by the UID or root and not group/other writable | `slotIdentityBinds`, `verifyAdoptedKeyFile` |
+| The key file is bound read-only (no `-` prefix: a missing key fails the start); at adoption and again before start it must be a regular file owned by the UID or root and not group/other writable, and every directory from `/` to it must be root-owned, not group/other writable and not a symlink (walked with `O_PATH\|O_NOFOLLOW`). The frozen G2 render declares only `agent_key_file`, no owner for its directories, so root is the only admitted owner | `slotIdentityBinds`, `verifyAdoptedKeyFile`, `verifyKeyAncestry` |
 | One live slot per adopted UID: a create refuses while any stored record of the UID is not destroyed | `adoptedSlotFree` |
 | Retirement never deletes the account: it kills every process of the UID, removes the per-slot home first, then runs the no-residue gate | `releaseAdopted` |
-| No-residue gate, at every adoption and at the end of every retirement: no process of the UID; no file owned by it in the daemon's whole view (`/proc` skipped; the key file and the per-slot home admitted); no linger file; no crontab; no kernel key charged to the UID in `/proc/key-users` | `adoptedNoResidue` |
+| No-residue gate, at every adoption and at the end of every retirement: no process of the UID; no file owned by it in the daemon's whole view (`/proc` skipped; the key file and the per-slot home admitted; at(1) jobs are files owned by the UID and are found here); no linger file; no per-user crontab spool entry; no `/etc/crontab` or `/etc/cron.d/*` job line whose user field is the account's name or numeric UID, whoever owns the file (comments, blank lines and `NAME=value` lines skipped; an unreadable, oversized, non-regular or unparsable entry refuses); no kernel key charged to the UID in `/proc/key-users` | `adoptedNoResidue`, `systemCronScheduledAs` |
 
 A failed gate at retirement leaves the record `failed`, which refuses reuse
 until the residue is removed and `destroy` is retried.
@@ -303,19 +303,38 @@ GID} and cannot write or chmod the key file; a worker slot of the same policy
 gets `EACCES`) and `TestRootAdoptedRetirement` (account kept, clean
 retirement passes and the account is reused; a planted residue file, a
 planted process and linger each refuse reuse; residue during a rental fails
-the retirement; a second create refuses while the slot is alive). The T19
+the retirement; a second create refuses while the slot is alive),
+`TestRootAdoptedSystemCron` (a root-owned `/etc/cron.d` line naming the
+account by name, by UID or as `@reboot`, and an `/etc/crontab` line, each
+refuse reuse with the record left destroyed; a cron.d line planted during a
+rental fails the retirement until removed; a line for another user, a comment
+and a `MAILTO=` line naming the account pass; plants use the never-firing
+`0 0 31 2 *` and are removed or restored byte-for-byte) and
+`TestRootAdoptedKeyAncestry` (beside the valid layout, a group-writable,
+other-writable, UID-owned or symlinked key directory refuses; a writable key
+directory refuses the public create, storing nothing, and the public start).
+The T19
 wallet fixture is now that same 0660 group-owned socket, and every T19 slot
 that needs the wallet runs as an adopted account (`T19.14-adopted-groups-key`).
 
 Adoption mutants (`-f mutant=<name>`): `m8-adopt-any-second-group` is killed
 by `TestAdoptedGroupSet`, `m9-adopt-retire-deletes` and
 `m10-adopt-skip-residue-gate` by `TestRootAdoptedRetirement`,
-`m11-adopt-skip-second-slot` by `TestAdoptedSecondLiveSlot`.
+`m11-adopt-skip-second-slot` by `TestAdoptedSecondLiveSlot`,
+`m12-adopt-skip-system-cron` by `TestRootAdoptedSystemCron`,
+`m13-adopt-skip-key-ancestry` by `TestRootAdoptedKeyAncestry` (also by the
+portable `TestAdoptedKeyAncestry`).
 
 Limits: the keyring check is stricter than "keyrings empty" (an empty
 persistent user keyring also refuses); the whole-view search fails closed on
 any unreadable directory (for example a FUSE mount without `allow_other`) and
-after five minutes.
+after five minutes (a cooperative deadline: a stalled filesystem call can
+delay the refusal). The scheduler check reads the per-user spool, the at
+spool (as owned files), `/etc/crontab` and `/etc/cron.d`; a systemd unit or
+timer with `User=<account>` is not inspected. The key ancestry is checked at
+adoption and before every start; systemd resolves the bind afterwards, and
+because every ancestor is root-owned and not writable by others, only root
+can change the path in between.
 
 ## linuxos reuse
 

@@ -1,0 +1,18 @@
+Adoption narrowing mutant m12 (condition 10, system crontabs): the
+/etc/crontab and /etc/cron.d check is skipped in the no-residue gate; the
+per-user spool, process, file, linger and key checks stay. Killed by
+TestRootAdoptedSystemCron (reuse over a root-owned cron.d line naming the
+account).
+
+--- a/cmd/swarma-slotd-demo/internal/slotd/adopted_linux.go
++++ b/cmd/swarma-slotd-demo/internal/slotd/adopted_linux.go
+@@ -60,9 +60,6 @@ func adoptedNoResidue(ctx context.Context, id slotIdentity) error {
+ 			return errors.Join(err, errors.New("adopted account cron entry remains"))
+ 		}
+ 	}
+-	if err = systemCronScheduledAs("/etc", id.Name, id.UID); err != nil {
+-		return err
+-	}
+ 	if err = keysCharged(id.UID); err != nil {
+ 		return err
+ 	}
