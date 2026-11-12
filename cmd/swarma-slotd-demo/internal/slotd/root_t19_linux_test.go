@@ -212,6 +212,10 @@ func t19Plant(t *testing.T) t19Plants {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { os.RemoveAll("/var/lib/swarma-t19") })
+	// The runner's umask is 077; the plant directory must be traversable.
+	if err := os.Chmod("/var/lib/swarma-t19", 0755); err != nil {
+		t.Fatal(err)
+	}
 	plants := t19Plants{Paths: []string{"/run/swarma-t19-ctl.sock", "/var/lib/swarma-t19/ctl.sock", "/tmp/swarma-t19-ctl.sock", "/dev/shm/swarma-t19-ctl.sock"}, Abstract: "swarma-t19-ctl-" + nonce}
 	accept := func(l net.Listener) {
 		for {

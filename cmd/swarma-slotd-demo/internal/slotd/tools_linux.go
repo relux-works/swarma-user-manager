@@ -6,18 +6,22 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
+	"os"
 	"os/exec"
 	"sync"
+	"syscall"
 	"time"
 )
 
 const maxToolOutput = 64 * 1024
 
-// toolSystemBus is set only by the prestart fence. systemd applies a unit's
+// toolRoot is set only by the prestart fence. systemd applies a unit's
 // TemporaryFileSystem= and Bind*Paths= even to ExecStartPre=+, so the fence
-// sees the slot's empty /run: systemctl's private socket and the bus socket
-// are reached below PID 1's root instead. The daemon leaves it empty.
-var toolSystemBus string
+// sees the slot's empty /run, where systemctl finds neither its private
+// socket nor /run/systemd/system. The fence's fixed tools therefore run
+// chrooted at PID 1's root, the view the daemon itself uses.
+var toolRoot string
 
 type boundedOutput struct {
 	mu        sync.Mutex
@@ -46,8 +50,8 @@ func fixedToolCommand(ctx context.Context, invocation toolInvocation) (*exec.Cmd
 	}
 	cmd := exec.CommandContext(ctx, invocation.Path, invocation.Args...)
 	cmd.Env = []string{}
-	if toolSystemBus != "" {
-		cmd.Env = []string{"DBUS_SYSTEM_BUS_ADDRESS=" + toolSystemBus}
+	if toolRoot != "" {
+		cmd.SysProcAttr = &syscall.SysProcAttr{Chroot: toolRoot}
 	}
 	cmd.Dir = "/"
 	cmd.Stdin = bytes.NewReader(invocation.Stdin)
@@ -86,4 +90,15 @@ type toolFailure struct {
 }
 
 func (e *toolFailure) Error() string { return "fixed tool failed" }
+
+// fenceDiagnostic writes a failed fence stage and any tool stderr to the
+// fence's own stderr, which systemd records in the unit journal (root-only).
+func fenceDiagnostic(stage string, err error) {
+	var tool *toolFailure
+	if errors.As(err, &tool) {
+		fmt.Fprintf(os.Stderr, "fence %s: %v: %s\n", stage, tool.cause, bytes.TrimSpace(tool.stderr))
+		return
+	}
+	fmt.Fprintf(os.Stderr, "fence %s: %v\n", stage, err)
+}
 func (e *toolFailure) Unwrap() error { return e.cause }

@@ -175,8 +175,9 @@ existing "installed unit property mismatch" check.
 The prestart fence shares the slot's mount view: systemd applies
 `TemporaryFileSystem=` and `Bind*Paths=` even to `ExecStartPre=+`. The fence
 therefore opens its request directory below PID 1's root
-(`/proc/1/root/run/swarma-slotd-demo-fences`) and runs `systemctl`/`busctl`
-with `DBUS_SYSTEM_BUS_ADDRESS` pointing at the bus socket below PID 1's root.
+(`/proc/1/root/run/swarma-slotd-demo-fences`) and runs its fixed tools
+(`systemctl`, `busctl`, `nft`) chrooted at `/proc/1/root`, the view the daemon
+itself uses; `systemctl` refuses to operate without `/run/systemd/system`.
 
 PID 1's `@…/bus/systemd/bus-api-system` (and the other `@…/bus/…` names) are
 autobound sd-bus CLIENT sockets: `/proc/net/unix` shows them connected, not

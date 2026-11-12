@@ -223,9 +223,13 @@ func verifyFence(ctx context.Context, q fenceRequest) error {
 	r := &q.Record
 	self, err := os.ReadFile("/proc/self/cgroup")
 	if err != nil || string(self) != "0::"+r.Cgroup+"\n" {
+		fenceDiagnostic("own cgroup", err)
 		return errFenceCgroup
 	}
 	v, err := unitProperties(ctx, r.Identity)
+	if err != nil {
+		fenceDiagnostic("unit properties", err)
+	}
 	if err != nil || v == nil || ownedUnit(v, r) != nil || v["ControlGroup"] != r.Cgroup || v["ActiveState"] != "activating" || v["SubState"] != "start-pre" || v["ControlPID"] != strconv.Itoa(os.Getpid()) {
 		return errFenceCgroup
 	}
@@ -284,7 +288,7 @@ func EnforcementFence(args []string) int {
 	}
 	// The fence runs inside the slot's mount view (empty /run); its request
 	// directory and the system bus are resolved below PID 1's root.
-	toolSystemBus = "unix:path=/proc/1/root/run/dbus/system_bus_socket"
+	toolRoot = "/proc/1/root"
 	root, err := openHostTrustedDir(fenceRootPath)
 	if err != nil {
 		return fenceExit(errFenceInput)
