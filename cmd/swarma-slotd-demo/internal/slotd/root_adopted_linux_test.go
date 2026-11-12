@@ -404,7 +404,15 @@ func TestRootAdoptedRetirement(t *testing.T) {
 	awaitT19Report(t, report, time.Minute)
 	expectCode("second create while running", "create", fresh("renter two"), invalidState)
 	expectCode("rental 1", "stop", q, "")
-	expectCode("rental 1", "destroy", q, "")
+	// The account check precedes the code check: a retirement that deletes
+	// the account fails here by name, whatever the destroy reports.
+	code := apply("destroy", q)
+	if passwdLine(t, h.Name) != account {
+		t.Fatalf("rental 1: retirement deleted or changed the adopted account (destroy code %q)", code)
+	}
+	if code != "" {
+		t.Fatalf("rental 1: destroy code %q", code)
+	}
 	retired("rental 1")
 
 	// Planted residue refuses reuse; removing it re-admits.

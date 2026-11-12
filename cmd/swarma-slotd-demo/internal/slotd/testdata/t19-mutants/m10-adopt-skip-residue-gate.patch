@@ -4,17 +4,17 @@ over a planted residue file).
 
 --- a/cmd/swarma-slotd-demo/internal/slotd/effects_linux.go
 +++ b/cmd/swarma-slotd-demo/internal/slotd/effects_linux.go
-@@ -50,9 +50,6 @@
- 		if o.passwd == "" || o.group == "" || !o.shadow {
- 			return errors.New("declared account missing")
- 		}
--		if err = adoptedNoResidue(ctx, r.Identity); err != nil {
+@@ -42,9 +42,6 @@
+ 		// The declared account is reused only after the no-residue gate
+ 		// proves the previous rental left nothing. The whole-view search
+ 		// runs outside the accounts lock so other slots are not blocked.
+-		if err := adoptedNoResidue(ctx, r.Identity); err != nil {
 -			return err
 -		}
- 	} else if !o.empty() {
- 		return errors.New("unmanaged identity exists")
  	}
-@@ -315,7 +312,7 @@
+ 	e.accounts.Lock()
+ 	defer e.accounts.Unlock()
+@@ -326,7 +323,7 @@
  	if err := e.stopProcesses(ctx, r); err != nil {
  		return err
  	}

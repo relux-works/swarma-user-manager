@@ -1,10 +1,10 @@
 Adoption narrowing mutant m9 (condition 3): retirement of the adopted slot
 deletes the account like a worker account. Killed by
-TestRootAdoptedRetirement (rental 1 retirement).
+TestRootAdoptedRetirement (rental 1: account kept after retirement).
 
 --- a/cmd/swarma-slotd-demo/internal/slotd/effects_linux.go
 +++ b/cmd/swarma-slotd-demo/internal/slotd/effects_linux.go
-@@ -315,6 +315,9 @@
+@@ -326,6 +326,9 @@
  	if err := e.stopProcesses(ctx, r); err != nil {
  		return err
  	}

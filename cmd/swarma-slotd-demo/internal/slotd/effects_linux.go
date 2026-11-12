@@ -38,6 +38,14 @@ func (e *linuxEffects) prepareCreate(ctx context.Context, r *durableRecord, boot
 	if err := e.homes.absent(r.Identity); err != nil {
 		return err
 	}
+	if r.Identity.adopted() {
+		// The declared account is reused only after the no-residue gate
+		// proves the previous rental left nothing. The whole-view search
+		// runs outside the accounts lock so other slots are not blocked.
+		if err := adoptedNoResidue(ctx, r.Identity); err != nil {
+			return err
+		}
+	}
 	e.accounts.Lock()
 	defer e.accounts.Unlock()
 	o, err := observeAccounts(ctx, r.Identity)
@@ -45,13 +53,9 @@ func (e *linuxEffects) prepareCreate(ctx context.Context, r *durableRecord, boot
 		return err
 	}
 	if r.Identity.adopted() {
-		// The declared account is verified, never created, and reused only
-		// after the no-residue gate proves the previous rental left nothing.
+		// Verified, never created.
 		if o.passwd == "" || o.group == "" || !o.shadow {
 			return errors.New("declared account missing")
-		}
-		if err = adoptedNoResidue(ctx, r.Identity); err != nil {
-			return err
 		}
 	} else if !o.empty() {
 		return errors.New("unmanaged identity exists")
@@ -275,14 +279,14 @@ func (e *linuxEffects) removeNFT(ctx context.Context, r *durableRecord) error {
 	return removeNFT(ctx, e.policy, r)
 }
 func (e *linuxEffects) retire(ctx context.Context, r *durableRecord) error {
+	if r.Identity.adopted() {
+		return e.releaseAdopted(ctx, r)
+	}
 	e.accounts.Lock()
 	defer e.accounts.Unlock()
 	o, err := observeAccounts(ctx, r.Identity)
 	if err != nil {
 		return err
-	}
-	if r.Identity.adopted() {
-		return e.releaseAdopted(ctx, r, o)
 	}
 	if r.Accounts == nil {
 		if !o.empty() {
@@ -302,8 +306,15 @@ func (e *linuxEffects) retire(ctx context.Context, r *durableRecord) error {
 // releaseAdopted is retirement for the adopted account (condition 3): it
 // NEVER deletes the account. It kills every process of the UID and then
 // requires the no-residue gate; the per-slot home and station trees were
-// already removed by the preceding home-remove step.
-func (e *linuxEffects) releaseAdopted(ctx context.Context, r *durableRecord, o accountObservation) error {
+// already removed by the preceding home-remove step. Only the account
+// observation holds the accounts lock; the whole-view search does not.
+func (e *linuxEffects) releaseAdopted(ctx context.Context, r *durableRecord) error {
+	e.accounts.Lock()
+	o, err := observeAccounts(ctx, r.Identity)
+	e.accounts.Unlock()
+	if err != nil {
+		return err
+	}
 	if o.passwd == "" || o.group == "" || !o.shadow {
 		return errors.New("declared account missing")
 	}
