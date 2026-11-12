@@ -208,9 +208,9 @@ const overrideDropIn = "[Service]\nExecStart=\nExecStart=/usr/bin/true\n"
 // retained, never started or enabled), then by the pre-publication scan, and an
 // idempotent rerun verifies the unit once the generator is gone. A dependency
 // a generator creates only at that reload (the unit's own .wants, .requires
-// and .upholds, a dash-prefix .wants and a reverse .wants link) is loaded by
-// systemd yet refused by the post-reload namespace scan, with the same
-// retained-files, no-start recovery; a generator whose dependency directories
+// and .upholds and a dash-prefix .wants) is loaded by systemd yet refused by
+// the post-reload namespace scan, and a generated reverse .wants link by the
+// readback, with the same retained-files, no-start recovery; a generator whose dependency directories
 // systemd does not merge into this unit is accepted. Narrowing mutants that
 // omit one prefix or the type-wide scope, or whose post-reload scan omits the
 // dependency directories or only their suffixes, admit the planted case.
@@ -362,14 +362,15 @@ printf '[Unit]\nDescription=slotd fixture inert dependency\n\n[Service]\nType=on
 		forward("upholds", installUnitName+".upholds", "Upholds"),
 		// Dash-prefix dependency directories apply to swarma-slotd-*.service only.
 		forward("prefix_wants", "swarma-slotd-.service.wants", "Wants"),
-		// A reverse link pulls the unit in; the readback may see its enablement
-		// state first, so either post-reload refusal is accepted here.
-		{"reverse_wants", foreign + ".wants", installUnitName, installUnitPath, "WantedBy", "; not started or enabled"},
+		// A reverse link pulls the unit in. On the runner's systemd the loaded-unit
+		// readback already refuses it (hosted run 43216606653), before the scan.
+		{"reverse_wants", foreign + ".wants", installUnitName, installUnitPath, "WantedBy", "loaded daemon unit differs from the reviewed package; not started or enabled"},
 	}
 	t.Run("generated_dependency_refused_after_reload", func(t *testing.T) {
 		for _, c := range dependencyCases {
 			t.Run(c.name, func(t *testing.T) {
 				f.absent(t)
+				t.Cleanup(func() { uninstallPackage(t) })
 				plantGenerator(t, dependencyGenerator(c.dir, c.entry, c.target))
 				f.invoke(t, f.checkArgs, "no files published", true)
 				f.invoke(t, f.baseArgs, "slotd install refused: "+c.want, false)
@@ -377,7 +378,9 @@ printf '[Unit]\nDescription=slotd fixture inert dependency\n\n[Service]\nType=on
 				if deps := unitDependencies(t, c.property); !slices.Contains(deps, foreign) {
 					t.Fatalf("systemd did not load the generated %s dependency: %q", c.property, deps)
 				}
-				if props := loadedUnitProperties(t); props["ActiveState"] != "inactive" || props["FragmentPath"] != installUnitPath {
+				props := loadedUnitProperties(t)
+				t.Logf("systemd readback after the refused install: %q", props)
+				if props["ActiveState"] != "inactive" || props["FragmentPath"] != installUnitPath {
 					t.Fatalf("refused unit was started or replaced: %q", props)
 				}
 				installed := f.requireInstalled(t)
@@ -404,6 +407,7 @@ printf '[Unit]\nDescription=slotd fixture inert dependency\n\n[Service]\nType=on
 	// succeeds with the reviewed unit and no added dependency.
 	t.Run("unrelated_generated_dependencies_accepted", func(t *testing.T) {
 		f.absent(t)
+		t.Cleanup(func() { uninstallPackage(t) })
 		plantGenerator(t, dependencyGenerator("swarma-slotd-demo-.service.wants", foreign, "$1/"+foreign)+
 			`/usr/bin/mkdir -p "$1/swarma.service.requires"
 /usr/bin/ln -s "$1/`+foreign+`" "$1/swarma.service.requires/`+foreign+`"
@@ -448,6 +452,7 @@ printf '[Unit]\nDescription=slotd fixture inert dependency\n\n[Service]\nType=on
 	} {
 		t.Run("mutant_"+m.name+"_killed_by_generated_dependency_refused_after_reload_"+m.killer.name, func(t *testing.T) {
 			f.absent(t)
+			t.Cleanup(func() { uninstallPackage(t) })
 			mutant := f.mutantApplyArgs(t, m.name, postReload, m.replacement)
 			plantGenerator(t, dependencyGenerator(m.killer.dir, m.killer.entry, m.killer.target))
 			f.invoke(t, mutant, "daemon not started or enabled", true)
