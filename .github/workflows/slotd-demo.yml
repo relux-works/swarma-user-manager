@@ -155,6 +155,7 @@ jobs:
           assert {"TestRootStationMetadataRefusals", "TestRootStationMountRefusal"} <= passed
           assert "TestRootStationCrossUIDAccess" in passed
           assert {"TestRootStationLifecycleRetention", "TestRootStationPreexecRefusal", "TestRootStationExtraWritableBind"} <= passed
+          assert "TestRootStationFenceHostView" in passed
           PY
           SH
       - name: Preserve root evidence
