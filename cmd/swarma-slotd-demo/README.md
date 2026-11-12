@@ -156,7 +156,7 @@ longer the launcher; a launcher refusal is a start failure. The readback also
 requires the exact `ExecStart` (launcher, `--slot-launch`, policy argv) through
 systemd's typed D-Bus property, for literal and typed policies alike.
 
-Layer 3 and loopback (matrix row 14). Policy load refuses loopback (`127/8`,
+Layer 3 and loopback. Policy load refuses loopback (`127/8`,
 `::1`) and link-local egress addresses, and any address this host owns; the only
 exception is the exact station gateway `addr:port` over TCP, which may then be
 the only loopback rule. Host-own addresses are checked at policy load, not on

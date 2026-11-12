@@ -560,7 +560,7 @@ func assertInstalledCaps(t *testing.T, p policy, r *durableRecord) {
 
 // Proves real TCP/UDP IPv4/IPv6 enforcement by each layer and both, with a no-layer connectivity control and an unrelated-UID control. This is runner evidence only.
 // Targets live in a peer network namespace: loopback and host-own addresses
-// are no longer admissible egress (T19 matrix row 14).
+// are no longer admissible egress (T19).
 func TestRootEgressLayers(t *testing.T) {
 	requireHostedRoot(t)
 	peer := newT19Peer(t)

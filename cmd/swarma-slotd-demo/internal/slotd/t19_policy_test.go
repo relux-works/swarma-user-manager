@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// T19.12 (load half), matrix row 14: a literal policy refuses every loopback
+// T19.12 (load half): a literal policy refuses every loopback
 // and link-local egress address, while the nearest routable neighbours on
 // both sides of each range stay admitted. This is the policy-load layer only;
 // the kernel layers are proved from a real slot by TestRootT19LoopbackEgress.

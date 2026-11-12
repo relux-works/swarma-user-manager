@@ -158,7 +158,7 @@ var hostAddresses = func() ([]netip.Addr, error) {
 }
 
 // rejectHostEgress refuses an egress address owned by this host, which would
-// reach host listeners through the shared network namespace (matrix row 14).
+// reach host listeners through the shared network namespace.
 // Only the exact station gateway rule is exempt. It runs at policy load, not
 // in validate, so a later address change cannot strand destroy or stop.
 func rejectHostEgress(p policy, own func() ([]netip.Addr, error)) error {
