@@ -363,6 +363,7 @@ func TestRootStationLifecycleRetention(t *testing.T) {
 // Proves an actual pre-exec input mutation (after prepareStart passed) reaches
 // fence_input with no main sentinel/turn, beside the valid sibling above. The
 // plant first validates all current inputs; setup failure cannot count as refusal.
+// Custody refuses the emptied input; its exact bytes restored, the set re-admits.
 func TestRootStationPreexecRefusal(t *testing.T) {
 	requireHostedRoot(t)
 	var r durableRecord
@@ -428,6 +429,29 @@ func TestRootStationPreexecRefusal(t *testing.T) {
 	// Independently prove that the intended plant actually changed its target.
 	if st, err := os.Stat(paths.Bootstrap); err != nil || st.Size() != 0 {
 		t.Fatal("bootstrap plant not applied", err)
+	}
+	// Custody metadata refuses the emptied input itself. Restore the exact
+	// fixture bytes in place (same inode), then the complete view and input
+	// admission must pass again: the refusal changed nothing but the plant.
+	if v, err := openStationView(roots, &r); err == nil {
+		v.close()
+		t.Fatal("emptied bootstrap admitted by custody view")
+	}
+	f, err := os.OpenFile(paths.Bootstrap, os.O_WRONLY|unix.O_NOFOLLOW, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.Write(stationBootstrapFixture()); err == nil {
+		err = f.Sync()
+	}
+	if closeErr := f.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		t.Fatal("restore planted bootstrap", err)
+	}
+	if err = verifyStationInputs(roots, p, &r); err != nil {
+		t.Fatal("input refusal changed custody", err)
 	}
 	after, err := openStationView(roots, &r)
 	if err != nil {
