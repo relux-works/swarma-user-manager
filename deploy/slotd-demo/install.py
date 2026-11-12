@@ -151,7 +151,14 @@ def main(argv=None):
     config = os.path.dirname(POLICY)
     create_config = not os.path.lexists(config)
     if not create_config:
-        os.close(directory(config))
+        # The installer owns this directory; an existing one must already match
+        # what it would create, including no setuid/setgid/sticky bits.
+        fd = directory(config)
+        try:
+            if stat.S_IMODE(os.fstat(fd).st_mode) != 0o755:
+                raise Refusal("config directory mode mismatch")
+        finally:
+            os.close(fd)
     plans = [planned_file(BINARY, binary, 0o755), planned_file(UNIT, unit, 0o644),
              planned_file(STOP, stop, 0o755), planned_file(POLICY, policy, 0o640)]
     if args.check:

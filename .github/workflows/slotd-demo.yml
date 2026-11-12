@@ -151,7 +151,7 @@ jobs:
           events = [json.loads(line) for line in open(sys.argv[1])]
           assert not any(e.get("Action") in ("skip", "fail") for e in events)
           passed = {e["Test"] for e in events if e.get("Action") == "pass" and "Test" in e}
-          assert {"TestRootRecordStore", "TestRootBootstrapExclusive", "TestRootHomeDeletionRefusals", "TestRootLifecycleRestart", "TestRootEgressLayers", "TestRootServiceRestart", "TestRootGate", "TestRootNFTOwnershipCreation", "TestRootInvalidHomeStartup", "TestRootEnforcementFence", "TestRootPayloadLeaves", "TestRootInstallPackage"} <= passed
+          assert {"TestRootRecordStore", "TestRootBootstrapExclusive", "TestRootHomeDeletionRefusals", "TestRootLifecycleRestart", "TestRootEgressLayers", "TestRootServiceRestart", "TestRootGate", "TestRootNFTOwnershipCreation", "TestRootInvalidHomeStartup", "TestRootEnforcementFence", "TestRootPayloadLeaves", "TestRootInstallPackage", "TestRootInstallRefusals"} <= passed
           assert {"TestRootStationDescriptorCustody", "TestRootStationDestroyPreflight", "TestRootStationMissingJournalState", "TestRootStationCreationBoundaries"} <= passed
           assert {"TestRootStationMetadataRefusals", "TestRootStationMountRefusal"} <= passed
           assert "TestRootStationCrossUIDAccess" in passed

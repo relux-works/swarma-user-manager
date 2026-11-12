@@ -14,7 +14,10 @@ SHA256, and a real protected policy using the exact
 [v1 r4 schema](../../cmd/swarma-slotd-demo/PROTOCOL.md). The
 [example](../../cmd/swarma-slotd-demo/policy.example.json) is inert and must not
 be deployed. Choose actual values for caller, UID range, home root, payload
-path/digest/argv, caps and egress before installation. A digest calculated from
+path/digest/argv, caps and egress before installation. The payload path must be
+a root-owned regular file reached without any symlink component: distribution
+command paths can be symlinks (on ubuntu-26.04 `/usr/bin/true` is one), and the
+daemon refuses them. A digest calculated from
 an untrusted download is not authentication; retain the reviewed source head,
 build provenance and independently verified artifact pin in the host's install
 record. Go version is 1.26.10; build in the isolated Linux environment described
@@ -23,7 +26,7 @@ in the [daemon README](../../cmd/swarma-slotd-demo/README.md#tools-and-verificat
 | Object | Installed location and protection |
 | --- | --- |
 | Daemon and identical fence helper | `/usr/libexec/swarma-slotd-demo`, root:root 0755, one file |
-| Policy | `/etc/swarma-slotd-demo/policy.json`, root:root 0640; parent root:root 0755 |
+| Policy | `/etc/swarma-slotd-demo/policy.json`, root:root 0640; parent root:root exactly 0755 (created if absent) |
 | Daemon unit | `/etc/systemd/system/swarma-slotd-demo.service`, root:root 0644 |
 | Stop command | `/usr/local/sbin/swarma-slotd-demo-stop`, root:root 0755 |
 | State (daemon-created) | `/var/lib/swarma-slotd-demo`, root:root 0700; retained at stop |
@@ -91,6 +94,11 @@ not host qualification. Failures omit policy contents and tool output.
 Symlink/ACL/unprotected inputs, wrong SHA256, invalid policy, wrong group,
 missing prerequisites, conflicting files and unit overrides fail before any
 publication. Package files and their ancestors must also be root protected.
+Target directories must be root:root and not group/world writable; an existing
+`/etc/swarma-slotd-demo` must be exactly root:root 0755. At a target file path,
+any existing object other than the identical root:root file with the exact mode
+and one link (foreign bytes, wrong mode, owner or group, hard link, symlink,
+directory, mask) is refused and left untouched.
 The installer is a first-install/idempotent publisher: existing byte-identical,
 properly protected files are accepted; differing files require a separately
 reviewed offline upgrade plan. Existing masks, runtime/vendor units or drop-ins
@@ -154,9 +162,9 @@ reviewed. To prevent boot starts without deleting resources, the operator can ru
 | Daemon prerequisite check | `slotd-linux --install-check ABS_POLICY MANAGER_GROUP` | Read-only prerequisite verdict; no lifecycle state |
 | systemctl | `systemctl enable --now swarma-slotd-demo.service` (install bench only) | Unit status and daemon journal |
 | Stop | `/usr/local/sbin/swarma-slotd-demo-stop` | Fixed daemon stop; retained lifecycle resources |
-| Hosted root fixture | Workflow `slotd-demo.yml`, `root_tests=true` dispatch on the exact PR head | `TestRootInstallPackage`, actual package/unit/socket/stop controls and negative no-write checks; workflow artifacts |
+| Hosted root fixture | Workflow `slotd-demo.yml`, `root_tests=true` dispatch on the exact PR head | `TestRootInstallPackage` (actual package/unit/socket/stop controls, installed owner/mode/byte contract, idempotent re-runs without republication) and `TestRootInstallRefusals` (target-directory and target-path refusals with no writes); workflow artifacts |
 
-The producer performs syntax, vet and Linux compile-only checks on ivmbp. Tests
+Producers run syntax, vet and Linux compile-only checks without root. Root tests
 run only in the disposable GitHub-hosted Ubuntu workflow with the real root gate.
 Installer tests do not qualify a station, and publishing this draft package does
 not authorize its installation on a host.
