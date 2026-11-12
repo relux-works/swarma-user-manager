@@ -289,7 +289,7 @@ suite drives it through literal v0 payloads):
 | The key file is bound read-only (no `-` prefix: a missing key fails the start); at adoption and again before start it must be a regular file owned by the UID or root and not group/other writable, and every directory from `/` to it must be root-owned, not group/other writable and not a symlink (walked with `O_PATH\|O_NOFOLLOW`). The frozen G2 render declares only `agent_key_file`, no owner for its directories, so root is the only admitted owner | `slotIdentityBinds`, `verifyAdoptedKeyFile`, `verifyKeyAncestry` |
 | One live slot per adopted UID: a create refuses while any stored record of the UID is not destroyed | `adoptedSlotFree` |
 | Retirement never deletes the account: it kills every process of the UID, removes the per-slot home first, then runs the no-residue gate | `releaseAdopted` |
-| No-residue gate, at every adoption and at the end of every retirement: no process of the UID; no file owned by it in the daemon's whole view (`/proc` skipped; the key file and the per-slot home admitted; at(1) jobs are files owned by the UID and are found here); no linger file; no per-user crontab spool entry; no `/etc/crontab` or `/etc/cron.d/*` file that may schedule a job as the account, whoever owns the file: the check is conservative, not a cron parser. A file with any byte outside printable ASCII, tab and newline (NUL, CR, vertical tab, other controls, non-ASCII) refuses; then any line that is neither blank nor a `#` comment and holds the account name, or a decimal number equal to its UID, as a token delimited by spaces, tabs or the line edges refuses, environment lines included. `/etc/cron.d` is opened with `O_DIRECTORY\|O_NOFOLLOW\|O_NONBLOCK` and rechecked by descriptor, so a FIFO, symlink or file in its place refuses without blocking; an unreadable, oversized (1 MiB) or non-regular file and more than 4096 entries refuse; no kernel key charged to the UID in `/proc/key-users` | `adoptedNoResidue`, `systemCronScheduledAs` |
+| No-residue gate, at every adoption and at the end of every retirement: no process of the UID; no file owned by it in the daemon's whole view (`/proc` skipped; the key file and the per-slot home admitted; at(1) jobs are files owned by the UID and are found here); no linger file; no per-user crontab spool entry; no `/etc/crontab` or `/etc/cron.d/*` file that may schedule a job as the account, whoever owns the file: the check is conservative, not a cron parser. A file with any byte outside printable ASCII, tab and newline (NUL, CR, vertical tab, other controls, non-ASCII) refuses; then any line that is neither blank nor a `#` comment and holds the account name, or a decimal number equal to its UID, as a token delimited by spaces, tabs or the line edges refuses, environment lines included. `/etc/cron.d` is opened with `O_DIRECTORY\|O_NOFOLLOW\|O_NONBLOCK` and rechecked by descriptor, so a FIFO, symlink or file in its place refuses without blocking; `/etc/crontab` and every `/etc/cron.d` entry are examined without following a symlink (`AT_SYMLINK_NOFOLLOW`), so a symlink refuses whatever it points to (a file, a directory or nothing), a real subdirectory is skipped (cron does not read it), and a regular file is opened with `O_NOFOLLOW\|O_NONBLOCK` and must be the same regular file (device and inode) by `fstat`, so an entry replaced or removed between the examination and the open refuses; an unreadable, oversized (1 MiB) or non-regular file and more than 4096 entries refuse; no kernel key charged to the UID in `/proc/key-users` | `adoptedNoResidue`, `systemCronScheduledAs` |
 
 A failed gate at retirement leaves the record `failed`, which refuses reuse
 until the residue is removed and `destroy` is retried.
@@ -309,7 +309,10 @@ unterminated quoted env prefix before a job naming the account, NUL after the
 name, a vertical tab inside a time field, an env-looking line naming the
 account as its 7th field, and lines naming the account by name, by UID or as
 `@reboot`, plus an `/etc/crontab` line, each refuse reuse with the record left
-destroyed; a FIFO or a symlink in place of `/etc/cron.d` refuses within 60 s
+destroyed; a symlink in `/etc/cron.d` (dangling, to a directory, to a file
+naming the account, to a clean file) or as `/etc/crontab` (dangling, to a
+clean copy) refuses reuse after a real `/etc/cron.d` subdirectory passes; a
+FIFO or a symlink in place of `/etc/cron.d` refuses within 60 s
 without blocking; a cron.d line planted during a rental fails the retirement
 until removed; a line for another account, a comment and a `MAILTO=` line
 naming the account pass; plants use the never-firing `0 0 31 2 *` and are
@@ -331,7 +334,13 @@ portable `TestAdoptedKeyAncestry`), `m14-adopt-system-cron-user-field-only`
 (the token check reads only the user field: the 6th field, or the 2nd after
 an `@keyword`) by `TestRootAdoptedSystemCron` at the env-looking line that
 names the account as its 7th field (also by the portable
-`TestSystemCronScheduledAs`). The portable job first checks that every patch
+`TestSystemCronScheduledAs`), and `m15-adopt-system-cron-follow-symlink` (the
+entry stat follows a symlink) by `TestRootAdoptedSystemCron` at the dangling
+`/etc/cron.d` symlink it admits (also by the portable
+`TestSystemCronScheduledAs`). The portable `TestSystemCronOpenEntryChanged`
+replaces an examined entry before the open: a symlink to the same file
+(caught only by `O_NOFOLLOW`), another file renamed over it (caught only by
+the device/inode recheck), a FIFO, a directory or removal each refuse. The portable job first checks that every patch
 in `testdata/t19-mutants` applies to the head (`git apply --check`), so a
 stale mutant fails the run instead of failing setup unnoticed.
 
@@ -345,7 +354,9 @@ timer with `User=<account>` is not inspected. The system-crontab check
 over-approximates: a cron line runs as the user named by its 6th field (2nd
 after `@keyword`), and with only printable ASCII, tab and newline admitted
 that field is one of the line's tokens, so every line cron could run as the
-account refuses. It also refuses lines cron never runs as the account: an
+account refuses, provided root does not rearrange `/etc/crontab` or
+`/etc/cron.d` while the check runs: the scan is not an atomic snapshot, and a
+directory replaced after it was enumerated is seen only by the next scan. It also refuses lines cron never runs as the account: an
 environment value naming it (`MAILTO = <account>`, or the complete assignment
 `*= * * * * <account> cmd`), another account's command argument equal to the
 name or UID, and any file with a CR (CRLF line ends), control or non-ASCII

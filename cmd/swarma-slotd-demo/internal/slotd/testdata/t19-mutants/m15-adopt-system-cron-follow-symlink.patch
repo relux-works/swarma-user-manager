@@ -1,0 +1,19 @@
+Adoption narrowing mutant m15 (condition 10, system crontabs, rev184): the
+stat of each /etc/crontab and /etc/cron.d entry follows a symlink (flags 0
+instead of AT_SYMLINK_NOFOLLOW), so a dangling symlink reads as absent and a
+symlink to a directory as a skipped cron.d subdirectory; the no-follow open
+and its same-file recheck stay. Killed by TestRootAdoptedSystemCron (a
+dangling symlink in /etc/cron.d is admitted after the real subdirectory
+neighbour passes).
+
+--- a/cmd/swarma-slotd-demo/internal/slotd/adopted_linux.go
++++ b/cmd/swarma-slotd-demo/internal/slotd/adopted_linux.go
+@@ -349,7 +349,7 @@
+ // through systemCronOpenEntry.
+ func systemCronFileScheduledAs(dirfd int, rel, p, name string, uid uint32, dirEntry bool) error {
+ 	var st unix.Stat_t
+-	err := unix.Fstatat(dirfd, rel, &st, unix.AT_SYMLINK_NOFOLLOW)
++	err := unix.Fstatat(dirfd, rel, &st, 0)
+ 	if errors.Is(err, unix.ENOENT) {
+ 		return nil // absent or vanished: no schedule
+ 	}

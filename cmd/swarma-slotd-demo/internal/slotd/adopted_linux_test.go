@@ -117,12 +117,16 @@ func TestAdoptedCallerOverlap(t *testing.T) {
 // "*= * * * * name cmd" cron does not run, or another user's command
 // argument naming the account as a token). Passing neighbours: comments naming the
 // account (also indented), environment lines whose value merely contains
-// the name, other users, prefix-sharing names and numbers, a cron.d
-// subdirectory, and the files after each plant is removed; a symlinked
-// cron.d file is followed. Refused with another error and without blocking
-// (5 s bound): a FIFO in cron.d, and a FIFO, a symlink or a regular file in
-// place of cron.d; also an oversized file and, when not root, an unreadable
-// file or directory. The rule over-approximates cron; it is not a parser.
+// the name, other users, prefix-sharing names and numbers, a real cron.d
+// subdirectory, and the files after each plant is removed. A symlink as
+// the crontab or as a cron.d entry refuses with errSystemCronSymlink
+// whatever it points to (rev184 witnesses: nothing, a directory, a file
+// naming the account, a clean file, the clean cron.d/neighbours by a
+// relative link).
+// Refused with another error and without blocking (5 s bound): a FIFO in
+// cron.d, and a FIFO, a symlink or a regular file in place of cron.d; also
+// an oversized file and, when not root, an unreadable file or directory.
+// The rule over-approximates cron; it is not a parser.
 func TestSystemCronScheduledAs(t *testing.T) {
 	const name, uid = "swarma-agent", uint32(61000)
 	etc := t.TempDir()
@@ -208,16 +212,44 @@ func TestSystemCronScheduledAs(t *testing.T) {
 		remove("cron.d/job")
 	}
 	scheduled("lines removed", nil)
-	// A symlinked cron.d entry is read through, as cron reads it.
-	target := filepath.Join(t.TempDir(), "job")
-	if err := os.WriteFile(target, []byte("0 0 31 2 * swarma-agent /bin/true\n"), 0644); err != nil {
+	// rev184: a symlink as the crontab or as a cron.d entry refuses
+	// whatever it points to; it is never followed. The regular files and
+	// the real subdirectory above are the passing neighbours, and removing
+	// each link restores the pass.
+	targets := t.TempDir()
+	account := filepath.Join(targets, "account")
+	if err := os.WriteFile(account, []byte("0 0 31 2 * swarma-agent /bin/true\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(target, filepath.Join(cronD, "linked")); err != nil {
+	clean := filepath.Join(targets, "clean")
+	if err := os.WriteFile(clean, []byte(neighbours), 0644); err != nil {
 		t.Fatal(err)
 	}
-	scheduled("symlinked cron.d file", errSystemCronScheduled)
-	remove("cron.d/linked")
+	if err := os.Mkdir(filepath.Join(targets, "dir"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	for _, link := range []struct{ step, target, crontabTarget string }{
+		{"dangling symlink", filepath.Join(targets, "missing"), filepath.Join(targets, "missing")},
+		{"symlink to a directory", filepath.Join(targets, "dir"), filepath.Join(targets, "dir")},
+		{"symlink to a file naming the account", account, account},
+		{"symlink to a clean file", clean, clean},
+		{"relative symlink to the clean cron.d/neighbours", "neighbours", "cron.d/neighbours"},
+	} {
+		if err := os.Symlink(link.target, filepath.Join(cronD, "job")); err != nil {
+			t.Fatal(err)
+		}
+		scheduled("cron.d "+link.step, errSystemCronSymlink)
+		remove("cron.d/job")
+		scheduled("cron.d "+link.step+" removed", nil)
+		remove("crontab")
+		if err := os.Symlink(link.crontabTarget, filepath.Join(etc, "crontab")); err != nil {
+			t.Fatal(err)
+		}
+		scheduled("crontab "+link.step, errSystemCronSymlink)
+		remove("crontab")
+		write("crontab", neighbours)
+		scheduled("crontab "+link.step+" removed", nil)
+	}
 	// Unknowns refuse.
 	write("cron.d/bad", strings.Repeat("#", systemCronFileLimit+1))
 	scheduled("oversized file", errors.New("too large"))
@@ -273,6 +305,90 @@ func TestSystemCronScheduledAs(t *testing.T) {
 		t.Fatal(err)
 	}
 	scheduled("unreadable crontab", errors.New("permission denied"))
+}
+
+// Proves the stat-to-open recheck of systemCronOpenEntry (rev184): a
+// cron.d entry examined as a regular file and then, before the open,
+// replaced by a symlink to that same file (only O_NOFOLLOW catches it), by a
+// symlink to another file, by another regular file renamed over it (only
+// the device/inode recheck catches it), by a FIFO (without blocking, 5 s
+// bound) or by a directory, or removed, refuses as changed. The unchanged
+// file, and a file rewritten in place (same inode), open: the valid
+// neighbours, checked first.
+func TestSystemCronOpenEntryChanged(t *testing.T) {
+	dir := t.TempDir()
+	dfd, err := unix.Open(dir, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unix.Close(dfd)
+	job := filepath.Join(dir, "job")
+	open := func(step string, replace func(), wantOpen bool) {
+		t.Helper()
+		if err := os.RemoveAll(job); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(job, []byte("0 0 31 2 * root /bin/true\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		var st unix.Stat_t
+		if err := unix.Fstatat(dfd, "job", &st, unix.AT_SYMLINK_NOFOLLOW); err != nil {
+			t.Fatal(err)
+		}
+		replace()
+		done := make(chan error, 1)
+		go func() {
+			f, err := systemCronOpenEntry(dfd, "job", job, &st)
+			if f != nil {
+				f.Close()
+			}
+			done <- err
+		}()
+		select {
+		case err = <-done:
+		case <-time.After(5 * time.Second):
+			if w, oerr := unix.Open(job, unix.O_WRONLY|unix.O_NONBLOCK|unix.O_CLOEXEC, 0); oerr == nil {
+				unix.Close(w)
+			}
+			t.Fatalf("%s: the open blocked for 5 s instead of refusing", step)
+		}
+		if wantOpen && err != nil {
+			t.Fatalf("%s: valid neighbour refused: %v", step, err)
+		}
+		if !wantOpen && (err == nil || !strings.Contains(err.Error(), "changed after it was examined")) {
+			t.Fatalf("%s: %v, want the changed-entry refusal", step, err)
+		}
+	}
+	must := func(err error) {
+		t.Helper()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	open("unchanged", func() {}, true)
+	open("rewritten in place", func() { must(os.WriteFile(job, []byte("# other\n"), 0644)) }, true)
+	open("symlink to the same file", func() {
+		must(os.Rename(job, job+".real"))
+		must(os.Symlink(job+".real", job))
+	}, false)
+	open("symlink to another file", func() {
+		must(os.WriteFile(job+".other", []byte("0 0 31 2 * root /bin/true\n"), 0644))
+		must(os.Remove(job))
+		must(os.Symlink(job+".other", job))
+	}, false)
+	open("another regular file renamed over it", func() {
+		must(os.WriteFile(job+".new", []byte("0 0 31 2 * root /bin/true\n"), 0644))
+		must(os.Rename(job+".new", job))
+	}, false)
+	open("FIFO", func() {
+		must(os.Remove(job))
+		must(unix.Mkfifo(job, 0644))
+	}, false)
+	open("directory", func() {
+		must(os.Remove(job))
+		must(os.Mkdir(job, 0755))
+	}, false)
+	open("removed", func() { must(os.Remove(job)) }, false)
 }
 
 // Proves the key-path rule portably: a root-owned key under root-owned,

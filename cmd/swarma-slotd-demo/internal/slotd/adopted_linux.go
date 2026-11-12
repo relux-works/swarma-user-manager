@@ -295,11 +295,13 @@ var errSystemCronScheduled = errors.New("adopted account system cron entry remai
 // <etc>/cron.d may schedule a job as the account. It does not emulate
 // cron's parser; it over-approximates every line cron could run as the
 // account (see systemCronContent), so false positives refuse too. The file
-// owner is irrelevant. A missing crontab or cron.d is no entry and a
+// owner is irrelevant. A missing crontab or cron.d is no entry and a real
 // subdirectory of cron.d is skipped (cron does not read it). cron.d is
 // opened as a directory, without following a symlink and without blocking,
 // so a FIFO, symlink or file in its place refuses; every unreadable,
-// oversized or non-regular entry refuses (fail closed).
+// oversized, non-regular or symlink entry refuses (fail closed). The check
+// is not an atomic snapshot: it covers a namespace that root does not
+// rearrange while it runs.
 func systemCronScheduledAs(etc, name string, uid uint32) error {
 	crontab := path.Join(etc, "crontab")
 	if err := systemCronFileScheduledAs(unix.AT_FDCWD, crontab, crontab, name, uid, false); err != nil {
@@ -334,34 +336,42 @@ func systemCronScheduledAs(etc, name string, uid uint32) error {
 	return nil
 }
 
+// errSystemCronSymlink is the refusal for a system-crontab path that is a
+// symlink, whatever it points to (a file, a directory or nothing).
+var errSystemCronSymlink = errors.New("a symlink, refused whatever it points to")
+
 // systemCronFileScheduledAs reads one system crontab, rel under dirfd (p
-// names it in errors), following a symlink as cron does and without
-// blocking on a FIFO, and applies systemCronContent. A directory inside
-// cron.d (dirEntry) is not read by cron and is skipped.
+// names it in errors), and applies systemCronContent. The entry itself is
+// examined without following a symlink: a symlink refuses (errSystemCronSymlink)
+// whatever its target, dangling or a directory included. A missing or
+// vanished entry is no schedule, and a real directory inside cron.d
+// (dirEntry) is not read by cron and is skipped. A regular file is read
+// through systemCronOpenEntry.
 func systemCronFileScheduledAs(dirfd int, rel, p, name string, uid uint32, dirEntry bool) error {
 	var st unix.Stat_t
-	err := unix.Fstatat(dirfd, rel, &st, 0)
+	err := unix.Fstatat(dirfd, rel, &st, unix.AT_SYMLINK_NOFOLLOW)
 	if errors.Is(err, unix.ENOENT) {
-		return nil // absent, vanished or dangling: no schedule
+		return nil // absent or vanished: no schedule
 	}
 	if err != nil {
 		return fmt.Errorf("system cron %s: %w", p, err)
 	}
-	if dirEntry && st.Mode&unix.S_IFMT == unix.S_IFDIR {
-		return nil
+	switch st.Mode & unix.S_IFMT {
+	case unix.S_IFLNK:
+		return fmt.Errorf("system cron %s: %w", p, errSystemCronSymlink)
+	case unix.S_IFDIR:
+		if dirEntry {
+			return nil
+		}
 	}
 	if st.Mode&unix.S_IFMT != unix.S_IFREG {
 		return fmt.Errorf("system cron %s: not a regular file", p)
 	}
-	fd, err := unix.Openat(dirfd, rel, unix.O_RDONLY|unix.O_NONBLOCK|unix.O_CLOEXEC, 0)
+	f, err := systemCronOpenEntry(dirfd, rel, p, &st)
 	if err != nil {
-		return fmt.Errorf("system cron %s: %w", p, err)
+		return err
 	}
-	f := os.NewFile(uintptr(fd), p)
 	defer f.Close()
-	if err = unix.Fstat(fd, &st); err != nil || st.Mode&unix.S_IFMT != unix.S_IFREG {
-		return errors.Join(err, fmt.Errorf("system cron %s: not a regular file", p))
-	}
 	b, err := io.ReadAll(io.LimitReader(f, systemCronFileLimit+1))
 	if err != nil {
 		return fmt.Errorf("system cron %s: %w", p, err)
@@ -373,6 +383,25 @@ func systemCronFileScheduledAs(dirfd int, rel, p, name string, uid uint32, dirEn
 		return fmt.Errorf("system cron %s: %w", p, err)
 	}
 	return nil
+}
+
+// systemCronOpenEntry opens rel under dirfd, the regular file seen as want
+// by a no-follow stat, without following a symlink and without blocking on
+// a FIFO, and returns it only when the descriptor is that same regular file
+// (device and inode). An entry replaced between the stat and the open (a
+// symlink, a FIFO, a directory, another file) or removed refuses.
+func systemCronOpenEntry(dirfd int, rel, p string, want *unix.Stat_t) (*os.File, error) {
+	fd, err := unix.Openat(dirfd, rel, unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_NONBLOCK|unix.O_CLOEXEC, 0)
+	if err != nil {
+		return nil, fmt.Errorf("system cron %s: changed after it was examined: %w", p, err)
+	}
+	f := os.NewFile(uintptr(fd), p)
+	var st unix.Stat_t
+	if err = unix.Fstat(fd, &st); err != nil || st.Mode&unix.S_IFMT != unix.S_IFREG || st.Dev != want.Dev || st.Ino != want.Ino {
+		f.Close()
+		return nil, errors.Join(err, fmt.Errorf("system cron %s: changed after it was examined: not the same regular file", p))
+	}
+	return f, nil
 }
 
 // systemCronContent is the conservative content rule for one system

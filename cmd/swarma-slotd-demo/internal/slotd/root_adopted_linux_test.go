@@ -583,15 +583,19 @@ func writeRootFile(t *testing.T, p string, b []byte) {
 // the account name, a vertical tab inside a time field), an env-looking line
 // naming the account as its 7th field (the m14 witness), and job lines
 // naming the account, its UID or "@reboot account"; an /etc/crontab line
-// refuses the same way; a FIFO or a symlink in place of /etc/cron.d refuses
-// within 60 s instead of blocking; a line planted during a rental fails the
-// retirement with the record left failed. Removing each plant restores the
-// clean neighbour and the account is never changed. Valid neighbours that
-// must pass: a comment naming the account, an environment line whose value
-// contains the name, root's line and another account's line. Every plant,
-// the rev183 witnesses included, schedules February 31 (never fires) and is
-// removed (cron.d) or restored byte-for-byte (crontab, the cron.d directory)
-// at cleanup.
+// refuses the same way; a symlink in /etc/cron.d or as /etc/crontab refuses
+// whatever it points to (rev184: dangling first, the m15 witness, then a
+// directory, a file naming the account and a clean file) after a real
+// /etc/cron.d subdirectory passes; a FIFO or a symlink in place of
+// /etc/cron.d refuses within 60 s instead of blocking; a line planted
+// during a rental fails the retirement with the record left failed.
+// Removing each plant restores the clean neighbour and the account is never
+// changed. Valid neighbours that must pass: a comment naming the account,
+// an environment line whose value contains the name, root's line and
+// another account's line. Every plant, the rev183 witnesses included,
+// schedules February 31 (never fires) and is removed (cron.d, links, the
+// subdirectory) or restored byte-for-byte (crontab as a regular file, the
+// cron.d directory) at cleanup.
 func TestRootAdoptedSystemCron(t *testing.T) {
 	a, _ := newAdoptedEngine(t)
 	name, uid := a.h.Name, strconv.FormatUint(uint64(a.h.UID), 10)
@@ -632,6 +636,43 @@ func TestRootAdoptedSystemCron(t *testing.T) {
 		t.Fatal(err)
 	}
 	a.gate("cron.d line removed", "")
+
+	// rev184: a symlink entry in /etc/cron.d refuses reuse whatever it
+	// points to; a real subdirectory (cron does not read it) passes first.
+	sub := plant + "-sub"
+	t.Cleanup(func() { _ = os.RemoveAll(sub) })
+	if err := os.Mkdir(sub, 0755); err != nil {
+		t.Fatal(err)
+	}
+	a.gate("real /etc/cron.d subdirectory", "")
+	targets := t.TempDir()
+	if err := os.WriteFile(filepath.Join(targets, "account"), []byte("0 0 31 2 * "+name+" /bin/true\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(targets, "clean"), []byte(neighbours), 0644); err != nil {
+		t.Fatal(err)
+	}
+	link := plant + "-link"
+	t.Cleanup(func() { _ = os.Remove(link) })
+	for _, c := range []struct{ step, target string }{
+		{"dangling symlink", filepath.Join(targets, "missing")},
+		{"symlink to a directory", targets},
+		{"symlink to a file naming the account", filepath.Join(targets, "account")},
+		{"symlink to a clean file", filepath.Join(targets, "clean")},
+	} {
+		if err := os.Symlink(c.target, link); err != nil {
+			t.Fatal(err)
+		}
+		a.gate("/etc/cron.d "+c.step, errSystemCronSymlink.Error())
+		a.expect("reuse over /etc/cron.d "+c.step, "create", internalError)
+		if a.r.Binding.State != destroyed {
+			t.Fatalf("refused reuse changed the record: %s", a.r.Binding.State)
+		}
+		if err := os.Remove(link); err != nil {
+			t.Fatal(err)
+		}
+	}
+	a.gate("cron.d symlinks removed", "")
 
 	// /etc/cron.d replaced by a FIFO (rev183: no blocking open) or by a
 	// symlink to the real directory: the gate refuses within 60 s and
@@ -700,6 +741,40 @@ func TestRootAdoptedSystemCron(t *testing.T) {
 	}
 	writeRootFile(t, "/etc/crontab", orig)
 	a.gate("crontab restored", "")
+
+	// rev184: /etc/crontab replaced by a dangling symlink or by a symlink to
+	// a clean copy of itself refuses reuse; the regular file is restored
+	// (and at cleanup, before the bytes are rewritten).
+	clean := "/etc/crontab-slotd-adopt-" + t19Nonce()[:8]
+	writeRootFile(t, clean, orig)
+	t.Cleanup(func() {
+		if st, err := os.Lstat("/etc/crontab"); err == nil && st.Mode()&os.ModeSymlink != 0 {
+			_ = os.Remove("/etc/crontab")
+		}
+	})
+	for _, c := range []struct{ step, target string }{
+		{"dangling symlink as /etc/crontab", clean + "-missing"},
+		{"symlink to a clean copy as /etc/crontab", clean},
+	} {
+		if err := os.Remove("/etc/crontab"); err != nil && !errors.Is(err, os.ErrNotExist) {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(c.target, "/etc/crontab"); err != nil {
+			t.Fatal(err)
+		}
+		a.gate(c.step, errSystemCronSymlink.Error())
+		a.expect("reuse over "+c.step, "create", internalError)
+		if a.r.Binding.State != destroyed {
+			t.Fatalf("refused reuse changed the record: %s", a.r.Binding.State)
+		}
+	}
+	if err := os.Remove("/etc/crontab"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile("/etc/crontab", orig, 0644); err != nil {
+		t.Fatal(err)
+	}
+	a.gate("regular /etc/crontab restored", "")
 
 	// A line planted during a rental fails the retirement, forbids reuse
 	// until removed, and a retry then retires cleanly.

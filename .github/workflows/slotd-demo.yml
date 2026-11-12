@@ -16,7 +16,7 @@ on:
         required: false
         type: choice
         default: none
-        options: [none, m1-run-bind, m2-skip-landlock, m3-no-family-filter, m5-no-syscall-archs, m8-adopt-any-second-group, m9-adopt-retire-deletes, m10-adopt-skip-residue-gate, m11-adopt-skip-second-slot, m12-adopt-skip-system-cron, m13-adopt-skip-key-ancestry, m14-adopt-system-cron-user-field-only]
+        options: [none, m1-run-bind, m2-skip-landlock, m3-no-family-filter, m5-no-syscall-archs, m8-adopt-any-second-group, m9-adopt-retire-deletes, m10-adopt-skip-residue-gate, m11-adopt-skip-second-slot, m12-adopt-skip-system-cron, m13-adopt-skip-key-ancestry, m14-adopt-system-cron-user-field-only, m15-adopt-system-cron-follow-symlink]
 
 permissions:
   contents: read
@@ -171,7 +171,7 @@ jobs:
               m8-*) run_filter='^TestAdoptedGroupSet$' ;;
               m9-*|m10-*) run_filter='^TestRootAdopted' ;;
               m11-*) run_filter='^TestAdoptedSecondLiveSlot$' ;;
-              m12-*|m14-*) run_filter='^TestRootAdoptedSystemCron$' ;;
+              m12-*|m14-*|m15-*) run_filter='^TestRootAdoptedSystemCron$' ;;
               m13-*) run_filter='^TestRootAdoptedKeyAncestry$' ;;
               *) run_filter='^TestRootT19' ;;
             esac
@@ -202,7 +202,7 @@ jobs:
           events = [json.loads(line) for line in open(sys.argv[1])]
           mutant, status = sys.argv[2], sys.argv[3]
           if mutant != "none":
-              killers = {"m1-run-bind": "TestRootT19SlotConfinement/T19.4-plants", "m2-skip-landlock": "TestRootT19SlotConfinement/T19.3-abstract", "m3-no-family-filter": "TestRootT19SlotConfinement/T19.8-families", "m5-no-syscall-archs": "TestRootT19AlternateABI", "m8-adopt-any-second-group": "TestAdoptedGroupSet", "m9-adopt-retire-deletes": "TestRootAdoptedRetirement", "m10-adopt-skip-residue-gate": "TestRootAdoptedRetirement", "m11-adopt-skip-second-slot": "TestAdoptedSecondLiveSlot", "m12-adopt-skip-system-cron": "TestRootAdoptedSystemCron", "m13-adopt-skip-key-ancestry": "TestRootAdoptedKeyAncestry", "m14-adopt-system-cron-user-field-only": "TestRootAdoptedSystemCron"}
+              killers = {"m1-run-bind": "TestRootT19SlotConfinement/T19.4-plants", "m2-skip-landlock": "TestRootT19SlotConfinement/T19.3-abstract", "m3-no-family-filter": "TestRootT19SlotConfinement/T19.8-families", "m5-no-syscall-archs": "TestRootT19AlternateABI", "m8-adopt-any-second-group": "TestAdoptedGroupSet", "m9-adopt-retire-deletes": "TestRootAdoptedRetirement", "m10-adopt-skip-residue-gate": "TestRootAdoptedRetirement", "m11-adopt-skip-second-slot": "TestAdoptedSecondLiveSlot", "m12-adopt-skip-system-cron": "TestRootAdoptedSystemCron", "m13-adopt-skip-key-ancestry": "TestRootAdoptedKeyAncestry", "m14-adopt-system-cron-user-field-only": "TestRootAdoptedSystemCron", "m15-adopt-system-cron-follow-symlink": "TestRootAdoptedSystemCron"}
               failed = {e["Test"] for e in events if e.get("Action") == "fail" and "Test" in e}
               assert killers[mutant] in failed, ("mutant survived", mutant, sorted(failed))
               print("mutant", mutant, "killed by", killers[mutant])
