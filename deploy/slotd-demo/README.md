@@ -140,11 +140,17 @@ change to this package. After `daemon-reload` the installer reads back
 SourcePath, Names exactly `swarma-slotd-demo.service`, UnitFileState
 `disabled`, NeedDaemonReload `no` and an inactive or failed ActiveState. A
 mismatch, for example a drop-in that a generator only creates at reload, is
-refused with `loaded daemon unit differs from the reviewed package`. The files
-already published are retained and nothing is started or enabled. The next run
-then refuses the generated drop-in before publication. Remove the conflicting
-configuration, reload, and rerun the same package; the rerun is idempotent and
-verifies again.
+refused with `loaded daemon unit differs from the reviewed package`. Because
+`daemon-reload` reruns every generator, a generated dependency (for example a
+`swarma-slotd-demo.service.wants` directory) can also first appear then, and it
+changes none of those properties. So after the readback the installer repeats
+the complete namespace scan above over the static load path, which includes
+the generator output directories, and the manager's `UnitPath` as read after
+this reload; an entry is refused with `additional or overridden daemon unit
+refused after reload`. In both cases the files already published are retained
+and nothing is started or enabled. The next run then refuses the generated
+entry before publication. Remove the conflicting configuration, reload, and
+rerun the same package; the rerun is idempotent and verifies again.
 
 Not covered: manager-wide defaults (`system.conf`, `system.conf.d`,
 `DefaultEnvironment=`, the manager environment) and slice configuration still
@@ -210,7 +216,7 @@ reviewed. To prevent boot starts without deleting resources, the operator can ru
 | Daemon prerequisite check | `slotd-linux --install-check ABS_POLICY MANAGER_GROUP` | Read-only prerequisite verdict; no lifecycle state |
 | systemctl | `systemctl enable --now swarma-slotd-demo.service` (install bench only) | Unit status and daemon journal |
 | Stop | `/usr/local/sbin/swarma-slotd-demo-stop` | Fixed daemon stop; retained lifecycle resources |
-| Hosted root fixture | Workflow `slotd-demo.yml`, `root_tests=true` dispatch on the exact PR head | `TestRootInstallPackage` (actual package/unit/socket/stop controls, installed owner/mode/byte contract, systemd's loaded-unit report, idempotent re-runs without republication), `TestRootInstallRefusals` (target-directory and target-path refusals with no writes), `TestRootInstallUnitNamespace` (load-path, prefix, type-wide, control, generator, alias and dependency refusals in both modes, unrelated-name neighbour, generator drop-in refused by the post-reload readback, two narrowing mutants) and `TestRootInstallConfigInventory` (extra config entries of each class in both modes, identical-policy neighbour, symlink-class mutant); workflow artifacts |
+| Hosted root fixture | Workflow `slotd-demo.yml`, `root_tests=true` dispatch on the exact PR head | `TestRootInstallPackage` (actual package/unit/socket/stop controls, installed owner/mode/byte contract, systemd's loaded-unit report, idempotent re-runs without republication), `TestRootInstallRefusals` (target-directory and target-path refusals with no writes), `TestRootInstallUnitNamespace` (load-path, prefix, type-wide, control, generator, alias and dependency refusals in both modes, unrelated-name neighbour, generator drop-in refused by the post-reload readback, generated `.wants`/`.requires`/`.upholds`, dash-prefix and reverse dependencies refused by the post-reload scan with an unrelated-generator neighbour, four narrowing mutants) and `TestRootInstallConfigInventory` (extra config entries of each class in both modes, identical-policy neighbour, symlink-class mutant); workflow artifacts |
 
 Producers run syntax, vet and Linux compile-only checks without root. Root tests
 run only in the disposable GitHub-hosted Ubuntu workflow with the real root gate.

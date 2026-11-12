@@ -139,6 +139,41 @@ func (f *installFixture) refuseBoth(t *testing.T, name, want string, setup func(
 	})
 }
 
+// mutantApplyArgs is mutantCheckArgs without --check, for mutants of what only
+// apply mode runs (the post-reload checks).
+func (f *installFixture) mutantApplyArgs(t *testing.T, name, old, replacement string) []string {
+	t.Helper()
+	args := f.mutantCheckArgs(t, name, old, replacement)
+	return args[:len(args)-1]
+}
+
+const fixtureGenerator = "/etc/systemd/system-generators/slotd-fixture-generator"
+
+// plantGenerator installs a system generator that every daemon-reload runs. At
+// cleanup it is removed and systemd reloaded, so its output in
+// /run/systemd/generator cannot outlive the subtest.
+func plantGenerator(t *testing.T, body string) {
+	t.Helper()
+	t.Cleanup(func() {
+		if _, err := runFixedTool(context.Background(), toolInvocation{Path: systemctlPath, Args: []string{"--system", "--no-ask-password", "daemon-reload"}}); err != nil {
+			t.Error(err)
+		}
+	})
+	plantFile(t, fixtureGenerator, []byte("#!/bin/sh\nset -eu\n"+body), 0755)
+}
+
+// unitDependencies is systemd's own report of one dependency property of the
+// loaded unit, such as Wants or WantedBy.
+func unitDependencies(t *testing.T, property string) []string {
+	t.Helper()
+	b, err := runFixedTool(context.Background(), toolInvocation{Path: systemctlPath, Args: []string{"--system", "--no-ask-password", "show",
+		"--property=" + property, "--value", "--", installUnitName}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return strings.Fields(string(b))
+}
+
 // mutantCheckArgs stages, beside the real package files, a copy of the packaged
 // installer with exactly one narrowing substitution, and returns --check args
 // that run it instead of the real installer.
@@ -171,8 +206,14 @@ const overrideDropIn = "[Service]\nExecStart=\nExecStart=/usr/bin/true\n"
 // fragment and no drop-in. A drop-in that a generator creates only at
 // daemon-reload is refused by the post-reload readback (published files are
 // retained, never started or enabled), then by the pre-publication scan, and an
-// idempotent rerun verifies the unit once the generator is gone. Narrowing
-// mutants that omit one prefix or the type-wide scope admit the planted case.
+// idempotent rerun verifies the unit once the generator is gone. A dependency
+// a generator creates only at that reload (the unit's own .wants, .requires
+// and .upholds, a dash-prefix .wants and a reverse .wants link) is loaded by
+// systemd yet refused by the post-reload namespace scan, with the same
+// retained-files, no-start recovery; a generator whose dependency directories
+// systemd does not merge into this unit is accepted. Narrowing mutants that
+// omit one prefix or the type-wide scope, or whose post-reload scan omits the
+// dependency directories or only their suffixes, admit the planted case.
 // Hosted runner only; systemd semantics are those of its systemd version.
 func TestRootInstallUnitNamespace(t *testing.T) {
 	f := newInstallFixture(t)
@@ -299,6 +340,128 @@ printf '[Service]\nEnvironment=SLOTD_GENERATED_FIXTURE=1\n' > "$1/swarma-slotd-d
 		uninstallPackage(t)
 		f.absent(t)
 	})
+
+	// A generator can equally add a dependency during the installer's own
+	// daemon-reload. That changes no property the readback compares, so the
+	// post-reload namespace scan is what refuses it.
+	const foreign = "slotd-fixture-foreign.service"
+	const afterReload = "additional or overridden daemon unit refused after reload; not started or enabled"
+	dependencyGenerator := func(dir, entry, target string) string {
+		return `/usr/bin/mkdir -p "$1/` + dir + `"
+printf '[Unit]\nDescription=slotd fixture inert dependency\n\n[Service]\nType=oneshot\nExecStart=/bin/false\n' > "$1/` + foreign + `"
+/usr/bin/ln -s "` + target + `" "$1/` + dir + `/` + entry + `"
+`
+	}
+	type dependencyCase struct{ name, dir, entry, target, property, want string }
+	forward := func(name, dir, property string) dependencyCase {
+		return dependencyCase{name, dir, foreign, "$1/" + foreign, property, afterReload}
+	}
+	dependencyCases := []dependencyCase{
+		forward("wants", installUnitName+".wants", "Wants"),
+		forward("requires", installUnitName+".requires", "Requires"),
+		forward("upholds", installUnitName+".upholds", "Upholds"),
+		// Dash-prefix dependency directories apply to swarma-slotd-*.service only.
+		forward("prefix_wants", "swarma-slotd-.service.wants", "Wants"),
+		// A reverse link pulls the unit in; the readback may see its enablement
+		// state first, so either post-reload refusal is accepted here.
+		{"reverse_wants", foreign + ".wants", installUnitName, installUnitPath, "WantedBy", "; not started or enabled"},
+	}
+	t.Run("generated_dependency_refused_after_reload", func(t *testing.T) {
+		for _, c := range dependencyCases {
+			t.Run(c.name, func(t *testing.T) {
+				f.absent(t)
+				plantGenerator(t, dependencyGenerator(c.dir, c.entry, c.target))
+				f.invoke(t, f.checkArgs, "no files published", true)
+				f.invoke(t, f.baseArgs, "slotd install refused: "+c.want, false)
+				// systemd itself loaded the generated dependency the installer refused.
+				if deps := unitDependencies(t, c.property); !slices.Contains(deps, foreign) {
+					t.Fatalf("systemd did not load the generated %s dependency: %q", c.property, deps)
+				}
+				if props := loadedUnitProperties(t); props["ActiveState"] != "inactive" || props["FragmentPath"] != installUnitPath {
+					t.Fatalf("refused unit was started or replaced: %q", props)
+				}
+				installed := f.requireInstalled(t)
+				f.invoke(t, f.checkArgs, "slotd install refused: "+refused, false)
+				requireUnchanged(t, installed, "refused rerun")
+				if err := os.Remove(fixtureGenerator); err != nil {
+					t.Fatal(err)
+				}
+				daemonReload(t)
+				f.invoke(t, f.baseArgs, "daemon not started or enabled", true)
+				requireUnchanged(t, installed, "rerun without generator")
+				requireLoadedReviewed(t)
+				if deps := unitDependencies(t, c.property); slices.Contains(deps, foreign) {
+					t.Fatalf("generated %s dependency outlived its generator: %q", c.property, deps)
+				}
+				uninstallPackage(t)
+				f.absent(t)
+			})
+		}
+	})
+
+	// Valid neighbour: a generator whose dependency directories systemd does
+	// not merge into this unit runs at the installer's reload, and the install
+	// succeeds with the reviewed unit and no added dependency.
+	t.Run("unrelated_generated_dependencies_accepted", func(t *testing.T) {
+		f.absent(t)
+		plantGenerator(t, dependencyGenerator("swarma-slotd-demo-.service.wants", foreign, "$1/"+foreign)+
+			`/usr/bin/mkdir -p "$1/swarma.service.requires"
+/usr/bin/ln -s "$1/`+foreign+`" "$1/swarma.service.requires/`+foreign+`"
+`)
+		f.invoke(t, f.checkArgs, "no files published", true)
+		f.invoke(t, f.baseArgs, "daemon not started or enabled", true)
+		for _, path := range []string{"/run/systemd/generator/swarma-slotd-demo-.service.wants/" + foreign, "/run/systemd/generator/swarma.service.requires/" + foreign} {
+			if _, err := os.Lstat(path); err != nil {
+				t.Fatalf("neighbour generator did not run at the installer's reload: %v", err)
+			}
+		}
+		f.requireInstalled(t)
+		requireLoadedReviewed(t)
+		requireUnitDisabled(t)
+		for _, property := range []string{"Wants", "Requires", "Upholds", "WantedBy"} {
+			if deps := unitDependencies(t, property); slices.Contains(deps, foreign) {
+				t.Fatalf("unrelated generator changed the unit's %s: %q", property, deps)
+			}
+		}
+		if err := os.Remove(fixtureGenerator); err != nil {
+			t.Fatal(err)
+		}
+		uninstallPackage(t)
+		f.absent(t)
+	})
+
+	// Narrowing mutants of the post-reload scan (apply mode only). Each keeps
+	// the loaded-unit readback, so a generated drop-in is still refused; the
+	// named generated-dependency case is refused by the real installer above
+	// and admitted by the mutant here, while systemd reports the dependency.
+	const postReload = `unit_namespace(LOAD_PATHS + tuple(path for path in manager_unit_paths() if path not in LOAD_PATHS))`
+	for _, m := range []struct {
+		name, replacement string
+		killer            dependencyCase
+	}{
+		// Re-checks unit files and .d drop-ins, but no dependency directory.
+		{"postreload_dependency_dirs_omitted", `if any(n == UNIT_NAME or n in {s + ".d" for s in UNIT_SCOPES} for p in LOAD_PATHS + tuple(manager_unit_paths()) if os.path.isdir(p) for n in os.listdir(p) if os.path.join(p, n) != UNIT): raise Refusal("additional or overridden daemon unit refused")`,
+			dependencyCases[0]},
+		// Drops the dependency suffixes; the own-name catch-all still refuses
+		// swarma-slotd-demo.service.wants, so the dash-prefix case kills it.
+		{"postreload_dependency_suffixes_dropped", `globals()["DEPENDENCY_DIRS"] = (); ` + postReload, dependencyCases[3]},
+	} {
+		t.Run("mutant_"+m.name+"_killed_by_generated_dependency_refused_after_reload_"+m.killer.name, func(t *testing.T) {
+			f.absent(t)
+			mutant := f.mutantApplyArgs(t, m.name, postReload, m.replacement)
+			plantGenerator(t, dependencyGenerator(m.killer.dir, m.killer.entry, m.killer.target))
+			f.invoke(t, mutant, "daemon not started or enabled", true)
+			if deps := unitDependencies(t, m.killer.property); !slices.Contains(deps, foreign) {
+				t.Fatalf("mutant admission is vacuous; systemd has no generated %s dependency: %q", m.killer.property, deps)
+			}
+			f.requireInstalled(t)
+			if err := os.Remove(fixtureGenerator); err != nil {
+				t.Fatal(err)
+			}
+			uninstallPackage(t)
+			f.absent(t)
+		})
+	}
 }
 
 // Proves an existing exact root:root 0755 config directory is inventoried

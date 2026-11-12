@@ -211,6 +211,20 @@ def loaded_unit():
         raise Refusal("loaded daemon unit differs from the reviewed package; not started or enabled")
 
 
+def reloaded_unit():
+    """daemon-reload reruns every generator, so a drop-in, dependency directory
+    or unit can first exist now. A generated dependency changes none of the
+    loaded properties above, so after reading them back, re-establish the
+    complete refused namespace: the static load path, which includes the
+    generator output directories, and the manager's UnitPath as read after this
+    reload. A refusal here keeps the published files; nothing is started or enabled."""
+    loaded_unit()
+    try:
+        unit_namespace(LOAD_PATHS + tuple(path for path in manager_unit_paths() if path not in LOAD_PATHS))
+    except Refusal as exc:
+        raise Refusal("%s after reload; not started or enabled" % exc) from None
+
+
 def config_inventory(fd):
     """The installer-owned config directory may hold only the policy file."""
     if any(name != os.path.basename(POLICY) for name in os.listdir(fd)):
@@ -283,7 +297,7 @@ def main(argv=None):
         if missing:
             publish_file(path, data, mode)
     command([SYSTEMCTL, "--system", "--no-ask-password", "daemon-reload"])
-    loaded_unit()
+    reloaded_unit()
     print("slotd installed; daemon not started or enabled by installer; start only after station qualification")
 
 
