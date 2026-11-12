@@ -362,9 +362,10 @@ printf '[Unit]\nDescription=slotd fixture inert dependency\n\n[Service]\nType=on
 		forward("upholds", installUnitName+".upholds", "Upholds"),
 		// Dash-prefix dependency directories apply to swarma-slotd-*.service only.
 		forward("prefix_wants", "swarma-slotd-.service.wants", "Wants"),
-		// A reverse link pulls the unit in. On the runner's systemd the loaded-unit
-		// readback already refuses it (hosted run 43216606653), before the scan.
-		{"reverse_wants", foreign + ".wants", installUnitName, installUnitPath, "WantedBy", "loaded daemon unit differs from the reviewed package; not started or enabled"},
+		// A reverse link would pull the unit in. systemd does not load the
+		// unreferenced foreign unit, so no WantedBy appears (no property
+		// witness); the loaded-unit readback refuses it before the scan.
+		{"reverse_wants", foreign + ".wants", installUnitName, installUnitPath, "", "loaded daemon unit differs from the reviewed package; not started or enabled"},
 	}
 	t.Run("generated_dependency_refused_after_reload", func(t *testing.T) {
 		for _, c := range dependencyCases {
@@ -374,14 +375,19 @@ printf '[Unit]\nDescription=slotd fixture inert dependency\n\n[Service]\nType=on
 				plantGenerator(t, dependencyGenerator(c.dir, c.entry, c.target))
 				f.invoke(t, f.checkArgs, "no files published", true)
 				f.invoke(t, f.baseArgs, "slotd install refused: "+c.want, false)
-				// systemd itself loaded the generated dependency the installer refused.
-				if deps := unitDependencies(t, c.property); !slices.Contains(deps, foreign) {
-					t.Fatalf("systemd did not load the generated %s dependency: %q", c.property, deps)
-				}
 				props := loadedUnitProperties(t)
 				t.Logf("systemd readback after the refused install: %q", props)
 				if props["ActiveState"] != "inactive" || props["FragmentPath"] != installUnitPath {
 					t.Fatalf("refused unit was started or replaced: %q", props)
+				}
+				if _, err := os.Lstat(filepath.Join("/run/systemd/generator", c.dir, c.entry)); err != nil {
+					t.Fatalf("generator did not run at the installer's reload: %v", err)
+				}
+				// systemd itself loaded the generated dependency the installer refused.
+				if c.property != "" {
+					if deps := unitDependencies(t, c.property); !slices.Contains(deps, foreign) {
+						t.Fatalf("systemd did not load the generated %s dependency: %q", c.property, deps)
+					}
 				}
 				installed := f.requireInstalled(t)
 				f.invoke(t, f.checkArgs, "slotd install refused: "+refused, false)
@@ -393,8 +399,10 @@ printf '[Unit]\nDescription=slotd fixture inert dependency\n\n[Service]\nType=on
 				f.invoke(t, f.baseArgs, "daemon not started or enabled", true)
 				requireUnchanged(t, installed, "rerun without generator")
 				requireLoadedReviewed(t)
-				if deps := unitDependencies(t, c.property); slices.Contains(deps, foreign) {
-					t.Fatalf("generated %s dependency outlived its generator: %q", c.property, deps)
+				if c.property != "" {
+					if deps := unitDependencies(t, c.property); slices.Contains(deps, foreign) {
+						t.Fatalf("generated %s dependency outlived its generator: %q", c.property, deps)
+					}
 				}
 				uninstallPackage(t)
 				f.absent(t)
