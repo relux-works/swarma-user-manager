@@ -70,7 +70,7 @@ func testFenceEntry(args []string) int {
 	if len(args) != 2 || os.Geteuid() != 0 || !slotPattern.MatchString(args[0]) {
 		return EnforcementFence(args)
 	}
-	root, err := openTrustedDir(fenceRootPath)
+	root, err := openHostTrustedDir(fenceRootPath)
 	if err != nil {
 		return EnforcementFence(args)
 	}

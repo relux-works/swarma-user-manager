@@ -282,7 +282,10 @@ func EnforcementFence(args []string) int {
 	if os.Getuid() != 0 || os.Geteuid() != 0 || len(args) != 2 {
 		return fenceExit(errFenceInput)
 	}
-	root, err := openTrustedDir(fenceRootPath)
+	// The fence runs inside the slot's mount view (empty /run); its request
+	// directory and the system bus are resolved below PID 1's root.
+	toolSystemBus = "unix:path=/proc/1/root/run/dbus/system_bus_socket"
+	root, err := openHostTrustedDir(fenceRootPath)
 	if err != nil {
 		return fenceExit(errFenceInput)
 	}

@@ -564,6 +564,9 @@ func t19Created(t *testing.T, p policy, r *durableRecord, dir string) (*lifecycl
 	t.Helper()
 	engine, _, _ := realEngine(t, p, r, dir)
 	q := currentCreate(t, r)
+	// The slot walks its whole mount view; give it more than the default
+	// five-minute deadline on a cold runner.
+	q.NotAfter = time.Now().UTC().Add(30 * time.Minute).Truncate(time.Second)
 	created, code := engine.apply(context.Background(), q)
 	if code != "" {
 		if created != nil {
@@ -666,10 +669,13 @@ func TestRootT19SlotConfinement(t *testing.T) {
 				t.Errorf("@%s: slot connects while host gets %s", name, host)
 			}
 		}
-		if first.Abstract["@"+plants.Abstract] != "EPERM" || live < 2 {
+		// A name the host itself cannot connect to (an autobound client
+		// socket, e.g. PID 1's @.../bus/systemd/bus-api-system, or a closed
+		// one) is no reachability target; the slot must still not connect.
+		if first.Abstract["@"+plants.Abstract] != "EPERM" || live < 1 {
 			t.Fatalf("abstract control %s, live names %d", first.Abstract["@"+plants.Abstract], live)
 		}
-		t.Logf("%d live abstract names refused with EPERM", live)
+		t.Logf("%d of %d abstract names connectable from the host; all refused from the slot with EPERM", live, len(abstract))
 	})
 	t.Run("T19.4-plants", func(t *testing.T) {
 		for _, path := range plants.Paths {
@@ -805,23 +811,18 @@ func TestRootT19SlotConfinement(t *testing.T) {
 // TestRootT19DetectorControl is the required detector control: the same
 // probes, run as the same slot UID in a unit WITHOUT the T19 layers (no mount
 // view, no Landlock launcher, no family/IP/nft layer), must REACH the planted
-// sockets, PID 1's bus-api-system, the planted loopback listener and the
-// node RPC stand-in. A refusal here means the suite cannot see a breach.
+// pathname and abstract sockets, the planted loopback listener and the node
+// RPC stand-in, and get the host's own verdict for every host abstract name.
+// A refusal here means the suite cannot see a breach. PID 1's
+// @.../bus/systemd/bus-api-system is an autobound sd-bus client socket
+// (connected, not listening): no context can connect to it, so the listening
+// abstract plant is the detector for layer 2.
 func TestRootT19DetectorControl(t *testing.T) {
 	p, r, dir := rootFixture(t)
 	t19Wallets(t)
 	plants := t19Plant(t)
 	ipSet := t19IPTargets(t)
 	_, hostAbstract := t19HostInventory(t)
-	var busAPI string
-	for _, name := range hostAbstract {
-		if strings.HasSuffix(name, "/bus/systemd/bus-api-system") {
-			busAPI = name
-		}
-	}
-	if busAPI == "" {
-		t.Fatal("PID 1 bus-api-system abstract socket not found on this host")
-	}
 	setT19Policy(t, &p, dir)
 	p.Egress = nil
 	_, _ = t19Created(t, p, &r, dir)
@@ -829,7 +830,8 @@ func TestRootT19DetectorControl(t *testing.T) {
 		t.Fatal(err)
 	}
 	report := filepath.Join(r.Identity.Home, "t19-control")
-	spec := t19Spec{Report: report, Pathnames: append(append([]string{}, plants.Paths...), t19WalletSock), Abstract: []string{plants.Abstract, busAPI}, Families: true, IP: ipSet.all(), Hold: true}
+	abstract := append([]string{plants.Abstract}, hostAbstract...)
+	spec := t19Spec{Report: report, Pathnames: append(append([]string{}, plants.Paths...), t19WalletSock), Abstract: abstract, Families: true, IP: ipSet.all(), Hold: true}
 	t19FixtureUnit(t, p, &r, "swarma-t19-control-"+r.Slot+".service", t19SpecArgv(spec), t19DropLayers)
 	got := awaitT19Report(t, report, 2*time.Minute)
 	j, _ := json.MarshalIndent(got, "", " ")
@@ -839,9 +841,14 @@ func TestRootT19DetectorControl(t *testing.T) {
 			t.Errorf("control cannot reach %s: %s", path, got.Pathnames[path])
 		}
 	}
-	for _, name := range []string{plants.Abstract, busAPI} {
-		if got.Abstract["@"+name] != "ok" {
-			t.Errorf("control cannot reach @%s: %s", name, got.Abstract["@"+name])
+	if got.Abstract["@"+plants.Abstract] != "ok" {
+		t.Errorf("control cannot reach the abstract plant: %s", got.Abstract["@"+plants.Abstract])
+	}
+	// Every host abstract name gets the same verdict from the unconfined
+	// slot UID as from the host: the probe sees whatever the host sees.
+	for _, name := range hostAbstract {
+		if host := unixVerdict("@" + name); got.Abstract["@"+name] != host {
+			t.Errorf("@%s: control %s, host %s", name, got.Abstract["@"+name], host)
 		}
 	}
 	// netlink opens without the family filter; packet then fails on the

@@ -172,6 +172,19 @@ is already an `addr:port`; slot creation now refuses a bootstrap whose
 Every new property is in the installed-unit readback, so any drift fails the
 existing "installed unit property mismatch" check.
 
+The prestart fence shares the slot's mount view: systemd applies
+`TemporaryFileSystem=` and `Bind*Paths=` even to `ExecStartPre=+`. The fence
+therefore opens its request directory below PID 1's root
+(`/proc/1/root/run/swarma-slotd-demo-fences`) and runs `systemctl`/`busctl`
+with `DBUS_SYSTEM_BUS_ADDRESS` pointing at the bus socket below PID 1's root.
+
+PID 1's `@…/bus/systemd/bus-api-system` (and the other `@…/bus/…` names) are
+autobound sd-bus CLIENT sockets: `/proc/net/unix` shows them connected, not
+listening, so `connect()` is refused (`ECONNREFUSED`) from any context, root
+included. T19.3 requires `EPERM` for every abstract name the host can connect
+to, and no slot connect for the rest; the listening abstract plant is the layer-2
+detector.
+
 Limits: requires Landlock ABI >= 6 (kernel 6.12 or later with `landlock` in the
 active LSM list); systemd must support `PrivateIPC=`, `ProcSubset=` and
 `TemporaryFileSystem=` (254+ is required anyway). Visible trees (`/etc`, `/usr`,
@@ -196,7 +209,7 @@ software that creates sockets there. AppArmor `unix` rules are not used.
 | T19.11 | `.../T19.11-status-absent`, `TestRootT19StatusSocketBound` | status.sock gives `ENOENT` in the slot; bound on purpose it gives `EACCES` while the wallet connects; no operator GID |
 | T19.12 | `.../T19.12-loopback` | node RPC port on `127.0.0.1`, `[::1]` and every host address, `127.0.0.53:53` tcp/udp and a planted loopback echo give `EPERM`; such policies are refused at load |
 | T19.13 | `.../T19.13-egress-readback` | the IP-literal gateway in a peer namespace answers; readback asserts every property, the exact allow set, `ExecStart` and the nft default drop |
-| control | `TestRootT19DetectorControl` | the same probes in a unit WITHOUT the layers reach the plants, PID 1's `bus-api-system`, the planted loopback listener and the node RPC stand-in |
+| control | `TestRootT19DetectorControl` | the same probes in a unit WITHOUT the layers reach the pathname and abstract plants, the planted loopback listener and the node RPC stand-in, and get the host's own verdict for every host abstract name |
 
 Narrowing mutants live in `internal/slotd/testdata/t19-mutants/`. A workflow
 dispatch with `-f mutant=<name>` applies one and is green only when its named

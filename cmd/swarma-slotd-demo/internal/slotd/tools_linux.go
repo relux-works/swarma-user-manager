@@ -13,6 +13,12 @@ import (
 
 const maxToolOutput = 64 * 1024
 
+// toolSystemBus is set only by the prestart fence. systemd applies a unit's
+// TemporaryFileSystem= and Bind*Paths= even to ExecStartPre=+, so the fence
+// sees the slot's empty /run: systemctl's private socket and the bus socket
+// are reached below PID 1's root instead. The daemon leaves it empty.
+var toolSystemBus string
+
 type boundedOutput struct {
 	mu        sync.Mutex
 	bytes     []byte
@@ -40,6 +46,9 @@ func fixedToolCommand(ctx context.Context, invocation toolInvocation) (*exec.Cmd
 	}
 	cmd := exec.CommandContext(ctx, invocation.Path, invocation.Args...)
 	cmd.Env = []string{}
+	if toolSystemBus != "" {
+		cmd.Env = []string{"DBUS_SYSTEM_BUS_ADDRESS=" + toolSystemBus}
+	}
 	cmd.Dir = "/"
 	cmd.Stdin = bytes.NewReader(invocation.Stdin)
 	cmd.WaitDelay = 2 * time.Second

@@ -148,10 +148,8 @@ func (e *linuxEffects) verifyRunning(ctx context.Context, r *durableRecord) erro
 	if err = verifyUnitProperties(v, e.policy, r); err != nil {
 		return err
 	}
-	if e.policy.Version == 2 {
-		return verifyStationUnitExec(ctx, r)
-	}
-	return nil
+	// The launcher prefix is verified for literal and typed policies alike.
+	return verifyUnitExec(ctx, e.policy, r)
 }
 func (e *linuxEffects) proveUIDQuiet(ctx context.Context, r *durableRecord) error {
 	proc, err := linuxos.OpenProc()
