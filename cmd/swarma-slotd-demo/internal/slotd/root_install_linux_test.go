@@ -60,20 +60,7 @@ func newInstallFixture(t *testing.T) *installFixture {
 	}
 	p, _, dir := rootFixture(t)
 	// Register only fixture-owned paths after proving their initial absence.
-	t.Cleanup(func() {
-		_, _ = runFixedTool(context.Background(), toolInvocation{Path: systemctlPath, Args: []string{"--system", "--no-ask-password", "stop", "--", "swarma-slotd-demo.service"}})
-		for _, path := range []string{installUnitPath, installStopPath, fenceBinaryPath, installPolicyPath} {
-			if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
-				t.Error(err)
-			}
-		}
-		for _, path := range []string{filepath.Join(installStatePath, "socket.json"), filepath.Join(installStatePath, "slots"), installStatePath, installRunPath, installConfigPath} {
-			if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
-				t.Error(err)
-			}
-		}
-		_, _ = runFixedTool(context.Background(), toolInvocation{Path: systemctlPath, Args: []string{"--system", "--no-ask-password", "daemon-reload"}})
-	})
+	t.Cleanup(func() { uninstallPackage(t) })
 	caller, err := user.LookupId("65534")
 	if err != nil {
 		t.Fatal(err)
@@ -141,6 +128,24 @@ func newInstallFixture(t *testing.T) *installFixture {
 	f.baseArgs = []string{filepath.Join(packageDir, "install.py"), "--binary", staged, "--sha256", digest(binary), "--policy", f.input, "--manager-group", group.Name}
 	f.checkArgs = append(slices.Clone(f.baseArgs), "--check")
 	return f
+}
+
+// uninstallPackage stops the unit and removes the fixed package targets and the
+// daemon's own state; only paths proven absent at fixture start are touched.
+func uninstallPackage(t *testing.T) {
+	t.Helper()
+	_, _ = runFixedTool(context.Background(), toolInvocation{Path: systemctlPath, Args: []string{"--system", "--no-ask-password", "stop", "--", "swarma-slotd-demo.service"}})
+	for _, path := range []string{installUnitPath, installStopPath, fenceBinaryPath, installPolicyPath} {
+		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			t.Error(err)
+		}
+	}
+	for _, path := range []string{filepath.Join(installStatePath, "socket.json"), filepath.Join(installStatePath, "slots"), installStatePath, installRunPath, installConfigPath} {
+		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			t.Error(err)
+		}
+	}
+	_, _ = runFixedTool(context.Background(), toolInvocation{Path: systemctlPath, Args: []string{"--system", "--no-ask-password", "daemon-reload"}})
 }
 
 func writeInstallFile(t *testing.T, path string, b []byte, mode os.FileMode) {
@@ -349,6 +354,7 @@ print("exclusive publication retained first inode")`
 
 	f.invoke(t, f.baseArgs, "daemon not started or enabled", true)
 	installed := f.requireInstalled(t)
+	requireLoadedReviewed(t)
 	if _, err := os.Lstat(p.Socket); !errors.Is(err, os.ErrNotExist) {
 		t.Fatal("install started daemon")
 	}
@@ -625,7 +631,12 @@ func TestRootInstallRefusals(t *testing.T) {
 			}},
 			{"identical_hard_link", "unprotected file refused", func(t *testing.T) []string {
 				place(t, target.path, want.data, want.mode, 0, 0)
-				link := target.path + ".fixture-link"
+				// Outside the unit namespace and the config directory, whose
+				// own closures would otherwise refuse first.
+				link := filepath.Join(filepath.Dir(target.path), "slotd-fixture-hardlink-"+target.name)
+				if target.path == installPolicyPath {
+					link = filepath.Join("/etc", "slotd-fixture-hardlink-"+target.name)
+				}
 				if err := os.Link(target.path, link); err != nil {
 					t.Fatal(err)
 				}

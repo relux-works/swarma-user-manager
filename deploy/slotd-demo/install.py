@@ -14,6 +14,21 @@ POLICY = "/etc/swarma-slotd-demo/policy.json"
 UNIT = "/etc/systemd/system/swarma-slotd-demo.service"
 BINARY = "/usr/libexec/swarma-slotd-demo"
 STOP = "/usr/local/sbin/swarma-slotd-demo-stop"
+SYSTEMCTL = "/usr/bin/systemctl"
+UNIT_NAME = os.path.basename(UNIT)
+# systemd.unit(5) system-manager unit load path. The running manager's own
+# UnitPath is scanned as well, so neither list can narrow the other.
+LOAD_PATHS = ("/etc/systemd/system.control", "/run/systemd/system.control", "/run/systemd/transient",
+              "/run/systemd/generator.early", "/etc/systemd/system", "/etc/systemd/system.attached",
+              "/run/systemd/system", "/run/systemd/system.attached", "/run/systemd/generator",
+              "/usr/local/lib/systemd/system", "/usr/lib/systemd/system", "/run/systemd/generator.late")
+# Names whose ".d" drop-ins and dependency directories apply to the unit: its
+# own name, its dash-truncated prefixes and the type-wide "service" scope.
+UNIT_SCOPES = (UNIT_NAME, "swarma-slotd-.service", "swarma-.service", "service")
+DEPENDENCY_DIRS = (".wants", ".requires", ".upholds")
+# Effective state systemd must report for the unit after daemon-reload.
+LOADED_UNIT = {"LoadState": "loaded", "FragmentPath": UNIT, "DropInPaths": "", "SourcePath": "",
+               "Names": UNIT_NAME, "UnitFileState": "disabled", "NeedDaemonReload": "no"}
 
 
 class Refusal(Exception):
@@ -45,7 +60,15 @@ def directory(path):
         raise
 
 
-def read_file(path, limit, mode=None):
+IDENTITY = ("st_dev", "st_ino", "st_uid", "st_gid", "st_nlink", "st_mode", "st_size", "st_mtime_ns", "st_ctime_ns")
+
+
+def same_identity(a, b):
+    return all(getattr(a, k) == getattr(b, k) for k in IDENTITY)
+
+
+def open_file(path, limit, mode=None):
+    """Return a held descriptor, its bytes and their identity snapshot."""
     parent = directory(os.path.dirname(path))
     try:
         fd = os.open(os.path.basename(path), os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC, dir_fd=parent)
@@ -64,13 +87,18 @@ def read_file(path, limit, mode=None):
             if not part:
                 break
             data.extend(part)
-        after = os.fstat(fd)
-        fields = ("st_dev", "st_ino", "st_uid", "st_gid", "st_nlink", "st_mode", "st_size", "st_mtime_ns", "st_ctime_ns")
-        if len(data) > limit or any(getattr(before, k) != getattr(after, k) for k in fields):
+        if len(data) > limit or not same_identity(before, os.fstat(fd)):
             raise Refusal("file too large or changed")
-        return bytes(data)
-    finally:
+        return fd, bytes(data), before
+    except BaseException:
         os.close(fd)
+        raise
+
+
+def read_file(path, limit, mode=None, identity=False):
+    fd, data, snapshot = open_file(path, limit, mode)
+    os.close(fd)
+    return (data, snapshot) if identity else data
 
 
 def planned_file(path, data, mode):
@@ -110,13 +138,83 @@ def publish_file(path, data, mode):
         os.close(parent)
 
 
-def command(args):
-    result = subprocess.run(args, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+def command(args, pass_fds=()):
+    result = subprocess.run(args, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, pass_fds=pass_fds,
                             env={"PATH": "/usr/sbin:/usr/bin:/bin", "LANG": "C", "LC_ALL": "C"}, cwd="/", timeout=30)
     if result.returncode:
         # Do not copy tool/policy output into the installer report.
         raise Refusal("prerequisite or systemd command refused")
     return result.stdout
+
+
+def unit_link(fd, name):
+    """True for an alias symlink to the unit, or a dependency directory
+    (enablement or reverse dependency) that links the unit."""
+    try:
+        st = os.stat(name, dir_fd=fd, follow_symlinks=False)
+        if stat.S_ISLNK(st.st_mode):
+            return os.path.basename(os.readlink(name, dir_fd=fd)) == UNIT_NAME
+        if not stat.S_ISDIR(st.st_mode) or not name.endswith(DEPENDENCY_DIRS):
+            return False
+        sub = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=fd)
+    except FileNotFoundError:
+        return False  # Removed since listing; a removed entry cannot apply.
+    try:
+        return UNIT_NAME in os.listdir(sub)
+    finally:
+        os.close(sub)
+
+
+def unit_namespace(paths):
+    """Refuse every load-path entry that would add, replace, alias, extend or
+    pull in the unit; the planned fragment path itself is checked by its plan."""
+    names = {scope + suffix for scope in UNIT_SCOPES for suffix in (".d",) + DEPENDENCY_DIRS}
+    for path in paths:
+        try:
+            fd = directory(path)
+        except FileNotFoundError:
+            continue
+        try:
+            for name in os.listdir(fd):
+                if os.path.join(path, name) == UNIT:
+                    continue
+                if name == UNIT_NAME or name.startswith(UNIT_NAME + ".") or name in names or unit_link(fd, name):
+                    raise Refusal("additional or overridden daemon unit refused")
+        finally:
+            os.close(fd)
+
+
+def manager_unit_paths():
+    try:
+        paths = command([SYSTEMCTL, "--system", "--no-ask-password", "show", "--property=UnitPath", "--value"]).decode("ascii").split()
+    except UnicodeDecodeError:
+        paths = []
+    if not paths or any(not p.startswith("/") or os.path.normpath(p) != p for p in paths):
+        raise Refusal("systemd unit path unavailable")
+    return paths
+
+
+def loaded_unit():
+    """Read back what systemd actually loaded after daemon-reload."""
+    keys = sorted(LOADED_UNIT) + ["ActiveState"]
+    out = command([SYSTEMCTL, "--system", "--no-ask-password", "show", "--property=" + ",".join(keys), "--", UNIT_NAME])
+    props = {}
+    try:
+        lines = out.decode("utf-8").splitlines()
+    except UnicodeDecodeError:
+        lines = []
+    for line in lines:
+        key, sep, value = line.partition("=")
+        if sep and key in keys and key not in props:
+            props[key] = value
+    if sorted(props) != sorted(keys) or any(props[k] != v for k, v in LOADED_UNIT.items()) or props["ActiveState"] not in ("inactive", "failed"):
+        raise Refusal("loaded daemon unit differs from the reviewed package; not started or enabled")
+
+
+def config_inventory(fd):
+    """The installer-owned config directory may hold only the policy file."""
+    if any(name != os.path.basename(POLICY) for name in os.listdir(fd)):
+        raise Refusal("unexpected entry in config directory refused")
 
 
 def main(argv=None):
@@ -131,40 +229,46 @@ def main(argv=None):
         raise Refusal("root on Linux required")
     os.umask(0o077)
     package = os.path.dirname(os.path.abspath(__file__))
-    binary = read_file(args.binary, MAX_BINARY)
-    if len(args.sha256) != 64 or hashlib.sha256(binary).hexdigest() != args.sha256:
-        raise Refusal("binary digest mismatch")
-    if not os.stat(args.binary, follow_symlinks=False).st_mode & 0o111:
-        raise Refusal("binary not executable")
-    policy = read_file(args.policy, 65536, 0o640)
-    unit = read_file(os.path.join(package, "swarma-slotd-demo.service"), 16384, 0o644)
-    stop = read_file(os.path.join(package, "stop.sh"), 4096, 0o755)
-    # Reuse the daemon's exact policy parser and protected-input checks. This
-    # mode does not open state, bind a socket, allocate accounts or load BPF.
-    command([args.binary, "--install-check", args.policy, args.manager_group])
-    for other in ("/run/systemd/system/swarma-slotd-demo.service", "/usr/lib/systemd/system/swarma-slotd-demo.service",
-                  UNIT + ".d", "/run/systemd/system/swarma-slotd-demo.service.d", "/usr/lib/systemd/system/swarma-slotd-demo.service.d"):
-        if os.path.lexists(other):
-            raise Refusal("additional or overridden daemon unit refused")
-    for path in ("/usr/libexec", "/usr/local/sbin", "/etc/systemd/system", "/etc"):
-        os.close(directory(path))
-    config = os.path.dirname(POLICY)
-    create_config = not os.path.lexists(config)
-    if not create_config:
-        # The installer owns this directory; an existing one must already match
-        # what it would create, including no setuid/setgid/sticky bits.
-        fd = directory(config)
-        try:
-            if stat.S_IMODE(os.fstat(fd).st_mode) != 0o755:
-                raise Refusal("config directory mode mismatch")
-        finally:
-            os.close(fd)
-    plans = [planned_file(BINARY, binary, 0o755), planned_file(UNIT, unit, 0o644),
-             planned_file(STOP, stop, 0o755), planned_file(POLICY, policy, 0o640)]
+    held, binary, binary_id = open_file(args.binary, MAX_BINARY)
+    try:
+        if len(args.sha256) != 64 or hashlib.sha256(binary).hexdigest() != args.sha256:
+            raise Refusal("binary digest mismatch")
+        if not binary_id.st_mode & 0o111:
+            raise Refusal("binary not executable")
+        policy, policy_id = read_file(args.policy, 65536, 0o640, identity=True)
+        unit = read_file(os.path.join(package, "swarma-slotd-demo.service"), 16384, 0o644)
+        stop = read_file(os.path.join(package, "stop.sh"), 4096, 0o755)
+        unit_namespace(LOAD_PATHS)
+        for path in ("/usr/libexec", "/usr/local/sbin", "/etc/systemd/system", "/etc"):
+            os.close(directory(path))
+        config = os.path.dirname(POLICY)
+        create_config = not os.path.lexists(config)
+        if not create_config:
+            # The installer owns this directory; an existing one must already match
+            # what it would create: exact mode, no special bits, only the policy.
+            fd = directory(config)
+            try:
+                if stat.S_IMODE(os.fstat(fd).st_mode) != 0o755:
+                    raise Refusal("config directory mode mismatch")
+                config_inventory(fd)
+            finally:
+                os.close(fd)
+        plans = [planned_file(BINARY, binary, 0o755), planned_file(UNIT, unit, 0o644),
+                 planned_file(STOP, stop, 0o755), planned_file(POLICY, policy, 0o640)]
+        unit_namespace([path for path in manager_unit_paths() if path not in LOAD_PATHS])
+        # Reuse the daemon's exact policy parser and protected-input checks. This
+        # mode does not open state, bind a socket, allocate accounts or load BPF.
+        # It executes the held, hashed inode; neither it nor the policy may change.
+        command(["/proc/self/fd/%d" % held, "--install-check", args.policy, args.manager_group], pass_fds=(held,))
+        again, again_id = read_file(args.policy, 65536, 0o640, identity=True)
+        if not same_identity(binary_id, os.fstat(held)) or again != policy or not same_identity(policy_id, again_id):
+            raise Refusal("input changed during prerequisite check")
+    finally:
+        os.close(held)
     if args.check:
         print("slotd install plan: ok; no files published, daemon not started; station qualification still required")
         return
-    state = command(["/usr/bin/systemctl", "--system", "--no-ask-password", "show", "--property=ActiveState", "--value", "--", "swarma-slotd-demo.service"]).strip()
+    state = command([SYSTEMCTL, "--system", "--no-ask-password", "show", "--property=ActiveState", "--value", "--", UNIT_NAME]).strip()
     if state not in (b"inactive", b"failed"):
         raise Refusal("daemon must be stopped before installation")
     if create_config:
@@ -178,7 +282,8 @@ def main(argv=None):
     for path, data, mode, missing in plans:
         if missing:
             publish_file(path, data, mode)
-    command(["/usr/bin/systemctl", "--system", "--no-ask-password", "daemon-reload"])
+    command([SYSTEMCTL, "--system", "--no-ask-password", "daemon-reload"])
+    loaded_unit()
     print("slotd installed; daemon not started or enabled by installer; start only after station qualification")
 
 
