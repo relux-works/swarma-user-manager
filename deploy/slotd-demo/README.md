@@ -87,7 +87,14 @@ sudo /usr/bin/python3 /var/lib/slotd-install-stage/install.py --check \
 `--check` reads the same inputs and target plan as install. It invokes the
 candidate's closed read-only `--install-check POLICY GROUP` mode, reusing the
 actual policy parser, caller binding, payload digest and protected home/tool
-checks. It never publishes files, opens lifecycle state, binds the socket,
+checks. The installer executes that check from its held descriptor of the
+hashed binary (`/proc/self/fd/N`), so the checked, executed and published
+binary bytes are one object. Afterwards the binary descriptor and the policy
+path must still show the same unchanged inode and bytes, or the install is
+refused. The daemon still opens the policy by path. A concurrent root actor that
+swaps an ancestor directory and restores it during the check is not detected,
+so privileged changes on the host must be serialized with installation.
+`--check` never publishes files, opens lifecycle state, binds the socket,
 allocates accounts, starts units or loads BPF. Success is a prerequisite verdict,
 not host qualification. Failures omit policy contents and tool output.
 
@@ -99,16 +106,57 @@ Target directories must be root:root and not group/world writable; an existing
 any existing object other than the identical root:root file with the exact mode
 and one link (foreign bytes, wrong mode, owner or group, hard link, symlink,
 directory, mask) is refused and left untouched.
+An existing `/etc/swarma-slotd-demo` may contain only `policy.json`. Any
+other entry is refused before publication: a regular file (including a hidden
+file or a stale `.slotd-install-*` temporary), a directory or a symlink. The
+installer never deletes or adopts such an entry. A present `policy.json` must
+still be the identical root:root 0640 single-link regular file.
 The installer is a first-install/idempotent publisher: existing byte-identical,
 properly protected files are accepted; differing files require a separately
-reviewed offline upgrade plan. Existing masks, runtime/vendor units or drop-ins
-are refused. It will not overwrite them or reset live state.
+reviewed offline upgrade plan. It will not overwrite them or reset live state.
+
+**Effective unit closure.** Before publication, in both modes, the installer
+lists every systemd unit load path: the documented system list
+(`/etc`, `/run` and `/usr/lib` `systemd/system`, `/usr/local/lib/systemd/system`,
+`system.control`, `system.attached`, `transient` and the three `generator`
+directories) plus every path in the running manager's `UnitPath`. In each, it
+refuses:
+
+- `swarma-slotd-demo.service` anywhere but the planned `/etc/systemd/system`
+  path (mask, runtime, vendor, transient, attached or generated unit);
+- any entry named `swarma-slotd-demo.service.*`;
+- the `.d`, `.wants`, `.requires` and `.upholds` directories that systemd
+  merges into this unit through its dash prefixes (`swarma-slotd-.service`,
+  `swarma-.service`) and the type-wide `service` scope;
+- an alias symlink to the unit, or an enablement or dependency link to it in
+  any `*.wants`, `*.requires` or `*.upholds` directory.
+
+Names systemd does not merge into this unit, such as
+`swarma-slotd-demo-.service.d`, are not refused. Type-wide drop-ins are
+refused even when a distribution ships them; such a host needs a reviewed
+change to this package. After `daemon-reload` the installer reads back
+`systemctl show`. It requires LoadState `loaded`, FragmentPath
+`/etc/systemd/system/swarma-slotd-demo.service`, empty DropInPaths and
+SourcePath, Names exactly `swarma-slotd-demo.service`, UnitFileState
+`disabled`, NeedDaemonReload `no` and an inactive or failed ActiveState. A
+mismatch, for example a drop-in that a generator only creates at reload, is
+refused with `loaded daemon unit differs from the reviewed package`. The files
+already published are retained and nothing is started or enabled. The next run
+then refuses the generated drop-in before publication. Remove the conflicting
+configuration, reload, and rerun the same package; the rerun is idempotent and
+verifies again.
+
+Not covered: manager-wide defaults (`system.conf`, `system.conf.d`,
+`DefaultEnvironment=`, the manager environment) and slice configuration still
+apply to every service. The unit sets PATH, LANG and LC_ALL and unsets loader
+variables, but those host files are part of the station review, not of this
+installer.
 
 ## Install, start and regtest smoke
 
 Repeat the check command **without `--check`**. The daemon must be stopped.
-Files are synced and exclusively published without replacement, and systemd
-configuration is reloaded. Installation **does not enable or start** the daemon.
+Files are synced and exclusively published without replacement, systemd
+configuration is reloaded, and the loaded unit is read back as described above. Installation **does not enable or start** the daemon.
 A mid-install failure may retain already published identical files; inspect the
 error, correct the prerequisite and rerun the same approved package. No automatic
 rollback deletes files, accounts, slot homes or state.
@@ -162,7 +210,7 @@ reviewed. To prevent boot starts without deleting resources, the operator can ru
 | Daemon prerequisite check | `slotd-linux --install-check ABS_POLICY MANAGER_GROUP` | Read-only prerequisite verdict; no lifecycle state |
 | systemctl | `systemctl enable --now swarma-slotd-demo.service` (install bench only) | Unit status and daemon journal |
 | Stop | `/usr/local/sbin/swarma-slotd-demo-stop` | Fixed daemon stop; retained lifecycle resources |
-| Hosted root fixture | Workflow `slotd-demo.yml`, `root_tests=true` dispatch on the exact PR head | `TestRootInstallPackage` (actual package/unit/socket/stop controls, installed owner/mode/byte contract, idempotent re-runs without republication) and `TestRootInstallRefusals` (target-directory and target-path refusals with no writes); workflow artifacts |
+| Hosted root fixture | Workflow `slotd-demo.yml`, `root_tests=true` dispatch on the exact PR head | `TestRootInstallPackage` (actual package/unit/socket/stop controls, installed owner/mode/byte contract, systemd's loaded-unit report, idempotent re-runs without republication), `TestRootInstallRefusals` (target-directory and target-path refusals with no writes), `TestRootInstallUnitNamespace` (load-path, prefix, type-wide, control, generator, alias and dependency refusals in both modes, unrelated-name neighbour, generator drop-in refused by the post-reload readback, two narrowing mutants) and `TestRootInstallConfigInventory` (extra config entries of each class in both modes, identical-policy neighbour, symlink-class mutant); workflow artifacts |
 
 Producers run syntax, vet and Linux compile-only checks without root. Root tests
 run only in the disposable GitHub-hosted Ubuntu workflow with the real root gate.

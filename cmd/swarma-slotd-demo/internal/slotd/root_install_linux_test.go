@@ -287,7 +287,7 @@ func requireUnitDisabled(t *testing.T) {
 
 // Proves the real package plans without writes, refuses drift/aliases before
 // publication, installs the exact owner/mode/byte contract without enabling or
-// starting, re-runs idempotently without republishing (stopped, after stop) and
+// starting (systemd reports the reviewed fragment and no drop-in), re-runs idempotently without republishing (stopped, after stop) and
 // refuses while the daemon is active, serves through the real unit with
 // protocol socket ownership, and stops without deleting state. Hosted only; no
 // slot payload or account is created, and station qualification is separate.
