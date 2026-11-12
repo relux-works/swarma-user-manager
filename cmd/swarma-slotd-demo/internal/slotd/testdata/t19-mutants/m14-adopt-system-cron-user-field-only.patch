@@ -1,0 +1,21 @@
+Adoption narrowing mutant m14 (condition 10, system crontabs): the token
+check reads only the user field of a job line (the 6th field, or the 2nd
+after an @keyword) instead of every token of every non-comment line, so a
+line naming the account outside that field, such as an environment-looking
+line, passes. Killed by TestRootAdoptedSystemCron (an env-prefix cron.d line
+naming the account as its 7th field).
+
+--- a/cmd/swarma-slotd-demo/internal/slotd/adopted_linux.go
++++ b/cmd/swarma-slotd-demo/internal/slotd/adopted_linux.go
+@@ -401,7 +401,10 @@
+ 		if len(fields) == 0 || fields[0][0] == '#' {
+ 			continue
+ 		}
+-		for _, f := range fields {
++		for i, f := range fields {
++			if i != 5 && (i != 1 || fields[0][0] != '@') {
++				continue
++			}
+ 			if systemCronToken(f, name, uid) {
+ 				return fmt.Errorf("line %d names the account: %w", n+1, errSystemCronScheduled)
+ 			}

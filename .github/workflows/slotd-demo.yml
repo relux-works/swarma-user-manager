@@ -16,7 +16,7 @@ on:
         required: false
         type: choice
         default: none
-        options: [none, m1-run-bind, m2-skip-landlock, m3-no-family-filter, m5-no-syscall-archs, m8-adopt-any-second-group, m9-adopt-retire-deletes, m10-adopt-skip-residue-gate, m11-adopt-skip-second-slot, m12-adopt-skip-system-cron, m13-adopt-skip-key-ancestry]
+        options: [none, m1-run-bind, m2-skip-landlock, m3-no-family-filter, m5-no-syscall-archs, m8-adopt-any-second-group, m9-adopt-retire-deletes, m10-adopt-skip-residue-gate, m11-adopt-skip-second-slot, m12-adopt-skip-system-cron, m13-adopt-skip-key-ancestry, m14-adopt-system-cron-user-field-only]
 
 permissions:
   contents: read
@@ -33,6 +33,26 @@ jobs:
         with:
           go-version: '1.26.10'
           cache: false
+      - name: Verify every T19 mutant patch applies to this head
+        # Control for the mutant runs: a stale patch would fail during setup
+        # and never reach its named killing test. Every patch in the
+        # directory must apply cleanly to the checked-out tree.
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          patches=(cmd/swarma-slotd-demo/internal/slotd/testdata/t19-mutants/*.patch)
+          test "${#patches[@]}" -gt 0
+          stale=0
+          for p in "${patches[@]}"; do
+            if git apply --check --verbose "$p"; then
+              echo "applies: $p"
+            else
+              echo "::error::mutant patch does not apply: $p"
+              stale=1
+            fi
+          done
+          exit "$stale"
       - name: Verify portable contract in isolated scratch
         shell: bash
         run: |
@@ -151,7 +171,7 @@ jobs:
               m8-*) run_filter='^TestAdoptedGroupSet$' ;;
               m9-*|m10-*) run_filter='^TestRootAdopted' ;;
               m11-*) run_filter='^TestAdoptedSecondLiveSlot$' ;;
-              m12-*) run_filter='^TestRootAdoptedSystemCron$' ;;
+              m12-*|m14-*) run_filter='^TestRootAdoptedSystemCron$' ;;
               m13-*) run_filter='^TestRootAdoptedKeyAncestry$' ;;
               *) run_filter='^TestRootT19' ;;
             esac
@@ -182,7 +202,7 @@ jobs:
           events = [json.loads(line) for line in open(sys.argv[1])]
           mutant, status = sys.argv[2], sys.argv[3]
           if mutant != "none":
-              killers = {"m1-run-bind": "TestRootT19SlotConfinement/T19.4-plants", "m2-skip-landlock": "TestRootT19SlotConfinement/T19.3-abstract", "m3-no-family-filter": "TestRootT19SlotConfinement/T19.8-families", "m5-no-syscall-archs": "TestRootT19AlternateABI", "m8-adopt-any-second-group": "TestAdoptedGroupSet", "m9-adopt-retire-deletes": "TestRootAdoptedRetirement", "m10-adopt-skip-residue-gate": "TestRootAdoptedRetirement", "m11-adopt-skip-second-slot": "TestAdoptedSecondLiveSlot", "m12-adopt-skip-system-cron": "TestRootAdoptedSystemCron", "m13-adopt-skip-key-ancestry": "TestRootAdoptedKeyAncestry"}
+              killers = {"m1-run-bind": "TestRootT19SlotConfinement/T19.4-plants", "m2-skip-landlock": "TestRootT19SlotConfinement/T19.3-abstract", "m3-no-family-filter": "TestRootT19SlotConfinement/T19.8-families", "m5-no-syscall-archs": "TestRootT19AlternateABI", "m8-adopt-any-second-group": "TestAdoptedGroupSet", "m9-adopt-retire-deletes": "TestRootAdoptedRetirement", "m10-adopt-skip-residue-gate": "TestRootAdoptedRetirement", "m11-adopt-skip-second-slot": "TestAdoptedSecondLiveSlot", "m12-adopt-skip-system-cron": "TestRootAdoptedSystemCron", "m13-adopt-skip-key-ancestry": "TestRootAdoptedKeyAncestry", "m14-adopt-system-cron-user-field-only": "TestRootAdoptedSystemCron"}
               failed = {e["Test"] for e in events if e.get("Action") == "fail" and "Test" in e}
               assert killers[mutant] in failed, ("mutant survived", mutant, sorted(failed))
               print("mutant", mutant, "killed by", killers[mutant])

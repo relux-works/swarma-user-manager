@@ -5,6 +5,7 @@ package slotd
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -576,14 +577,21 @@ func writeRootFile(t *testing.T, p string, b []byte) {
 }
 
 // TestRootAdoptedSystemCron proves the system-crontab part of condition 10
-// through the public lifecycle: a root-owned /etc/cron.d line or /etc/crontab
-// line that schedules a job as the adopted account (by name or numeric UID)
-// refuses reuse with the record left destroyed, and fails a retirement with
-// the record left failed; removing the line restores the clean neighbour and
-// the account is never changed. Valid neighbours that must pass: a line for
-// another user, a comment naming the account and an environment line whose
-// value is the account. Plants use the never-firing schedule 0 0 31 2 * and
-// are removed (cron.d) or restored byte-for-byte (crontab) at cleanup.
+// through the public lifecycle and the real /etc: each root-owned
+// /etc/cron.d plant refuses reuse with the record left destroyed: the
+// rev183 witnesses (an unterminated quoted env-prefix job line, NUL after
+// the account name, a vertical tab inside a time field), an env-looking line
+// naming the account as its 7th field (the m14 witness), and job lines
+// naming the account, its UID or "@reboot account"; an /etc/crontab line
+// refuses the same way; a FIFO or a symlink in place of /etc/cron.d refuses
+// within 60 s instead of blocking; a line planted during a rental fails the
+// retirement with the record left failed. Removing each plant restores the
+// clean neighbour and the account is never changed. Valid neighbours that
+// must pass: a comment naming the account, an environment line whose value
+// contains the name, root's line and another account's line. Every plant,
+// the rev183 witnesses included, schedules February 31 (never fires) and is
+// removed (cron.d) or restored byte-for-byte (crontab, the cron.d directory)
+// at cleanup.
 func TestRootAdoptedSystemCron(t *testing.T) {
 	a, _ := newAdoptedEngine(t)
 	name, uid := a.h.Name, strconv.FormatUint(uint64(a.h.UID), 10)
@@ -597,17 +605,25 @@ func TestRootAdoptedSystemCron(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.Remove(plant) })
-	neighbours := "# 0 0 31 2 * " + name + " /bin/true\nMAILTO=" + name + "\n0 0 31 2 * root /bin/true\n"
+	neighbours := "# 0 0 31 2 * " + name + " /bin/true\nMAILTO=" + name + "\n0 0 31 2 * root /bin/true\n0 0 31 2 * nobody /bin/true\n"
 	if err := os.WriteFile(plant, []byte(neighbours), 0644); err != nil {
 		t.Fatal(err)
 	}
 	a.gate("cron.d neighbours", "")
-	for _, line := range []string{"0 0 31 2 * " + name + " /bin/true\n", "0 0 31 2 * " + uid + " /bin/true\n", "@reboot " + name + " /bin/true\n"} {
+	for _, line := range []string{
+		"*=\" * 31 2 * " + name + " /bin/true\n",        // rev183 env prefix
+		"MAILTO=\" 0 0 31 2 * " + name + " /bin/true\n", // env-looking, 7th field (m14)
+		"0 0 31 2 * " + name + "\x00 /bin/true\n",       // rev183 NUL after the name
+		"0\v0 0 31 2 * " + name + " /bin/true\n",        // rev183 vertical tab in a time field
+		"0 0 31 2 * " + name + " /bin/true\n",
+		"0 0 31 2 * " + uid + " /bin/true\n",
+		"@reboot " + name + " /bin/true\n",
+	} {
 		if err := os.WriteFile(plant, []byte(neighbours+line), 0644); err != nil {
 			t.Fatal(err)
 		}
-		a.gate("cron.d "+line, "system cron entry remains")
-		a.expect("reuse over cron.d "+line, "create", internalError)
+		a.gate(fmt.Sprintf("cron.d %q", line), "system cron entry remains")
+		a.expect(fmt.Sprintf("reuse over cron.d %q", line), "create", internalError)
 		if a.r.Binding.State != destroyed {
 			t.Fatalf("refused reuse changed the record: %s", a.r.Binding.State)
 		}
@@ -616,6 +632,60 @@ func TestRootAdoptedSystemCron(t *testing.T) {
 		t.Fatal(err)
 	}
 	a.gate("cron.d line removed", "")
+
+	// /etc/cron.d replaced by a FIFO (rev183: no blocking open) or by a
+	// symlink to the real directory: the gate refuses within 60 s and
+	// reuse is refused; the directory is restored at the end and at cleanup.
+	moved := "/etc/cron.d.slotd-adopt-" + t19Nonce()[:8]
+	if err := os.Rename("/etc/cron.d", moved); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if _, err := os.Lstat(moved); err == nil {
+			_ = os.Remove("/etc/cron.d")
+			if err := os.Rename(moved, "/etc/cron.d"); err != nil {
+				t.Errorf("restore /etc/cron.d: %v", err)
+			}
+		}
+	})
+	bounded := func(step string) {
+		t.Helper()
+		done := make(chan error, 1)
+		go func() { done <- adoptedNoResidue(context.Background(), a.r.Identity) }()
+		select {
+		case err := <-done:
+			if err == nil || !strings.Contains(err.Error(), "/etc/cron.d: not an openable directory") {
+				t.Fatalf("%s: gate %v, want the cron.d refusal", step, err)
+			}
+		case <-time.After(60 * time.Second):
+			if w, err := syscall.Open("/etc/cron.d", syscall.O_WRONLY|syscall.O_NONBLOCK|syscall.O_CLOEXEC, 0); err == nil {
+				syscall.Close(w)
+			}
+			t.Fatalf("%s: the gate blocked for 60 s instead of refusing", step)
+		}
+		a.expect("reuse over "+step, "create", internalError)
+		if a.r.Binding.State != destroyed {
+			t.Fatalf("refused reuse changed the record: %s", a.r.Binding.State)
+		}
+	}
+	if err := syscall.Mkfifo("/etc/cron.d", 0600); err != nil {
+		t.Fatal(err)
+	}
+	bounded("FIFO as /etc/cron.d")
+	if err := os.Remove("/etc/cron.d"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(moved, "/etc/cron.d"); err != nil {
+		t.Fatal(err)
+	}
+	bounded("symlink as /etc/cron.d")
+	if err := os.Remove("/etc/cron.d"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(moved, "/etc/cron.d"); err != nil {
+		t.Fatal(err)
+	}
+	a.gate("cron.d restored", "")
 
 	// /etc/crontab: a line for the account refuses reuse; restored, it passes.
 	orig, err := os.ReadFile("/etc/crontab")

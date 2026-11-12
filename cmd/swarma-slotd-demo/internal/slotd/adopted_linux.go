@@ -30,9 +30,9 @@ var residueSearchLimit = 5 * time.Minute
 // no process of the UID, no file owned by the UID outside the per-slot home
 // (whole-view search, /proc excluded; the declared key file is the one
 // admitted object), linger off, no cron or at entries (the per-user spool,
-// and any /etc/crontab or /etc/cron.d line scheduled as the account,
-// whoever owns the file), and no kernel key charged to the UID. Any residue
-// refuses.
+// and any /etc/crontab or /etc/cron.d file that may schedule a job as the
+// account, whoever owns it), and no kernel key charged to the UID. Any
+// residue refuses.
 func adoptedNoResidue(ctx context.Context, id slotIdentity) error {
 	if !id.adopted() {
 		return errors.New("no-residue gate needs an adopted identity")
@@ -287,31 +287,39 @@ const (
 	systemCronEntriesLimit = 4096
 )
 
-// errSystemCronScheduled is the refusal for a system-crontab job that runs
-// as the adopted account.
+// errSystemCronScheduled is the refusal for a system-crontab file that may
+// schedule a job as the adopted account.
 var errSystemCronScheduled = errors.New("adopted account system cron entry remains")
 
 // systemCronScheduledAs refuses when <etc>/crontab or any file in
-// <etc>/cron.d schedules a job as the account, by name or numeric UID, in
-// the user field of the system crontab format. The file owner is
-// irrelevant: a root-owned line naming the account is residue. A missing
-// crontab or cron.d is no entry; a subdirectory of cron.d is ignored (cron
-// does not read it); every other unreadable, oversized, non-regular or
-// unparsable entry refuses (fail closed).
+// <etc>/cron.d may schedule a job as the account. It does not emulate
+// cron's parser; it over-approximates every line cron could run as the
+// account (see systemCronContent), so false positives refuse too. The file
+// owner is irrelevant. A missing crontab or cron.d is no entry and a
+// subdirectory of cron.d is skipped (cron does not read it). cron.d is
+// opened as a directory, without following a symlink and without blocking,
+// so a FIFO, symlink or file in its place refuses; every unreadable,
+// oversized or non-regular entry refuses (fail closed).
 func systemCronScheduledAs(etc, name string, uid uint32) error {
-	if err := systemCronFileScheduledAs(path.Join(etc, "crontab"), name, uid, false); err != nil {
+	crontab := path.Join(etc, "crontab")
+	if err := systemCronFileScheduledAs(unix.AT_FDCWD, crontab, crontab, name, uid, false); err != nil {
 		return err
 	}
 	dir := path.Join(etc, "cron.d")
-	f, err := os.Open(dir)
-	if errors.Is(err, os.ErrNotExist) {
+	fd, err := unix.Open(dir, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_NONBLOCK|unix.O_CLOEXEC, 0)
+	if errors.Is(err, unix.ENOENT) {
 		return nil
 	}
 	if err != nil {
-		return fmt.Errorf("system cron %s: %w", dir, err)
+		return fmt.Errorf("system cron %s: not an openable directory: %w", dir, err)
+	}
+	f := os.NewFile(uintptr(fd), dir)
+	defer f.Close()
+	var st unix.Stat_t
+	if err = unix.Fstat(fd, &st); err != nil || st.Mode&unix.S_IFMT != unix.S_IFDIR {
+		return errors.Join(err, fmt.Errorf("system cron %s: not a directory", dir))
 	}
 	names, err := f.Readdirnames(systemCronEntriesLimit + 1)
-	f.Close()
 	if err != nil && !errors.Is(err, io.EOF) {
 		return fmt.Errorf("system cron %s: %w", dir, err)
 	}
@@ -319,19 +327,20 @@ func systemCronScheduledAs(etc, name string, uid uint32) error {
 		return fmt.Errorf("system cron %s: too many entries", dir)
 	}
 	for _, n := range names {
-		if err := systemCronFileScheduledAs(path.Join(dir, n), name, uid, true); err != nil {
+		if err := systemCronFileScheduledAs(fd, n, path.Join(dir, n), name, uid, true); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// systemCronFileScheduledAs reads one system crontab (following a symlink,
-// as cron does) without blocking on a FIFO and checks its user fields. A
-// directory inside cron.d (dirEntry) is not read by cron and is skipped.
-func systemCronFileScheduledAs(p, name string, uid uint32, dirEntry bool) error {
+// systemCronFileScheduledAs reads one system crontab, rel under dirfd (p
+// names it in errors), following a symlink as cron does and without
+// blocking on a FIFO, and applies systemCronContent. A directory inside
+// cron.d (dirEntry) is not read by cron and is skipped.
+func systemCronFileScheduledAs(dirfd int, rel, p, name string, uid uint32, dirEntry bool) error {
 	var st unix.Stat_t
-	err := unix.Stat(p, &st)
+	err := unix.Fstatat(dirfd, rel, &st, 0)
 	if errors.Is(err, unix.ENOENT) {
 		return nil // absent, vanished or dangling: no schedule
 	}
@@ -344,7 +353,7 @@ func systemCronFileScheduledAs(p, name string, uid uint32, dirEntry bool) error 
 	if st.Mode&unix.S_IFMT != unix.S_IFREG {
 		return fmt.Errorf("system cron %s: not a regular file", p)
 	}
-	fd, err := unix.Open(p, unix.O_RDONLY|unix.O_NONBLOCK|unix.O_CLOEXEC, 0)
+	fd, err := unix.Openat(dirfd, rel, unix.O_RDONLY|unix.O_NONBLOCK|unix.O_CLOEXEC, 0)
 	if err != nil {
 		return fmt.Errorf("system cron %s: %w", p, err)
 	}
@@ -360,64 +369,56 @@ func systemCronFileScheduledAs(p, name string, uid uint32, dirEntry bool) error 
 	if len(b) > systemCronFileLimit {
 		return fmt.Errorf("system cron %s: too large", p)
 	}
-	users, err := systemCronUsers(b)
-	if err != nil {
+	if err = systemCronContent(b, name, uid); err != nil {
 		return fmt.Errorf("system cron %s: %w", p, err)
 	}
-	for _, u := range users {
-		if u == name {
-			return errSystemCronScheduled
+	return nil
+}
+
+// systemCronContent is the conservative content rule for one system
+// crontab. It does not reproduce cron's parser; it refuses with
+// errSystemCronScheduled when
+//   - any byte is outside printable ASCII (0x20-0x7e), tab and newline (NUL,
+//     CR, vertical tab, other controls, DEL, non-ASCII): cron's byte
+//     tokenizer could read such a line differently from this check; or
+//   - a line that is neither blank nor a comment (first non-blank byte '#')
+//     holds the account name, or a decimal number equal to its UID (leading
+//     zeros included), as a token delimited by spaces, tabs or the line
+//     edges. Every token of the line is compared, environment lines
+//     included, so the user field of any line cron could run is covered
+//     whatever an environment-looking prefix makes of the line.
+//
+// False positives are accepted: an environment value, a command argument or
+// another account's line naming the account as such a token also refuses.
+func systemCronContent(b []byte, name string, uid uint32) error {
+	for i, c := range b {
+		if c != '\t' && c != '\n' && (c < 0x20 || c > 0x7e) {
+			return fmt.Errorf("byte 0x%02x at offset %d is not printable ASCII, tab or newline, so a job as the account cannot be ruled out: %w", c, i, errSystemCronScheduled)
 		}
-		if n, err := strconv.ParseUint(u, 10, 32); err == nil && uint32(n) == uid {
-			return errSystemCronScheduled
+	}
+	for n, line := range strings.Split(string(b), "\n") {
+		fields := strings.FieldsFunc(line, func(r rune) bool { return r == ' ' || r == '\t' })
+		if len(fields) == 0 || fields[0][0] == '#' {
+			continue
+		}
+		for _, f := range fields {
+			if systemCronToken(f, name, uid) {
+				return fmt.Errorf("line %d names the account: %w", n+1, errSystemCronScheduled)
+			}
 		}
 	}
 	return nil
 }
 
-// systemCronUsers returns the user field of every job line of a system
-// crontab: blank lines, comments and environment assignments (NAME=value,
-// spaces around "=" allowed, NAME optionally quoted) are skipped; "@keyword
-// user command" and "m h dom mon dow user command" are job lines. A job line
-// without a command field is unparsable and refuses.
-func systemCronUsers(b []byte) ([]string, error) {
-	var users []string
-	for i, line := range strings.Split(string(b), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" || line[0] == '#' || systemCronAssignment(line) {
-			continue
-		}
-		fields := strings.Fields(line)
-		want := 7
-		if line[0] == '@' {
-			want = 3
-		}
-		if len(fields) < want {
-			return nil, fmt.Errorf("line %d: unparsable job line", i+1)
-		}
-		users = append(users, fields[want-2])
+// systemCronToken reports a token that is the account name or a decimal
+// number (only ASCII digits) equal to its UID.
+func systemCronToken(tok, name string, uid uint32) bool {
+	if tok == name {
+		return true
 	}
-	return users, nil
-}
-
-// systemCronAssignment reports a crontab environment line the way cron's
-// load_env reads one: a name (quoted, or every character up to the first
-// blank or "="), optional blanks, then "=". A job line never has "=" right
-// after its first field.
-func systemCronAssignment(line string) bool {
-	rest := line
-	if q := line[0]; q == '"' || q == '\'' {
-		end := strings.IndexByte(line[1:], q)
-		if end < 0 {
-			return false
-		}
-		rest = line[end+2:]
-	} else {
-		n := strings.IndexAny(line, " \t=")
-		if n <= 0 {
-			return false
-		}
-		rest = line[n:]
+	if strings.Trim(tok, "0123456789") != "" {
+		return false
 	}
-	return strings.HasPrefix(strings.TrimLeft(rest, " \t"), "=")
+	v, err := strconv.ParseUint(strings.TrimLeft(tok, "0"), 10, 32)
+	return err == nil && uint32(v) == uid
 }
