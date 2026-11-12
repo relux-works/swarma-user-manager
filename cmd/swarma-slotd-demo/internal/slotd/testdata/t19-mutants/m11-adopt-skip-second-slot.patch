@@ -1,0 +1,18 @@
+Adoption narrowing mutant m11 (condition 7): the one-live-slot check is
+skipped, so a create proceeds while another record of the adopted UID is
+alive. Killed by TestAdoptedSecondLiveSlot.
+
+--- a/cmd/swarma-slotd-demo/internal/slotd/lifecycle.go
++++ b/cmd/swarma-slotd-demo/internal/slotd/lifecycle.go
+@@ -102,11 +102,6 @@
+ 		if err != nil {
+ 			return r, internalError
+ 		}
+-		if id.adopted() {
+-			if code := e.adoptedSlotFree(id); code != "" {
+-				return r, code
+-			}
+-		}
+ 		boot, _, err := e.clock()
+ 		if err != nil {
+ 			return r, internalError

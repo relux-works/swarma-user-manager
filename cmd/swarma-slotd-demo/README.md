@@ -257,6 +257,64 @@ and a node-RPC stand-in, and refuse to run where `/run/swarma-wallet` already
 exists. The real agent-walletd frame and the real node RPC are covered only by
 the station qualification.
 
+## Adopted agent account
+
+The G2 host flow provisions the rented agent's account itself
+(`u <agent_user> <agent_uid>` plus `m <agent_user> swarma-wallet-peer` in
+sysusers) and owns its key file. slotd ADOPTS that persistent account for one
+declared slot instead of allocating an ephemeral worker account. The
+declaration is optional and accepted in both policy versions (the T19 root
+suite drives it through literal v0 payloads):
+
+```json
+"adopted_account": {
+  "slot": "0",
+  "name": "swarma-agent",
+  "uid": 61000,
+  "socket_group": {"name": "swarma-wallet-peer", "gid": 61001},
+  "key_file": "/var/lib/swarma-agent/agent.key"
+}
+```
+
+| Rule | Where |
+|---|---|
+| Name and UID are declared; the UID and the socket GID lie outside `uid_base .. uid_base+9999`, are not 0/65534, and differ; any other pre-existing name or UID still refuses `unmanaged identity exists` | `validateAdopted`, `createAccounts` |
+| `/etc/passwd` line: GID == UID, home `/` (sysusers default), `/usr/sbin/nologin`, locked; own group with no members; the account is a member of the declared socket group and of no other group | `observeAccountBytes` |
+| NSS (by name and by id): groups are exactly {own GID == UID, socket GID}; the socket group resolves by name and by id | `verifyNSS`, `admitGroupSet` |
+| Adoption verifies and never creates; the receipt hashes the existing lines | `createAccounts`, `prepareCreate` |
+| Fresh per-slot home `<home_root>/<name>`, owned by the UID, removed at retirement | `homeRoot` |
+| `SupplementaryGroups=<socket group>` explicitly, for the adopted slot only (v2 worker slots keep the empty value, v0 worker slots set none) | `slotSupplementaryGroups` |
+| The key file is bound read-only (no `-` prefix: a missing key fails the start); before start it must be a regular file owned by the UID or root and not group/other writable | `slotIdentityBinds`, `verifyAdoptedKeyFile` |
+| One live slot per adopted UID: a create refuses while any stored record of the UID is not destroyed | `adoptedSlotFree` |
+| Retirement never deletes the account: it kills every process of the UID, removes the per-slot home first, then runs the no-residue gate | `releaseAdopted` |
+| No-residue gate, at every adoption and at the end of every retirement: no process of the UID; no file owned by it in the daemon's whole view (`/proc` skipped; the key file and the per-slot home admitted); no linger file; no crontab; no kernel key charged to the UID in `/proc/key-users` | `adoptedNoResidue` |
+
+A failed gate at retirement leaves the record `failed`, which refuses reuse
+until the residue is removed and `destroy` is retried.
+
+Root tests: `TestRootAdoptedAccountRules` (third group, undeclared group,
+GID != UID and a different declared UID refuse beside the declared account;
+adoption writes nothing; an undeclared pre-existing worker account refuses),
+`TestRootAdoptedWalletGroup` (a real `0660 root:<peer group>` wallet socket:
+the adopted slot connects with `id -g` = own GID and `id -G` = {own, socket
+GID} and cannot write or chmod the key file; a worker slot of the same policy
+gets `EACCES`) and `TestRootAdoptedRetirement` (account kept, clean
+retirement passes and the account is reused; a planted residue file, a
+planted process and linger each refuse reuse; residue during a rental fails
+the retirement; a second create refuses while the slot is alive). The T19
+wallet fixture is now that same 0660 group-owned socket, and every T19 slot
+that needs the wallet runs as an adopted account (`T19.14-adopted-groups-key`).
+
+Adoption mutants (`-f mutant=<name>`): `m8-adopt-any-second-group` is killed
+by `TestAdoptedGroupSet`, `m9-adopt-retire-deletes` and
+`m10-adopt-skip-residue-gate` by `TestRootAdoptedRetirement`,
+`m11-adopt-skip-second-slot` by `TestAdoptedSecondLiveSlot`.
+
+Limits: the keyring check is stricter than "keyrings empty" (an empty
+persistent user keyring also refuses); the whole-view search fails closed on
+any unreadable directory (for example a FUSE mount without `allow_other`) and
+after five minutes.
+
 ## linuxos reuse
 
 `internal/linuxos` remains unchanged. Account creation uses `Allocate` with an

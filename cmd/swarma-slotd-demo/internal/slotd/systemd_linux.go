@@ -229,9 +229,14 @@ func verifyUnitPropertiesAt(v map[string]string, p policy, r *durableRecord, act
 			return errStationUnit
 		}
 		delete(expected, "BindPaths")
-		for _, key := range []string{"SupplementaryGroups", "Environment", "EnvironmentFiles", "PassEnvironment"} {
+		for _, key := range []string{"Environment", "EnvironmentFiles", "PassEnvironment"} {
 			expected[key] = ""
 		}
+	}
+	if groups, explicit := slotSupplementaryGroups(p, r.Identity); explicit {
+		expected["SupplementaryGroups"] = groups
+	} else if v["SupplementaryGroups"] != "" {
+		return errors.New("installed unit property mismatch: SupplementaryGroups")
 	}
 	for key, want := range expected {
 		if v[key] != want {
@@ -244,7 +249,7 @@ func verifyUnitPropertiesAt(v map[string]string, p policy, r *durableRecord, act
 		return errors.New("installed unit property mismatch: TemporaryFileSystem")
 	}
 	var readOnly []string
-	for _, bind := range slotReadOnlyBinds(p, manifest) {
+	for _, bind := range slotIdentityBinds(p, r.Identity, manifest) {
 		readOnly = append(readOnly, bind+":"+strings.TrimPrefix(bind, "-")+":rbind")
 	}
 	if !sameWords(v["BindReadOnlyPaths"], readOnly) {

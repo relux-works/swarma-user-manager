@@ -311,7 +311,12 @@ func setProbePolicy(t *testing.T, p *policy, dir string, spec probeSpec) {
 func accountCleanup(t *testing.T, e *linuxEffects, r *durableRecord) {
 	t.Helper()
 	t.Cleanup(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		limit := 20 * time.Second
+		if r.Identity.adopted() {
+			// Adopted release ends in the whole-view no-residue search.
+			limit = residueSearchLimit + time.Minute
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), limit)
 		defer cancel()
 		// Cleanup is receipt-gated too: a failed or ambiguous create never grants
 		// this test permission to remove a merely name-equal account or resource.
@@ -326,7 +331,7 @@ func accountCleanup(t *testing.T, e *linuxEffects, r *durableRecord) {
 			return
 		}
 		steps := []func(context.Context, *durableRecord) error{e.removeNFT, e.retire, e.removeHome}
-		if r.Station != nil {
+		if r.Station != nil || r.Identity.adopted() {
 			steps[1], steps[2] = steps[2], steps[1]
 		}
 		for _, step := range steps {

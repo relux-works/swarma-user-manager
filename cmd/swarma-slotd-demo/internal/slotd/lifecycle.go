@@ -102,6 +102,11 @@ func (e *lifecycle) applyLocked(ctx context.Context, req request) (*durableRecor
 		if err != nil {
 			return r, internalError
 		}
+		if id.adopted() {
+			if code := e.adoptedSlotFree(id); code != "" {
+				return r, code
+			}
+		}
 		boot, _, err := e.clock()
 		if err != nil {
 			return r, internalError
@@ -176,7 +181,9 @@ func (e *lifecycle) applyLocked(ctx context.Context, req request) (*durableRecor
 			}{{"nft-remove", e.effects.removeNFT}, {"account-remove", e.effects.retire}, {"home-remove", e.effects.removeHome}}
 			// Retire typed identity only after every per-renter secret/state tree
 			// is gone. Failure retains the record and forbids reuse.
-			if r.Station != nil {
+			// The adopted account is released last, after its per-slot home,
+			// so the no-residue gate runs over the final state.
+			if r.Station != nil || r.Identity.adopted() {
 				steps[1], steps[2] = steps[2], steps[1]
 			}
 			for _, step := range steps {
@@ -196,6 +203,22 @@ func (e *lifecycle) applyLocked(ctx context.Context, req request) (*durableRecor
 		return r, e.failure(r, err)
 	}
 	return r, ""
+}
+
+// adoptedSlotFree is condition 7: one live slot per adopted account. Any
+// stored record of the adopted UID that is not destroyed (created, running,
+// stopped or failed) refuses another create, so two rentals never share it.
+func (e *lifecycle) adoptedSlotFree(id slotIdentity) errorCode {
+	records, err := e.store.all()
+	if err != nil {
+		return internalError
+	}
+	for _, other := range records {
+		if other.Identity.UID == id.UID && other.Binding.State != destroyed {
+			return conflict
+		}
+	}
+	return ""
 }
 func (e *lifecycle) expire(ctx context.Context) error {
 	records, err := e.store.all()

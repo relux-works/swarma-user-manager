@@ -1,0 +1,15 @@
+Adoption narrowing mutant m8 (condition 2): the NSS group rule admits ANY
+second group for the adopted account, not only the declared socket GID.
+Killed by TestAdoptedGroupSet (adopted undeclared group).
+
+--- a/cmd/swarma-slotd-demo/internal/slotd/accounts.go
++++ b/cmd/swarma-slotd-demo/internal/slotd/accounts.go
+@@ -164,7 +164,7 @@
+ 	}
+ 	seen := map[string]bool{}
+ 	for _, gid := range gids {
+-		if !want[gid] || seen[gid] {
++		if (!want[gid] && !id.adopted()) || seen[gid] {
+ 			return errors.New("NSS supplementary group refused")
+ 		}
+ 		seen[gid] = true

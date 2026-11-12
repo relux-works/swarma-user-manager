@@ -52,6 +52,28 @@ func slotReadOnlyBinds(p policy, station *payloadlaunch.Manifest) []string {
 	return binds
 }
 
+// slotIdentityBinds adds the adopted account's agent key file to the
+// read-only binds (adoption condition 5). No "-" prefix: a missing key file
+// fails the start instead of silently starting without it.
+func slotIdentityBinds(p policy, id slotIdentity, station *payloadlaunch.Manifest) []string {
+	binds := slotReadOnlyBinds(p, station)
+	if id.adopted() {
+		binds = append(binds, id.KeyFile)
+	}
+	return binds
+}
+
+// slotSupplementaryGroups is the explicit SupplementaryGroups= value. The
+// adopted slot names its one declared socket group (adoption condition 6) in
+// either policy version; a v2 worker slot sets it empty; a v0 worker slot
+// does not set it (unchanged).
+func slotSupplementaryGroups(p policy, id slotIdentity) (string, bool) {
+	if id.adopted() {
+		return id.SocketGroup, true
+	}
+	return "", p.Version == 2
+}
+
 type toolInvocation struct {
 	Path  string
 	Args  []string
@@ -135,13 +157,16 @@ func startInvocation(p policy, slot string, current record, now time.Time, stati
 		properties = append(properties, "TemporaryFileSystem="+tmpfs)
 	}
 	var readOnly []string
-	for _, bind := range slotReadOnlyBinds(p, manifest) {
+	for _, bind := range slotIdentityBinds(p, id, manifest) {
 		readOnly = append(readOnly, quoteSystemdWord(bind))
 	}
 	properties = append(properties, "BindReadOnlyPaths="+strings.Join(readOnly, " "))
 	properties = append(properties, slotHardening...)
+	if groups, explicit := slotSupplementaryGroups(p, id); explicit {
+		properties = append(properties, "SupplementaryGroups="+groups)
+	}
 	if p.Version == 2 {
-		properties = append(properties, "SupplementaryGroups=", "Environment=", "EnvironmentFile=", "PassEnvironment=")
+		properties = append(properties, "Environment=", "EnvironmentFile=", "PassEnvironment=")
 	}
 	properties = append(properties, systemdAddressProperties(p)...)
 	args := []string{"--system", "--quiet", "--no-ask-password", "--unit=" + id.Unit, "--expand-environment=no"}

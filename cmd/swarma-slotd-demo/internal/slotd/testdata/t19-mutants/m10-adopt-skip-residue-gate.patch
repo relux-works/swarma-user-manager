@@ -1,0 +1,25 @@
+Adoption narrowing mutant m10 (condition 10): the no-residue gate is skipped
+at adoption and at retirement. Killed by TestRootAdoptedRetirement (reuse
+over a planted residue file).
+
+--- a/cmd/swarma-slotd-demo/internal/slotd/effects_linux.go
++++ b/cmd/swarma-slotd-demo/internal/slotd/effects_linux.go
+@@ -50,9 +50,6 @@
+ 		if o.passwd == "" || o.group == "" || !o.shadow {
+ 			return errors.New("declared account missing")
+ 		}
+-		if err = adoptedNoResidue(ctx, r.Identity); err != nil {
+-			return err
+-		}
+ 	} else if !o.empty() {
+ 		return errors.New("unmanaged identity exists")
+ 	}
+@@ -315,7 +312,7 @@
+ 	if err := e.stopProcesses(ctx, r); err != nil {
+ 		return err
+ 	}
+-	return adoptedNoResidue(ctx, r.Identity)
++	return nil
+ }
+ func (e *linuxEffects) removeHome(ctx context.Context, r *durableRecord) error {
+ 	if r.Identity.adopted() {

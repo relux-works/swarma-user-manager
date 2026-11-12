@@ -43,11 +43,17 @@ type t19Spec struct {
 	Tamper        bool
 	IP            []t19Target
 	Hold          bool
+	// KeyFile: read it, then try to open it for writing and to chmod it.
+	KeyFile string
 }
 
 type t19Report struct {
 	UID           int
+	GID           int
 	Groups        []int
+	KeyRead       string
+	KeyWrite      string
+	KeyChmod      string
 	Sockets       []string
 	WalkErrors    []t19WalkError
 	Pathnames     map[string]string
@@ -224,7 +230,18 @@ func runT19Probe(args []string) int {
 		fmt.Println(spec.JournalLine)
 	}
 	report := t19Report{UID: os.Getuid(), Pathnames: map[string]string{}, Abstract: map[string]string{}, IP: map[string]string{}}
+	report.GID = os.Getgid()
 	report.Groups, _ = os.Getgroups()
+	if spec.KeyFile != "" {
+		_, err := os.ReadFile(spec.KeyFile)
+		report.KeyRead = errnoName(err)
+		f, err := os.OpenFile(spec.KeyFile, os.O_WRONLY|os.O_APPEND, 0)
+		if err == nil {
+			f.Close()
+		}
+		report.KeyWrite = errnoName(err)
+		report.KeyChmod = errnoName(unix.Chmod(spec.KeyFile, 0666))
+	}
 	if spec.Inventory {
 		// Every failure keeps its path, errno and whether this UID can still
 		// resolve names below it. /proc is procfs (socketless); root's view

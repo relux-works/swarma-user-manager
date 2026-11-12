@@ -56,6 +56,10 @@ type t19Wallet struct {
 	listener   *net.UnixListener
 	generation int
 	peers      []uint32
+	// PeerGroup/PeerGID own wallet.sock (root:PeerGroup 0660): only a slot
+	// holding that group as a supplementary group can connect.
+	PeerGroup string
+	PeerGID   uint32
 }
 
 func (w *t19Wallet) serve(l *net.UnixListener, generation int) {
@@ -98,7 +102,10 @@ func (w *t19Wallet) start(t *testing.T) uint64 {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = os.Chmod(t19WalletSock, 0666); err != nil {
+	if err = os.Chown(t19WalletSock, 0, int(w.PeerGID)); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.Chmod(t19WalletSock, 0660); err != nil {
 		t.Fatal(err)
 	}
 	var st unix.Stat_t
@@ -156,6 +163,8 @@ func t19Wallets(t *testing.T) (*t19Wallet, uint64, int) {
 	t.Helper()
 	t19RunDir(t, walletSocketDir, 0755, 0)
 	w := &t19Wallet{}
+	w.PeerGroup = "slotd-t19-wp-" + t19Nonce()[:6]
+	w.PeerGID = fixtureGroup(t, w.PeerGroup)
 	ino := w.start(t)
 	t.Cleanup(func() { w.listener.Close() })
 	group := "slotd-t19-op-" + t19Nonce()[:6]
@@ -718,6 +727,7 @@ func t19Journal(t *testing.T, unit, needle string) string {
 func TestRootT19SlotConfinement(t *testing.T) {
 	p, r, dir := rootFixture(t)
 	wallet, walletIno, operatorGID := t19Wallets(t)
+	t19Adopt(t, &p, &r, dir, wallet)
 	plants := t19Plant(t)
 	peer := newT19Peer(t)
 	gateway := peer.echo(t, "tcp4", peer.v4+":0")
@@ -739,7 +749,7 @@ func TestRootT19SlotConfinement(t *testing.T) {
 	phase1 := filepath.Join(r.Identity.Home, "t19-phase1")
 	line := "swarma-t19-journal-" + t19Nonce()
 	ipTargets := append(ipSet.all(), t19Target{gateway.Network, gateway.Address, true})
-	spec := t19Spec{Report: report, Phase1: phase1, Inventory: true, Pathnames: attempt, Abstract: abstract, Wallet: t19WalletSock, Frame: t19WalletReq, WalletRestart: true, JournalLine: line, Families: true, Tamper: true, IP: ipTargets, Hold: true}
+	spec := t19Spec{Report: report, Phase1: phase1, Inventory: true, Pathnames: attempt, Abstract: abstract, Wallet: t19WalletSock, Frame: t19WalletReq, WalletRestart: true, JournalLine: line, Families: true, Tamper: true, IP: ipTargets, Hold: true, KeyFile: r.Identity.KeyFile}
 	setT19Policy(t, &p, dir, t19SpecArgv(spec)...)
 	p.Egress = []egressRule{t19EgressRule(t, gateway)}
 	engine, q := t19Created(t, p, &r, dir)
@@ -875,6 +885,20 @@ func TestRootT19SlotConfinement(t *testing.T) {
 			t.Errorf("SupplementaryGroups %q %v", values["SupplementaryGroups"], err)
 		}
 	})
+	t.Run("T19.14-adopted-groups-key", func(t *testing.T) {
+		// R9 in the slot: id -g == the adopted UID's own GID and id -G ==
+		// exactly {own, declared socket GID}; the agent key is readable but
+		// neither writable nor chmod-able (read-only bind: EROFS).
+		groups := groupSet(first.Groups)
+		want := []int{int(wallet.PeerGID), int(r.Identity.UID)}
+		slices.Sort(want)
+		if first.UID != int(r.Identity.UID) || first.GID != int(r.Identity.UID) || !slices.Equal(groups, want) {
+			t.Errorf("uid %d gid %d groups %v, want %d/%d/%v", first.UID, first.GID, groups, r.Identity.UID, r.Identity.UID, want)
+		}
+		if first.KeyRead != "ok" || first.KeyWrite != "EROFS" || first.KeyChmod != "EROFS" {
+			t.Errorf("key read %s write %s chmod %s, want ok/EROFS/EROFS", first.KeyRead, first.KeyWrite, first.KeyChmod)
+		}
+	})
 	t.Run("T19.12-loopback", func(t *testing.T) {
 		// The cgroup filter and the per-UID nft rule DROP the packet. A UDP
 		// send reports EPERM; a TCP SYN never leaves, so connect() keeps
@@ -957,7 +981,8 @@ func TestRootT19SlotConfinement(t *testing.T) {
 // abstract plant is the detector for layer 2.
 func TestRootT19DetectorControl(t *testing.T) {
 	p, r, dir := rootFixture(t)
-	t19Wallets(t)
+	w, _, _ := t19Wallets(t)
+	t19Adopt(t, &p, &r, dir, w)
 	plants := t19Plant(t)
 	ipSet := t19IPTargets(t)
 	hostAbstract := t19HostAbstract(t)
@@ -1009,7 +1034,8 @@ func TestRootT19DetectorControl(t *testing.T) {
 // the wallet in the same unit stays reachable (the valid neighbour).
 func TestRootT19StatusSocketBound(t *testing.T) {
 	p, r, dir := rootFixture(t)
-	_, _, operatorGID := t19Wallets(t)
+	w, _, operatorGID := t19Wallets(t)
+	t19Adopt(t, &p, &r, dir, w)
 	setT19Policy(t, &p, dir)
 	p.Egress = nil
 	_, _ = t19Created(t, p, &r, dir)
@@ -1150,7 +1176,8 @@ func TestRootT19AlternateABI(t *testing.T) {
 // so the T19.1 certification is what keeps such a host from qualifying.
 func TestRootT19InventoryOmission(t *testing.T) {
 	p, r, dir := rootFixture(t)
-	t19Wallets(t)
+	w, _, _ := t19Wallets(t)
+	t19Adopt(t, &p, &r, dir, w)
 	base := "/opt/swarma-t19-omit"
 	searchable, closed := base+"/searchable", base+"/closed"
 	// Parent first: the directories are created in this order.

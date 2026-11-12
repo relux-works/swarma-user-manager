@@ -64,19 +64,22 @@ func verifyNSS(id slotIdentity, o accountObservation) error {
 			return errors.New("NSS account absence unproved")
 		}
 	} else {
-		if ne != nil || ie != nil || named.Username != id.Name || numeric.Username != id.Name || named.Uid != number || numeric.Uid != number || named.Gid != number || numeric.Gid != number || named.HomeDir != id.Home || numeric.HomeDir != id.Home {
+		if ne != nil || ie != nil || named.Username != id.Name || numeric.Username != id.Name || named.Uid != number || numeric.Uid != number || named.Gid != number || numeric.Gid != number || named.HomeDir != id.passwdHome() || numeric.HomeDir != id.passwdHome() {
 			return errors.New("NSS account mismatch")
 		}
 		gids, e := named.GroupIds()
 		if e != nil {
 			return e
 		}
-		if len(gids) != 1 {
-			return errors.New("NSS primary group agreement unproved")
+		if e = admitGroupSet(id, gids); e != nil {
+			return e
 		}
-		for _, gid := range gids {
-			if gid != number {
-				return errors.New("NSS supplementary group refused")
+		if id.adopted() {
+			socket := strconv.FormatUint(uint64(id.SocketGID), 10)
+			sg, se := user.LookupGroup(id.SocketGroup)
+			sgid, side := user.LookupGroupId(socket)
+			if se != nil || side != nil || sg.Gid != socket || sg.Name != id.SocketGroup || sgid.Name != id.SocketGroup || sgid.Gid != socket {
+				return errors.New("NSS socket group mismatch")
 			}
 		}
 	}
@@ -97,6 +100,15 @@ func createAccounts(ctx context.Context, id slotIdentity, homeRoot, slot string)
 	o, e := observeAccounts(ctx, id)
 	if e != nil {
 		return nil, e
+	}
+	if id.adopted() {
+		// Adoption verifies and never creates: the declared account must
+		// already exist completely, and observeAccounts has proved its
+		// databases and NSS view (GID == UID, exactly {own, socket}).
+		if o.passwd == "" || o.group == "" || !o.shadow {
+			return nil, errors.New("declared account missing")
+		}
+		return o.receipt()
 	}
 	if !o.empty() {
 		return nil, errors.New("unmanaged identity exists")

@@ -44,7 +44,16 @@ func (e *linuxEffects) prepareCreate(ctx context.Context, r *durableRecord, boot
 	if err != nil {
 		return err
 	}
-	if !o.empty() {
+	if r.Identity.adopted() {
+		// The declared account is verified, never created, and reused only
+		// after the no-residue gate proves the previous rental left nothing.
+		if o.passwd == "" || o.group == "" || !o.shadow {
+			return errors.New("declared account missing")
+		}
+		if err = adoptedNoResidue(ctx, r.Identity); err != nil {
+			return err
+		}
+	} else if !o.empty() {
 		return errors.New("unmanaged identity exists")
 	}
 	v, err := unitProperties(ctx, r.Identity)
@@ -118,6 +127,11 @@ func (e *linuxEffects) prepareStart(ctx context.Context, r *durableRecord) error
 	f.Close()
 	if err = verifyPayload(e.policy); err != nil {
 		return err
+	}
+	if r.Identity.adopted() {
+		if err = verifyAdoptedKeyFile(r.Identity); err != nil {
+			return err
+		}
 	}
 	if e.policy.Version == 2 {
 		if r.Binding.State != running {
@@ -209,7 +223,18 @@ func (e *linuxEffects) prepareDestroy(ctx context.Context, r *durableRecord) err
 	if err != nil {
 		return err
 	}
-	if r.Accounts == nil {
+	if r.Identity.adopted() {
+		// Adoption created nothing, so a missing receipt is no ambiguity;
+		// the declared account itself must still be present and unchanged.
+		if o.passwd == "" {
+			return errors.New("declared account missing")
+		}
+		if r.Accounts != nil {
+			if err = o.matches(r.Accounts); err != nil {
+				return err
+			}
+		}
+	} else if r.Accounts == nil {
 		if !o.empty() {
 			return errors.New("ambiguous account creation")
 		}
@@ -256,6 +281,9 @@ func (e *linuxEffects) retire(ctx context.Context, r *durableRecord) error {
 	if err != nil {
 		return err
 	}
+	if r.Identity.adopted() {
+		return e.releaseAdopted(ctx, r, o)
+	}
 	if r.Accounts == nil {
 		if !o.empty() {
 			return errors.New("ambiguous account creation")
@@ -270,7 +298,33 @@ func (e *linuxEffects) retire(ctx context.Context, r *durableRecord) error {
 	}
 	return retireAccounts(ctx, r)
 }
+
+// releaseAdopted is retirement for the adopted account (condition 3): it
+// NEVER deletes the account. It kills every process of the UID and then
+// requires the no-residue gate; the per-slot home and station trees were
+// already removed by the preceding home-remove step.
+func (e *linuxEffects) releaseAdopted(ctx context.Context, r *durableRecord, o accountObservation) error {
+	if o.passwd == "" || o.group == "" || !o.shadow {
+		return errors.New("declared account missing")
+	}
+	if r.Accounts != nil {
+		if err := o.matches(r.Accounts); err != nil {
+			return err
+		}
+	}
+	if err := e.stopProcesses(ctx, r); err != nil {
+		return err
+	}
+	return adoptedNoResidue(ctx, r.Identity)
+}
 func (e *linuxEffects) removeHome(ctx context.Context, r *durableRecord) error {
+	if r.Identity.adopted() {
+		// The adopted UID outlives the slot: no process of it may keep
+		// writing while its per-slot trees are removed.
+		if err := e.stopProcesses(ctx, r); err != nil {
+			return err
+		}
+	}
 	if r.Station != nil {
 		if err := e.proveUIDQuiet(ctx, r); err != nil {
 			return err

@@ -26,6 +26,22 @@ type policy struct {
 	Payload    payloadPolicy `json:"payload"`
 	Caps       capsPolicy    `json:"caps"`
 	Egress     []egressRule  `json:"egress"`
+	// Adopted declares the one persistent, externally provisioned account
+	// (the G2 agent) that slotd adopts for exactly one slot instead of
+	// allocating an ephemeral worker account. Absent: every slot is ephemeral.
+	Adopted *adoptedAccount `json:"adopted_account,omitempty"`
+}
+
+// adoptedAccount is verified at adoption, never created and never deleted by
+// slotd. Its account holds exactly two groups: its own (GID == UID) and the
+// one declared socket group. KeyFile is bound read-only into the slot view.
+type adoptedAccount struct {
+	Slot        string
+	Name        string
+	UID         uint32
+	SocketGroup string
+	SocketGID   uint32
+	KeyFile     string
 }
 
 type payloadPolicy struct {
@@ -74,15 +90,24 @@ func parsePolicy(b []byte) (policy, error) {
 	if len(b) > maxPolicyBytes {
 		return p, errors.New("policy too large")
 	}
-	f, ok := objectFields(b, "version", "caller_user", "uid_base", "home_root", "socket", "payload", "caps", "egress")
-	if !ok || (len(f) != 7 && len(f) != 8) {
+	f, ok := objectFields(b, "version", "caller_user", "uid_base", "home_root", "socket", "payload", "caps", "egress", "adopted_account")
+	n := len(f)
+	if _, present := f["adopted_account"]; ok && present {
+		n--
+		a, err := parseAdoptedAccount(f["adopted_account"])
+		if err != nil {
+			return p, err
+		}
+		p.Adopted = a
+	}
+	if !ok || (n != 7 && n != 8) {
 		return p, errors.New("invalid policy fields")
 	}
 	if _, present := f["version"]; present {
-		if len(f) != 8 || !decodeFields(f, map[string]any{"version": &p.Version}) || p.Version != 2 {
+		if n != 8 || !decodeFields(f, map[string]any{"version": &p.Version}) || p.Version != 2 {
 			return p, errors.New("unsupported policy version")
 		}
-	} else if len(f) != 7 {
+	} else if n != 7 {
 		return p, errors.New("invalid policy fields")
 	}
 	if !decodeFields(f, map[string]any{
@@ -140,6 +165,36 @@ func parsePolicy(b []byte) (policy, error) {
 		return p, err
 	}
 	return p, rejectHostEgress(p, hostAddresses)
+}
+
+// MarshalJSON writes the exact declaration shape parseAdoptedAccount reads.
+func (a adoptedAccount) MarshalJSON() ([]byte, error) {
+	type group struct {
+		Name string `json:"name"`
+		GID  uint32 `json:"gid"`
+	}
+	return json.Marshal(struct {
+		Slot        string `json:"slot"`
+		Name        string `json:"name"`
+		UID         uint32 `json:"uid"`
+		SocketGroup group  `json:"socket_group"`
+		KeyFile     string `json:"key_file"`
+	}{a.Slot, a.Name, a.UID, group{a.SocketGroup, a.SocketGID}, a.KeyFile})
+}
+
+// parseAdoptedAccount decodes the exact declaration object; every field is
+// required and no other field is admitted.
+func parseAdoptedAccount(b json.RawMessage) (*adoptedAccount, error) {
+	var a adoptedAccount
+	f, ok := objectFields(b, "slot", "name", "uid", "socket_group", "key_file")
+	if !ok || len(f) != 5 || !decodeFields(f, map[string]any{"slot": &a.Slot, "name": &a.Name, "uid": &a.UID, "key_file": &a.KeyFile}) {
+		return nil, errors.New("invalid adopted account fields")
+	}
+	g, ok := objectFields(f["socket_group"], "name", "gid")
+	if !ok || len(g) != 2 || !decodeFields(g, map[string]any{"name": &a.SocketGroup, "gid": &a.SocketGID}) {
+		return nil, errors.New("invalid adopted socket group fields")
+	}
+	return &a, nil
 }
 
 // hostAddresses lists this host's own interface addresses at policy load.
@@ -250,6 +305,9 @@ func (p policy) validate() error {
 	if p.payloadPath() == p.HomeRoot || strings.HasPrefix(p.payloadPath(), p.HomeRoot+"/") {
 		return errors.New("payload inside writable home root")
 	}
+	if err := p.validateAdopted(); err != nil {
+		return err
+	}
 	argvBytes := 0
 	for _, arg := range p.Payload.Argv {
 		if !plainText(arg) {
@@ -326,6 +384,62 @@ func validMemoryMax(value string) bool {
 type slotIdentity struct {
 	Name, Home, Unit, Table string
 	UID                     uint32
+	// Set only for the declared adopted slot; zero (and omitted from the
+	// durable encoding) for every ephemeral worker slot.
+	SocketGroup string `json:",omitempty"`
+	SocketGID   uint32 `json:",omitempty"`
+	KeyFile     string `json:",omitempty"`
+}
+
+// adopted reports whether the identity is the policy-declared persistent
+// account. validateAdopted guarantees SocketGID != 0 for a declaration.
+func (id slotIdentity) adopted() bool { return id.SocketGID != 0 }
+
+// passwdHome is the home field the account databases must carry. slotd
+// writes the per-slot home for its own accounts; the adopted account is
+// rendered by sysusers ("u <name> <uid>"), whose home field is "/". The
+// per-slot working home under home_root is separate and fresh per slot.
+func (id slotIdentity) passwdHome() string {
+	if id.adopted() {
+		return "/"
+	}
+	return id.Home
+}
+
+// inSlotRange reports whether an ID lies in slotd's own allocation range,
+// UIDBase+0 .. UIDBase+9999, where every worker UID and its GID live.
+func (p policy) inSlotRange(n uint32) bool {
+	return n >= p.UIDBase && uint64(n) <= uint64(p.UIDBase)+9999
+}
+
+// validateAdopted admits a declaration only when it cannot collide with any
+// slotd-allocated identity (conditions 1, 8 and 9 of the adoption decision).
+func (p policy) validateAdopted() error {
+	a := p.Adopted
+	if a == nil {
+		return nil
+	}
+	if !slotPattern.MatchString(a.Slot) {
+		return errors.New("invalid adopted slot")
+	}
+	if !userPattern.MatchString(a.Name) || a.Name == "root" || a.Name == "nobody" || strings.HasPrefix(a.Name, "worker-slot-") || a.Name == p.CallerUser {
+		return errors.New("invalid adopted account name")
+	}
+	reserved := func(n uint32) bool { return n == 0 || n == 65534 || n == ^uint32(0) }
+	if reserved(a.UID) || p.inSlotRange(a.UID) {
+		return errors.New("adopted UID inside slot allocation range or reserved")
+	}
+	if !userPattern.MatchString(a.SocketGroup) || a.SocketGroup == "root" || a.SocketGroup == a.Name || strings.HasPrefix(a.SocketGroup, "worker-slot-") {
+		return errors.New("invalid adopted socket group")
+	}
+	if reserved(a.SocketGID) || a.SocketGID == a.UID || p.inSlotRange(a.SocketGID) {
+		return errors.New("adopted socket GID inside slot allocation range or reserved")
+	}
+	// The key file becomes a BindReadOnlyPaths word: systemd splits it on ':'.
+	if !cleanAbsolutePath(a.KeyFile) || strings.ContainsRune(a.KeyFile, ':') || a.KeyFile == p.HomeRoot || strings.HasPrefix(a.KeyFile, p.HomeRoot+"/") || a.KeyFile == p.Socket || a.KeyFile == p.payloadPath() || strings.HasPrefix(a.KeyFile, "/proc/") {
+		return errors.New("invalid adopted key file")
+	}
+	return nil
 }
 
 func (p policy) identity(slot string) (slotIdentity, error) {
@@ -335,7 +449,11 @@ func (p policy) identity(slot string) (slotIdentity, error) {
 	if err := p.validate(); err != nil {
 		return slotIdentity{}, err
 	}
+	unit, table := "swarma-slot-"+slot+".service", "swarma_slot_"+slot
+	if a := p.Adopted; a != nil && a.Slot == slot {
+		return slotIdentity{Name: a.Name, Home: path.Join(p.HomeRoot, a.Name), Unit: unit, Table: table, UID: a.UID, SocketGroup: a.SocketGroup, SocketGID: a.SocketGID, KeyFile: a.KeyFile}, nil
+	}
 	n, _ := strconv.ParseUint(slot, 10, 32)
 	name := "worker-slot-" + slot
-	return slotIdentity{Name: name, Home: path.Join(p.HomeRoot, name), Unit: "swarma-slot-" + slot + ".service", Table: "swarma_slot_" + slot, UID: p.UIDBase + uint32(n)}, nil
+	return slotIdentity{Name: name, Home: path.Join(p.HomeRoot, name), Unit: unit, Table: table, UID: p.UIDBase + uint32(n)}, nil
 }
