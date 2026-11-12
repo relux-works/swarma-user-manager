@@ -131,7 +131,7 @@ Three layers, each a separate kernel mechanism:
 | --- | --- | --- |
 | 1. Pathname sockets | Mount view | `TemporaryFileSystem=/run:ro /var:ro /dev/shm:ro`; `BindReadOnlyPaths=-/run/swarma-wallet <payload> [station inputs, static]`; existing `PrivateTmp=yes`, `PrivateDevices=yes`, `ProtectHome=tmpfs` |
 | 2. Abstract sockets, signals | Landlock scope (ABI >= 6) | `ExecStart=/usr/libexec/swarma-slotd-demo --slot-launch <argv>`: `LANDLOCK_SCOPE_ABSTRACT_UNIX_SOCKET\|LANDLOCK_SCOPE_SIGNAL`, then `execve` of the payload |
-| 3. Families, IPC, namespaces, IP | seccomp, namespaces, cgroup BPF, nft | `RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6`, `PrivateIPC=yes`, `RestrictNamespaces=yes`, `ProtectProc=invisible`, `ProcSubset=pid`; `IPAddressDeny=any` plus one `/32` or `/128` allow per egress address; per-UID nft accept-then-drop |
+| 3. Families, IPC, namespaces, IP | seccomp, namespaces, cgroup BPF, nft | `RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6`, `SystemCallArchitectures=native`, `PrivateIPC=yes`, `RestrictNamespaces=yes`, `ProtectProc=invisible`, `ProcSubset=pid`; `IPAddressDeny=any` plus one `/32` or `/128` allow per egress address; per-UID nft accept-then-drop |
 
 Layer 1. The wallet's socket DIRECTORY is bound read-only, not the socket file,
 so a wallet restart that recreates `wallet.sock` in the same directory stays
@@ -155,6 +155,13 @@ counts a start as successful only after the unit's main process image is no
 longer the launcher; a launcher refusal is a start failure. The readback also
 requires the exact `ExecStart` (launcher, `--slot-launch`, policy argv) through
 systemd's typed D-Bus property, for literal and typed policies alike.
+
+Layer 3, executable ABIs. systemd cannot filter the i386 `socketcall()`
+multiplexer, so `RestrictAddressFamilies=` alone lets a 386 payload open
+`AF_NETLINK`. `SystemCallArchitectures=native` is therefore part of the family
+filter: a non-native system call kills the payload with `SIGSYS`. The readback
+requires the exact value `native`. The x32 `socket()` call is filtered by
+systemd directly; no x32 payload is run.
 
 Layer 3 and loopback. Policy load refuses loopback (`127/8`,
 `::1`) and link-local egress addresses, and any address this host owns; the only
@@ -189,15 +196,35 @@ detector.
 Limits: requires Landlock ABI >= 6 (kernel 6.12 or later with `landlock` in the
 active LSM list); systemd must support `PrivateIPC=`, `ProcSubset=` and
 `TemporaryFileSystem=` (254+ is required anyway). Visible trees (`/etc`, `/usr`,
-`/opt`, `/srv`, ...) are not hidden; the T19.1 slot-side inventory proves they
-hold no socket on the tested host, and a station must re-run it after adding
-software that creates sockets there. AppArmor `unix` rules are not used.
+`/opt`, `/srv`, ...) are not hidden; the T19.1 certification proves they
+hold no reachable socket on the tested host, and a station must re-run it after
+adding software that creates sockets there. `TestRootT19InventoryOmission`
+shows why: a 0666 socket in a visible 0711 directory is connectable from a
+production slot by name. AppArmor `unix` rules are not used. Not covered by a
+committed fixture: the network names a slot can read under `/proc` (with
+`ProcSubset=pid`), and file descriptors other than the journal streams 1 and 2
+that a payload might inherit.
+
+T19.1 is a certification, not a count. Root walks the running slot's view
+through `/proc/<MainPID>/root`, pruning only mounts that are, with every mount
+below them, of a socketless type (`proc`, `sysfs`, `cgroup2`, ...: no `mknod`,
+so no socket inode) by that view's own mountinfo. Every failure of either walk
+keeps its path and errno, and the slot walk also records whether the slot UID
+can still search the directory (`stat(dir/.)`). The certification refuses when
+root's walk failed outside a socketless subtree, when a slot omission lacks
+those facts, when an omission the slot can still search holds a socket in
+root's walk, or when the two socket lists disagree. Sockets below a directory
+the slot UID cannot search are unreachable by name and leave the set. The host
+inventory for T19.2 is the same Go walk of `/` (NUL-safe, no `find` output
+parsing); there only `ENOENT` (a directory that vanished during the walk) is
+accepted, and both walks have a time bound.
 
 ### T19 root tests
 
 | ID | Test | Claim |
 | --- | --- | --- |
-| T19.1 | `TestRootT19SlotConfinement/T19.1-inventory` | host `find / -type s` (all mounts, `/proc` pruned) and `/proc/net/unix` are logged; the slot's own walk of its whole view finds exactly `wallet.sock` |
+| T19.1 | `TestRootT19SlotConfinement/T19.1-inventory` | the certified reachable pathname-socket set is exactly `wallet.sock`: root's walk of the slot view is complete, every slot omission is classified, and the slot's own walk lists exactly `wallet.sock` |
+| T19.1 control | `TestRootT19InventoryOmission` | a socket in a visible 0711 directory is missed by the slot walk yet connects by name: the certification refuses it; its 0700 neighbour gives `EACCES` and is classified unreachable |
 | T19.2 | `.../T19.2-pathname` | every host pathname socket refuses from the slot with `ENOENT` or `EACCES`; the wallet connects |
 | T19.3 | `.../T19.3-abstract` | every abstract name the host can connect to refuses from the slot with `EPERM` |
 | T19.4 | `.../T19.4-plants` | 0666 plants in `/run`, `/var/lib`, `/tmp`, `/dev/shm` refuse with `ENOENT`, the abstract plant with `EPERM`; each accepts from the host first |
@@ -205,6 +232,7 @@ software that creates sockets there. AppArmor `unix` rules are not used.
 | T19.6 | `.../T19.6-wallet-restart` | after the wallet unlinks and recreates its socket inode, the running slot reaches generation 2 |
 | T19.7 | `.../T19.7-journald` | the payload's stdout line is in the unit's journal while `/run/systemd/journal/socket` and `/dev/log` give `ENOENT` |
 | T19.8 | `.../T19.8-families` | `AF_NETLINK` and `AF_PACKET` give `EAFNOSUPPORT`; `AF_UNIX`, `AF_INET`, `AF_INET6` open |
+| T19.8 ABI | `TestRootT19AlternateABI` | the 386 build of the probe, started by slotd with the production properties, dies with `SIGSYS` before it reports; the same vector without only `SystemCallArchitectures=native` runs it, and it opens `AF_NETLINK` |
 | T19.9 | `.../T19.9-tamper` | `unshare(NEWUSER\|NEWNET)`, an empty-scope ruleset, an unscoped second Landlock layer and `prctl` games restore no access |
 | T19.10 | `TestRootT19LandlockFailClosed` | with the ABI faked to 5, slotd's production start fails, the payload never runs, the journal has the refusal |
 | T19.11 | `.../T19.11-status-absent`, `TestRootT19StatusSocketBound` | status.sock gives `ENOENT` in the slot; bound on purpose it gives `EACCES` while the wallet connects; no operator GID |
@@ -216,8 +244,13 @@ Narrowing mutants live in `internal/slotd/testdata/t19-mutants/`. A workflow
 dispatch with `-f mutant=<name>` applies one and is green only when its named
 test fails: `m1-run-bind` (no `/run` tmpfs) is killed by `T19.4-plants`,
 `m2-skip-landlock` by `T19.3-abstract`, `m3-no-family-filter` by
-`T19.8-families`. `m4-egress-loopback` (accept `127/8`) is a portable mutant,
-killed by `TestT19EgressHostLocalRefusal`.
+`T19.8-families`, `m5-no-syscall-archs` (no `SystemCallArchitectures=native`)
+by `TestRootT19AlternateABI`. Portable mutants: `m4-egress-loopback` (accept
+`127/8`) is killed by `TestT19EgressHostLocalRefusal`;
+`m6-inventory-searchable-omission` (every slot omission counts as unsearchable)
+and `m7-inventory-view-errors` (failures of root's view walk ignored) by
+`TestT19InventoryVerdict`. The workflow builds the 386 test binary itself and
+passes it as `SLOTD_T19_ALT_ABI_PROBE`.
 
 The hosted runner has no agent wallet or node: the tests bind a fixture wallet
 and a node-RPC stand-in, and refuse to run where `/run/swarma-wallet` already
