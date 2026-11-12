@@ -1153,15 +1153,19 @@ func TestRootT19InventoryOmission(t *testing.T) {
 	t19Wallets(t)
 	base := "/opt/swarma-t19-omit"
 	searchable, closed := base+"/searchable", base+"/closed"
-	for path, mode := range map[string]os.FileMode{base: 0755, searchable: 0711, closed: 0700} {
-		if err := os.Mkdir(path, mode); err != nil {
+	// Parent first: the directories are created in this order.
+	for _, dir := range []struct {
+		path string
+		mode os.FileMode
+	}{{base, 0755}, {searchable, 0711}, {closed, 0700}} {
+		if err := os.Mkdir(dir.path, dir.mode); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.Chmod(path, mode); err != nil {
-			t.Fatal(err)
-		}
-		if path == base {
+		if dir.path == base {
 			t.Cleanup(func() { os.RemoveAll(base) })
+		}
+		if err := os.Chmod(dir.path, dir.mode); err != nil {
+			t.Fatal(err)
 		}
 	}
 	plants := []string{searchable + "/ctl.sock", closed + "/ctl.sock"}
