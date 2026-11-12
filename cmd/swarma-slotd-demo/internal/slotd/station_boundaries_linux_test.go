@@ -72,3 +72,41 @@ func TestStationInstalledUnitReadback(t *testing.T) {
 		})
 	}
 }
+
+// Claim: unit property parsing reads systemd's omission of an empty
+// EnvironmentFiles list as empty, keeps a present entry for readback to refuse,
+// and still refuses any other missing, duplicate or malformed property. The
+// omission shape is systemd 259 `systemctl show --all` output; hosted root
+// starts are the end-to-end witness.
+func TestUnitPropertiesOmittedEnvironmentFiles(t *testing.T) {
+	render := func(skip string) string {
+		var b strings.Builder
+		for _, key := range unitPropertyNames {
+			if key != skip {
+				b.WriteString(key + "=\n")
+			}
+		}
+		return b.String()
+	}
+	base := render("EnvironmentFiles")
+	v, err := parseUnitProperties([]byte(base))
+	if err != nil || len(v) != len(unitPropertyNames) || v["EnvironmentFiles"] != "" {
+		t.Fatal("empty EnvironmentFiles omission refused", err)
+	}
+	one := base + "EnvironmentFiles=/etc/default/payload (ignore_errors=no)\n"
+	if v, err = parseUnitProperties([]byte(one)); err != nil || v["EnvironmentFiles"] != "/etc/default/payload (ignore_errors=no)" {
+		t.Fatal("present EnvironmentFiles entry lost", err)
+	}
+	for name, plant := range map[string]struct{ output, want string }{
+		"two environment files": {one + "EnvironmentFiles=/etc/default/other (ignore_errors=yes)\n", "duplicate unit property"},
+		"environment missing":   {render("Environment"), "missing unit property"},
+		"bind paths missing":    {render("BindPaths"), "missing unit property"},
+		"malformed line":        {base + "EnvironmentFiles\n", "invalid unit properties"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := parseUnitProperties([]byte(plant.output)); err == nil || err.Error() != plant.want {
+				t.Fatalf("wrong property parse verdict: %v; want %s", err, plant.want)
+			}
+		})
+	}
+}

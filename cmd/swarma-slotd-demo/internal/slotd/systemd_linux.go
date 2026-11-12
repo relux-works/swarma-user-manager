@@ -41,6 +41,15 @@ func unitProperties(ctx context.Context, id slotIdentity) (map[string]string, er
 	if e != nil {
 		return nil, e
 	}
+	return parseUnitProperties(b)
+}
+
+// systemctl show prints EnvironmentFiles once per entry and omits it entirely
+// when the list is empty, even with --all. Absence therefore means empty; any
+// entry keeps a non-empty value, and two or more entries are duplicate lines.
+var unitPropertiesOmittedWhenEmpty = map[string]bool{"EnvironmentFiles": true}
+
+func parseUnitProperties(b []byte) (map[string]string, error) {
 	values := map[string]string{}
 	for _, line := range strings.Split(strings.TrimSuffix(string(b), "\n"), "\n") {
 		k, v, ok := strings.Cut(line, "=")
@@ -54,7 +63,10 @@ func unitProperties(ctx context.Context, id slotIdentity) (map[string]string, er
 	}
 	for _, key := range unitPropertyNames {
 		if _, ok := values[key]; !ok {
-			return nil, errors.New("missing unit property")
+			if !unitPropertiesOmittedWhenEmpty[key] {
+				return nil, errors.New("missing unit property")
+			}
+			values[key] = ""
 		}
 	}
 	return values, nil
