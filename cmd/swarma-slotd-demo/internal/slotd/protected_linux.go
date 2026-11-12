@@ -79,8 +79,43 @@ func openTrustedDir(path string) (*os.File, error) {
 	if e != nil {
 		return nil, e
 	}
-	current := os.NewFile(uintptr(fd), "root")
-	if e = trustedDirectory(current, 0); e != nil {
+	return walkTrustedDir(os.NewFile(uintptr(fd), "root"), path)
+}
+
+// openHostTrustedDir resolves path below PID 1's root directory. systemd gives
+// even a fully privileged ExecStartPre=+ command a fresh mount namespace when
+// the unit needs one (BindPaths=, ProtectSystem=, PrivateTmp=); only the
+// sandboxing options are skipped. Mount identities observed through "/" there
+// are namespace-local copies, and the unit's own binds add mount crossings. The
+// daemon runs without a private mount namespace, so PID 1's root is the view in
+// which it recorded custody receipts.
+func openHostTrustedDir(path string) (*os.File, error) {
+	if path != "/" && !cleanAbsolutePath(path) {
+		return nil, errors.New("invalid protected path")
+	}
+	proc, e := openTrustedDir("/proc")
+	if e != nil {
+		return nil, e
+	}
+	defer proc.Close()
+	var fs unix.Statfs_t
+	if e = unix.Fstatfs(int(proc.Fd()), &fs); e != nil || fs.Type != unix.PROC_SUPER_MAGIC {
+		return nil, errors.New("host root unavailable")
+	}
+	// "root" is a kernel magic link into PID 1's mount namespace and root.
+	fd, e := unix.Openat(int(proc.Fd()), "1/root", unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC, 0)
+	if e != nil {
+		return nil, e
+	}
+	return walkTrustedDir(os.NewFile(uintptr(fd), "host-root"), path)
+}
+
+// walkTrustedDir takes ownership of current, a root directory, and opens path
+// below it one protected component at a time.
+func walkTrustedDir(current *os.File, path string) (*os.File, error) {
+	var fd int
+	e := trustedDirectory(current, 0)
+	if e != nil {
 		current.Close()
 		return nil, e
 	}

@@ -112,7 +112,8 @@ func plantFenceFault(kind string, q fenceRequest) error {
 	case "station_bootstrap":
 		// Baseline admission must succeed before the bounded known violation.
 		// The caller already verified this is its positively owned test cgroup.
-		roots, err := openStationRoots()
+		// Like the fence itself, resolve custody below PID 1's root.
+		roots, err := openHostStationRoots()
 		if err != nil {
 			return err
 		}

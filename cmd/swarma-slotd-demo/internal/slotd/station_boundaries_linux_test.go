@@ -3,8 +3,14 @@
 package slotd
 
 import (
+	"context"
+	"encoding/json"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -108,5 +114,91 @@ func TestUnitPropertiesOmittedEnvironmentFiles(t *testing.T) {
 				t.Fatalf("wrong property parse verdict: %v; want %s", err, plant.want)
 			}
 		})
+	}
+}
+
+type namespaceViewReport struct {
+	Local string `json:"local"`
+	Host  string `json:"host"`
+}
+
+// runNamespaceViewProbe runs as root in a fresh mount namespace and reports
+// whether the recorded custody admits through "/" and below PID 1's root.
+func runNamespaceViewProbe(args []string) int {
+	if len(args) != 1 || os.Geteuid() != 0 {
+		return 91
+	}
+	b, err := readProtected(args[0], 0600, 64*1024)
+	var r durableRecord
+	if err != nil || json.Unmarshal(b, &r) != nil {
+		return 92
+	}
+	view := func(open func() (stationRoots, error)) string {
+		roots, err := open()
+		if err != nil {
+			return "roots: " + err.Error()
+		}
+		defer roots.close()
+		v, err := openStationView(roots, &r)
+		if err != nil {
+			return "view: " + err.Error()
+		}
+		v.close()
+		return ""
+	}
+	out, err := json.Marshal(namespaceViewReport{Local: view(openStationRoots), Host: view(openHostStationRoots)})
+	if err != nil {
+		return 93
+	}
+	_, _ = os.Stdout.Write(out)
+	return 0
+}
+
+// Claim: in a fresh mount namespace, as systemd gives an ExecStartPre=+ fence,
+// custody opened through "/" fails the daemon's mount receipts while custody
+// opened below PID 1's root admits them; both admit in the daemon's own view.
+func TestRootStationFenceHostView(t *testing.T) {
+	var r durableRecord
+	engine, _, _, dir := realStationEngine(t, &r)
+	createStationFixture(t, engine, &r)
+	for name, open := range map[string]func() (stationRoots, error){"slash": openStationRoots, "pid1": openHostStationRoots} {
+		roots, err := open()
+		if err != nil {
+			t.Fatal(name, err)
+		}
+		v, err := openStationView(roots, &r)
+		roots.close()
+		if err != nil {
+			t.Fatal("daemon-view control", name, err)
+		}
+		v.close()
+	}
+	b, err := json.Marshal(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	record := filepath.Join(dir, "namespace-view-record.json")
+	if err = os.WriteFile(record, b, 0600); err != nil {
+		t.Fatal(err)
+	}
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(self, "slotd-namespace-view-probe", record)
+	cmd.Env = []string{}
+	cmd.SysProcAttr = &syscall.SysProcAttr{Unshareflags: syscall.CLONE_NEWNS}
+	out, err := cmd.Output()
+	var got namespaceViewReport
+	if err != nil || json.Unmarshal(out, &got) != nil {
+		t.Fatal("namespace probe", err, string(out))
+	}
+	t.Logf("fresh namespace: %+v", got)
+	if got.Local == "" || got.Host != "" {
+		t.Fatal("fresh-namespace custody verdicts", got)
+	}
+	retired, code := engine.apply(context.Background(), request{Op: "destroy", Slot: r.Slot})
+	if code != "" || retired == nil || retired.Binding.State != destroyed {
+		t.Fatal("typed retirement", code)
 	}
 }

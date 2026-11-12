@@ -68,14 +68,24 @@ func (r stationRoots) close() {
 // Deployment provisions only the shared protected parents. Create never adopts
 // or repairs a missing/misconfigured parent, nor provisions an unbounded range.
 func openStationRoots() (stationRoots, error) {
+	return openStationRootsWith(openTrustedDir)
+}
+
+// openHostStationRoots is for the ExecStartPre=+ fence, which runs in a fresh
+// mount namespace; see openHostTrustedDir.
+func openHostStationRoots() (stationRoots, error) {
+	return openStationRootsWith(openHostTrustedDir)
+}
+
+func openStationRootsWith(open func(string) (*os.File, error)) (stationRoots, error) {
 	var r stationRoots
 	var err error
-	r.envelopes, err = openTrustedDir(payloadlaunch.EnvelopeRoot)
+	r.envelopes, err = open(payloadlaunch.EnvelopeRoot)
 	if err == nil {
 		err = trustedDirectory(r.envelopes, 0755)
 	}
 	if err == nil {
-		r.anchors, err = openTrustedDir(payloadlaunch.AnchorRoot)
+		r.anchors, err = open(payloadlaunch.AnchorRoot)
 	}
 	if err == nil {
 		err = trustedDirectory(r.anchors, 0755)

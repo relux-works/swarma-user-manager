@@ -259,9 +259,10 @@ func verifyFence(ctx context.Context, q fenceRequest) error {
 		if err = verifyStationUnitExec(ctx, r); err != nil {
 			return errFenceInput
 		}
-		// ExecStartPre=+ intentionally sees the host mount view required for
-		// kernel enforcement. Main proves its own strict view before effects.
-		roots, e := openStationRoots()
+		// ExecStartPre=+ runs in a fresh mount namespace whenever the unit
+		// needs one, so custody receipts are checked below PID 1's root, the
+		// view the daemon recorded them in. Main proves its own strict view.
+		roots, e := openHostStationRoots()
 		if e != nil {
 			return errFenceInput
 		}

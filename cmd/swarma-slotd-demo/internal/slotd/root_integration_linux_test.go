@@ -37,6 +37,9 @@ func TestMain(m *testing.M) {
 		}
 		os.Exit(runProbe(os.Args[2:]))
 	}
+	if len(os.Args) > 1 && os.Args[1] == "slotd-namespace-view-probe" {
+		os.Exit(runNamespaceViewProbe(os.Args[2:]))
+	}
 	if len(os.Args) > 1 && os.Args[1] == "slotd-station-access-probe" {
 		if os.Geteuid() == 0 {
 			os.Exit(90)

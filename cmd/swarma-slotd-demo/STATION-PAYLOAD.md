@@ -113,7 +113,11 @@ the actual executable and argv without parsing systemctl's display string.
 The fixed existing `ExecStartPre=+` fence still proves actual cgroup/BPF/NFT and
 limits before execution. It checks the typed host-view receipt, inputs and
 intended unit settings. The immutable journal `mount_id` is exclusively the host
-custody observation. Each service command has its own namespace-local mount IDs;
+custody observation. systemd runs even an `ExecStartPre=+` command in a fresh
+mount namespace when the unit needs one (only its sandboxing options are
+skipped), so the fence resolves custody below PID 1's root (`/proc/1/root`), the
+view in which the namespace-free daemon recorded its receipts. Each service
+command has its own namespace-local mount IDs;
 the payload must prove its actual main view, pinned device/inode, local topology
 and read-only flags before credentials, transport or delivery effects. Prestart
 does not claim to observe that later namespace. No wrapper or extra helper mode
