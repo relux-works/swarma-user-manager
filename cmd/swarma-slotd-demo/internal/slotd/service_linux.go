@@ -231,7 +231,7 @@ func callerIdentity(p policy) (uint32, uint32, error) {
 	if e != nil {
 		return 0, 0, e
 	}
-	if uid == 0 || (uid >= uint64(p.UIDBase) && uid <= uint64(p.UIDBase)+9999) {
+	if uid == 0 || (uid >= uint64(p.UIDBase) && uid <= uint64(p.UIDBase)+9999) || (p.Adopted != nil && uid == uint64(p.Adopted.UID)) {
 		return 0, 0, errors.New("caller overlaps slot identities")
 	}
 	return uint32(uid), uint32(gid), nil

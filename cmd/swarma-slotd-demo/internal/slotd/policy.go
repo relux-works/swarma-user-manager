@@ -182,6 +182,17 @@ func (a adoptedAccount) MarshalJSON() ([]byte, error) {
 	}{a.Slot, a.Name, a.UID, group{a.SocketGroup, a.SocketGID}, a.KeyFile})
 }
 
+// UnmarshalJSON is the strict inverse of MarshalJSON, so a policy carried
+// through encoding/json (the prestart fence request) keeps its declaration.
+func (a *adoptedAccount) UnmarshalJSON(b []byte) error {
+	v, err := parseAdoptedAccount(b)
+	if err != nil {
+		return err
+	}
+	*a = *v
+	return nil
+}
+
 // parseAdoptedAccount decodes the exact declaration object; every field is
 // required and no other field is admitted.
 func parseAdoptedAccount(b json.RawMessage) (*adoptedAccount, error) {
@@ -434,6 +445,18 @@ func (p policy) validateAdopted() error {
 	}
 	if reserved(a.SocketGID) || a.SocketGID == a.UID || p.inSlotRange(a.SocketGID) {
 		return errors.New("adopted socket GID inside slot allocation range or reserved")
+	}
+	// A v2 station manifest binds (slot, UID, GID == UID) through
+	// payloadlaunch, which accepts only UID = base + slot for a valid slot
+	// base. Refuse at load what the station path would refuse at create.
+	if p.Version == 2 {
+		n, _ := strconv.ParseUint(a.Slot, 10, 32)
+		if uint64(a.UID) <= n {
+			return errors.New("adopted UID outside the station allocation rule")
+		}
+		if base, err := payloadlaunch.SlotUID(a.UID-uint32(n), uint32(n)); err != nil || base != a.UID {
+			return errors.New("adopted UID outside the station allocation rule")
+		}
 	}
 	// The key file becomes a BindReadOnlyPaths word: systemd splits it on ':'.
 	if !cleanAbsolutePath(a.KeyFile) || strings.ContainsRune(a.KeyFile, ':') || a.KeyFile == p.HomeRoot || strings.HasPrefix(a.KeyFile, p.HomeRoot+"/") || a.KeyFile == p.Socket || a.KeyFile == p.payloadPath() || strings.HasPrefix(a.KeyFile, "/proc/") {

@@ -5,7 +5,9 @@ package slotd
 import (
 	"context"
 	"os"
+	"os/user"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -72,5 +74,28 @@ func TestAdoptedResidueSearch(t *testing.T) {
 	cancel()
 	if found, err = findOwned(expired, root, uid+1, nil, nil, time.Minute); err == nil {
 		t.Fatalf("cancelled search passed: %q", found)
+	}
+}
+
+// Proves a caller account whose UID is the adopted UID is refused like a
+// caller inside the slot range, while the same caller is admitted when the
+// declaration names another UID. Uses the invoking (non-root) account.
+func TestAdoptedCallerOverlap(t *testing.T) {
+	me, err := user.Current()
+	if err != nil || me.Uid == "0" || !userPattern.MatchString(me.Username) {
+		t.Skip("needs a named non-root invoking account")
+	}
+	uid, _ := strconv.ParseUint(me.Uid, 10, 32)
+	p := adoptedPolicy(t)
+	p.CallerUser = me.Username
+	decl := *p.Adopted
+	decl.UID = uint32(uid) + 1
+	p.Adopted = &decl
+	if got, _, err := callerIdentity(p); err != nil || uint64(got) != uid {
+		t.Fatalf("caller with another UID: %d %v", got, err)
+	}
+	decl.UID = uint32(uid)
+	if _, _, err = callerIdentity(p); err == nil || err.Error() != "caller overlaps slot identities" {
+		t.Fatalf("caller with the adopted UID: %v", err)
 	}
 }

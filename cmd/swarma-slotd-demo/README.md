@@ -279,6 +279,8 @@ suite drives it through literal v0 payloads):
 | Rule | Where |
 |---|---|
 | Name and UID are declared; the UID and the socket GID lie outside `uid_base .. uid_base+9999`, are not 0/65534, and differ; any other pre-existing name or UID still refuses `unmanaged identity exists` | `validateAdopted`, `createAccounts` |
+| v2 only: the UID also satisfies the station manifest's allocation rule (`uid - slot` is a valid slot base, so the base range cannot cover 65534); otherwise the policy is refused at load | `validateAdopted` |
+| The caller account may not hold the adopted UID | `callerIdentity` |
 | `/etc/passwd` line: GID == UID, home `/` (sysusers default), `/usr/sbin/nologin`, locked; own group with no members; the account is a member of the declared socket group and of no other group | `observeAccountBytes` |
 | NSS (by name and by id): groups are exactly {own GID == UID, socket GID}; the socket group resolves by name and by id | `verifyNSS`, `admitGroupSet` |
 | Adoption verifies and never creates; the receipt hashes the existing lines | `createAccounts`, `prepareCreate` |

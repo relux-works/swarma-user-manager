@@ -63,8 +63,29 @@ func TestAdoptedPolicyDeclaration(t *testing.T) {
 	if err != nil || !reflect.DeepEqual(again, p) {
 		t.Fatalf("round trip %v", err)
 	}
-	if _, err = parsePolicy(adoptedPolicyBytes(t, stationPolicyBytes(t), adoptedDeclaration)); err != nil {
+	// The prestart fence carries the policy through encoding/json and
+	// requires a canonical re-encoding: the declaration must survive it, and
+	// a malformed declaration must not decode.
+	var decoded policy
+	if err = json.Unmarshal(b, &decoded); err != nil || !reflect.DeepEqual(decoded, p) {
+		t.Fatalf("encoding/json round trip lost the declaration: %+v %v", decoded.Adopted, err)
+	}
+	if again, _ := json.Marshal(decoded); !bytes.Equal(again, b) {
+		t.Fatal("fence re-encoding is not canonical")
+	}
+	var bad adoptedAccount
+	if err = json.Unmarshal([]byte(`{"slot":"17","name":"a","uid":61000,"socket_group":{"name":"g"},"key_file":"/k"}`), &bad); err == nil {
+		t.Fatal("declaration without a socket GID decoded")
+	}
+	// v2: the adopted UID must also satisfy the station manifest's
+	// allocation rule (UID = valid base + slot); 300017 for slot 17 does,
+	// 61000 for slot 17 does not (its base range would cover 65534).
+	v2 := `"adopted_account":{"slot":"17","name":"swarma-agent","uid":300017,"socket_group":{"name":"swarma-wallet-peer","gid":61001},"key_file":"/var/lib/swarma-agent/agent.key"}`
+	if _, err = parsePolicy(adoptedPolicyBytes(t, stationPolicyBytes(t), v2)); err != nil {
 		t.Fatalf("v2 declaration refused: %v", err)
+	}
+	if _, err = parsePolicy(adoptedPolicyBytes(t, stationPolicyBytes(t), adoptedDeclaration)); err == nil || err.Error() != "adopted UID outside the station allocation rule" {
+		t.Fatalf("v2 declaration outside the station allocation rule: %v", err)
 	}
 }
 
