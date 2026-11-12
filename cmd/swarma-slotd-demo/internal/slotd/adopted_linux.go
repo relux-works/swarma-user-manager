@@ -392,8 +392,11 @@ func systemCronFileScheduledAs(dirfd int, rel, p, name string, uid uint32, dirEn
 // symlink, a FIFO, a directory, another file) or removed refuses.
 func systemCronOpenEntry(dirfd int, rel, p string, want *unix.Stat_t) (*os.File, error) {
 	fd, err := unix.Openat(dirfd, rel, unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_NONBLOCK|unix.O_CLOEXEC, 0)
-	if err != nil {
+	if errors.Is(err, unix.ELOOP) || errors.Is(err, unix.ENOENT) {
 		return nil, fmt.Errorf("system cron %s: changed after it was examined: %w", p, err)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("system cron %s: %w", p, err)
 	}
 	f := os.NewFile(uintptr(fd), p)
 	var st unix.Stat_t
