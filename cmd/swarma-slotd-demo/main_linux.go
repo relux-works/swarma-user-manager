@@ -17,6 +17,9 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == "--install-check" {
 		os.Exit(slotd.InstallCheck(os.Args[2:]))
 	}
+	if len(os.Args) > 1 && os.Args[1] == "--slot-launch" {
+		os.Exit(slotd.SlotLaunch(os.Args[2:]))
+	}
 	if len(os.Args) > 1 && os.Args[1] == "--enforcement-fence" {
 		os.Exit(slotd.EnforcementFence(os.Args[2:]))
 	}

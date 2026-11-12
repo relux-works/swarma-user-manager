@@ -21,6 +21,7 @@ func TestStationExecReadback(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	argv = append([]string{slotLauncherPath, slotLaunchFlag}, argv...)
 	tuple := func(args []string) []any {
 		return []any{argv[0], args, false, uint64(0), uint64(0), uint64(0), uint64(0), uint32(0), int32(0), int32(0)}
 	}
@@ -39,10 +40,19 @@ func TestStationExecReadback(t *testing.T) {
 		"extra flag": func() []byte { return encode([]any{tuple(append(append([]string{}, argv...), "-ca", "/foreign"))}) },
 		"reorder": func() []byte {
 			a := append([]string{}, argv...)
-			a[3], a[5] = a[5], a[3]
+			a[5], a[7] = a[7], a[5]
 			return encode([]any{tuple(a)})
 		},
 		"executable override": func() []byte { v := tuple(argv); v[0] = "/bin/true"; return encode([]any{v}) },
+		// T19 layer 2: the payload as the direct ExecStart skips the Landlock
+		// launcher, whether by executable, argv prefix or launch flag.
+		"launcher bypassed": func() []byte { v := tuple(argv[2:]); v[0] = argv[2]; return encode([]any{v}) },
+		"launcher argv0":    func() []byte { a := append([]string{}, argv...); a[0] = argv[2]; return encode([]any{tuple(a)}) },
+		"launch flag": func() []byte {
+			a := append([]string{}, argv...)
+			a[1] = "--enforcement-fence"
+			return encode([]any{tuple(a)})
+		},
 		"extra command":       func() []byte { return encode([]any{tuple(argv), tuple(argv)}) },
 		"ignore exit":         func() []byte { v := tuple(argv); v[2] = true; return encode([]any{v}) },
 		"null timestamp":      func() []byte { v := tuple(argv); v[3] = nil; return encode([]any{v}) },

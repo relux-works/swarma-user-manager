@@ -1,0 +1,15 @@
+T19 narrowing mutant m1 (layer 1, mount view): /run is not replaced by an
+empty tmpfs; host /run stays visible read-only. Killed by
+TestRootT19SlotConfinement/T19.4-plants (and T19.1, T19.2).
+
+--- a/cmd/swarma-slotd-demo/internal/slotd/unit.go
++++ b/cmd/swarma-slotd-demo/internal/slotd/unit.go
+@@ -27,7 +27,7 @@
+ // slotTemporaryFileSystems replaces every tree that can hold another
+ // service's pathname socket with an empty read-only tmpfs. /dev/shm is listed
+ // because PrivateDevices= binds the host's /dev/shm into the private /dev.
+-var slotTemporaryFileSystems = []string{"/run:ro", "/var:ro", "/dev/shm:ro"}
++var slotTemporaryFileSystems = []string{"/var:ro", "/dev/shm:ro"}
+ 
+ // slotHardening is T19 layer 3: no netlink/packet sockets, private SysV/POSIX
+ // IPC, no new namespaces, and host processes invisible in the slot's /proc.

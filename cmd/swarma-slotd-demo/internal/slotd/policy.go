@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"net"
 	"net/netip"
 	"path"
 	"regexp"
@@ -135,7 +136,59 @@ func parsePolicy(b []byte) (policy, error) {
 		}
 		p.Egress = append(p.Egress, rule)
 	}
-	return p, p.validate()
+	if err := p.validate(); err != nil {
+		return p, err
+	}
+	return p, rejectHostEgress(p, hostAddresses)
+}
+
+// hostAddresses lists this host's own interface addresses at policy load.
+var hostAddresses = func() ([]netip.Addr, error) {
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return nil, err
+	}
+	var out []netip.Addr
+	for _, a := range addrs {
+		if prefix, perr := netip.ParsePrefix(a.String()); perr == nil {
+			out = append(out, prefix.Addr().Unmap())
+		}
+	}
+	return out, nil
+}
+
+// rejectHostEgress refuses an egress address owned by this host, which would
+// reach host listeners through the shared network namespace (matrix row 14).
+// Only the exact station gateway rule is exempt. It runs at policy load, not
+// in validate, so a later address change cannot strand destroy or stop.
+func rejectHostEgress(p policy, own func() ([]netip.Addr, error)) error {
+	addrs, err := own()
+	if err != nil {
+		return errors.New("host address inventory unavailable")
+	}
+	gateway, exempt := stationGatewayRule(p)
+	for _, rule := range p.Egress {
+		if exempt && rule == gateway {
+			continue
+		}
+		for _, a := range addrs {
+			if a.String() == rule.Addr {
+				return errors.New("invalid egress rule: host address")
+			}
+		}
+	}
+	return nil
+}
+
+func stationGatewayRule(p policy) (egressRule, bool) {
+	if p.Version != 2 || p.Payload.StationProfile == nil {
+		return egressRule{}, false
+	}
+	gateway, err := netip.ParseAddrPort(p.Payload.StationProfile.Gateway)
+	if err != nil {
+		return egressRule{}, false
+	}
+	return egressRule{Addr: gateway.Addr().String(), Port: gateway.Port(), Proto: "tcp"}, true
 }
 
 func decodeFields(fields map[string]json.RawMessage, targets map[string]any) bool {
@@ -211,20 +264,25 @@ func (p policy) validate() error {
 	if !cpuPattern.MatchString(p.Caps.CPUQuota) || err != nil || cpu <= 0 || !validMemoryMax(p.Caps.MemoryMax) || p.Caps.TasksMax == 0 {
 		return errors.New("invalid resource caps")
 	}
-	seen, err := validateEgress(p.Egress)
+	gateway, exempt := stationGatewayRule(p)
+	if p.Version == 2 && !exempt {
+		return errors.New("invalid station gateway")
+	}
+	seen, err := validateEgress(p.Egress, gateway, exempt)
 	if err != nil {
 		return err
 	}
-	if p.Version == 2 {
-		gateway, _ := netip.ParseAddrPort(p.Payload.StationProfile.Gateway)
-		if !seen[egressRule{Addr: gateway.Addr().String(), Port: gateway.Port(), Proto: "tcp"}] {
-			return errors.New("station gateway missing from egress policy")
-		}
+	if p.Version == 2 && !seen[gateway] {
+		return errors.New("station gateway missing from egress policy")
 	}
 	return nil
 }
 
-func validateEgress(rules []egressRule) (map[egressRule]bool, error) {
+// validateEgress also refuses loopback and link-local destinations: the slot
+// shares the host network namespace, so such a rule opens host-local
+// listeners (node RPC, resolver stub). The single exception is the exact
+// station gateway addr:port, which may be the only loopback rule.
+func validateEgress(rules []egressRule, gateway egressRule, exempt bool) (map[egressRule]bool, error) {
 	if len(rules) > 256 {
 		return nil, errors.New("invalid egress list")
 	}
@@ -233,6 +291,9 @@ func validateEgress(rules []egressRule) (map[egressRule]bool, error) {
 		addr, err := netip.ParseAddr(rule.Addr)
 		if err != nil || addr.Zone() != "" || addr.IsUnspecified() || addr.IsMulticast() || addr.Is4In6() || addr.String() != rule.Addr || rule.Port == 0 || (rule.Proto != "tcp" && rule.Proto != "udp") || seen[rule] {
 			return nil, errors.New("invalid egress rule")
+		}
+		if (addr.IsLoopback() || addr.IsLinkLocalUnicast()) && !(exempt && rule == gateway) {
+			return nil, errors.New("invalid egress rule: host-local address")
 		}
 		seen[rule] = true
 	}

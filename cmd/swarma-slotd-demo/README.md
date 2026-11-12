@@ -83,7 +83,8 @@ Install this same binary at `/usr/libexec/swarma-slotd-demo`, root-owned and not
 group/other writable, with executable permission and protected ancestors. Before
 launch the daemon checks that its kernel-held executable bytes match that file.
 `ExecStartPre=+/usr/libexec/swarma-slotd-demo --enforcement-fence N TOKEN` runs
-before the unchanged policy `ExecStart` argv. The `+` applies only to this trusted
+before `ExecStart=/usr/libexec/swarma-slotd-demo --slot-launch <policy argv>`
+(see [Slot confinement](#slot-confinement-t19)). The `+` applies only to this trusted
 root verifier; the payload retains its slot UID and hardening. Fence mode has no
 payload execution or account mutation operation and is not setuid.
 
@@ -118,6 +119,96 @@ Each requires its specific refusal and an absent payload execution sentinel,
 beside a valid launch. These fault hooks exist only in the copied test binary.
 The systemd-only network control removes its owned NFT layer after a successful
 production fence and releases an inert gated probe; production has no bypass.
+
+## Slot confinement (T19)
+
+From inside a slot exactly one AF_UNIX endpoint is connectable: the agent
+wallet's action socket in `/run/swarma-wallet/`. Every other pathname socket,
+every abstract socket outside the slot, and loopback/host-IP listeners refuse.
+Three layers, each a separate kernel mechanism:
+
+| Layer | Mechanism | Unit properties / code |
+| --- | --- | --- |
+| 1. Pathname sockets | Mount view | `TemporaryFileSystem=/run:ro /var:ro /dev/shm:ro`; `BindReadOnlyPaths=-/run/swarma-wallet <payload> [station inputs, static]`; existing `PrivateTmp=yes`, `PrivateDevices=yes`, `ProtectHome=tmpfs` |
+| 2. Abstract sockets, signals | Landlock scope (ABI >= 6) | `ExecStart=/usr/libexec/swarma-slotd-demo --slot-launch <argv>`: `LANDLOCK_SCOPE_ABSTRACT_UNIX_SOCKET\|LANDLOCK_SCOPE_SIGNAL`, then `execve` of the payload |
+| 3. Families, IPC, namespaces, IP | seccomp, namespaces, cgroup BPF, nft | `RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6`, `PrivateIPC=yes`, `RestrictNamespaces=yes`, `ProtectProc=invisible`, `ProcSubset=pid`; `IPAddressDeny=any` plus one `/32` or `/128` allow per egress address; per-UID nft accept-then-drop |
+
+Layer 1. The wallet's socket DIRECTORY is bound read-only, not the socket file,
+so a wallet restart that recreates `wallet.sock` in the same directory stays
+reachable; the wallet unit must therefore keep the directory across restarts
+(for example `RuntimeDirectoryPreserve=yes`, or a tmpfiles entry). The `-`
+prefix lets a host without a wallet start slots, which then have no AF_UNIX
+endpoint at all. The operator `status.sock` lives in `/run/swarma-wallet-status/`
+(0750, operator group) and is never bound. `/var` is hidden as a whole instead of
+listing socket directories found by an inventory: a socket created under `/var`
+later is still hidden. `/dev/shm` is listed because `PrivateDevices=` binds the
+host's `/dev/shm` into the private `/dev`. journald needs no connect: systemd
+hands the slot its stdout/stderr stream sockets as fds 1 and 2.
+
+Layer 2. The launcher is the installed daemon binary in a separate mode. It runs
+as the slot UID inside the mount view, applies the scope with
+`landlock_restrict_self` on the thread that then calls `execve`, and the payload
+inherits the domain and cannot drop it. If the kernel reports a Landlock ABI
+below 6, or any Landlock call fails, it exits 71 without exec (70: invalid argv,
+72: exec failed). Type=exec only reports that the launcher started, so slotd
+counts a start as successful only after the unit's main process image is no
+longer the launcher; a launcher refusal is a start failure. The readback also
+requires the exact `ExecStart` (launcher, `--slot-launch`, policy argv) through
+systemd's typed D-Bus property, for literal and typed policies alike.
+
+Layer 3 and loopback (matrix row 14). Policy load refuses loopback (`127/8`,
+`::1`) and link-local egress addresses, and any address this host owns; the only
+exception is the exact station gateway `addr:port` over TCP, which may then be
+the only loopback rule. Host-own addresses are checked at policy load, not on
+every operation, so a later address change cannot strand stop or destroy.
+
+Name resolution. The slot cannot resolve names: `/run` (the resolver stub's
+socket) is hidden and `127.0.0.53` is outside its allow-list. Decision: the
+gateway and the bootstrap `model_endpoint` are IP-literal origins. The gateway
+is already an `addr:port`; slot creation now refuses a bootstrap whose
+`model_endpoint` host is not an IP literal (`PAYLOAD_BOOTSTRAP`).
+`model_cert_sha256` keeps the certificate pinned. No hosts file is bound.
+
+Every new property is in the installed-unit readback, so any drift fails the
+existing "installed unit property mismatch" check.
+
+Limits: requires Landlock ABI >= 6 (kernel 6.12 or later with `landlock` in the
+active LSM list); systemd must support `PrivateIPC=`, `ProcSubset=` and
+`TemporaryFileSystem=` (254+ is required anyway). Visible trees (`/etc`, `/usr`,
+`/opt`, `/srv`, ...) are not hidden; the T19.1 slot-side inventory proves they
+hold no socket on the tested host, and a station must re-run it after adding
+software that creates sockets there. AppArmor `unix` rules are not used.
+
+### T19 root tests
+
+| ID | Test | Claim |
+| --- | --- | --- |
+| T19.1 | `TestRootT19SlotConfinement/T19.1-inventory` | host `find / -type s` (all mounts, `/proc` pruned) and `/proc/net/unix` are logged; the slot's own walk of its whole view finds exactly `wallet.sock` |
+| T19.2 | `.../T19.2-pathname` | every host pathname socket refuses from the slot with `ENOENT` or `EACCES`; the wallet connects |
+| T19.3 | `.../T19.3-abstract` | every abstract name the host can connect to refuses from the slot with `EPERM` |
+| T19.4 | `.../T19.4-plants` | 0666 plants in `/run`, `/var/lib`, `/tmp`, `/dev/shm` refuse with `ENOENT`, the abstract plant with `EPERM`; each accepts from the host first |
+| T19.5 | `.../T19.5-wallet` | one framed request gets the fixture wallet's defined refusal; `SO_PEERCRED` is the slot UID |
+| T19.6 | `.../T19.6-wallet-restart` | after the wallet unlinks and recreates its socket inode, the running slot reaches generation 2 |
+| T19.7 | `.../T19.7-journald` | the payload's stdout line is in the unit's journal while `/run/systemd/journal/socket` and `/dev/log` give `ENOENT` |
+| T19.8 | `.../T19.8-families` | `AF_NETLINK` and `AF_PACKET` give `EAFNOSUPPORT`; `AF_UNIX`, `AF_INET`, `AF_INET6` open |
+| T19.9 | `.../T19.9-tamper` | `unshare(NEWUSER\|NEWNET)`, an empty-scope ruleset, an unscoped second Landlock layer and `prctl` games restore no access |
+| T19.10 | `TestRootT19LandlockFailClosed` | with the ABI faked to 5, slotd's production start fails, the payload never runs, the journal has the refusal |
+| T19.11 | `.../T19.11-status-absent`, `TestRootT19StatusSocketBound` | status.sock gives `ENOENT` in the slot; bound on purpose it gives `EACCES` while the wallet connects; no operator GID |
+| T19.12 | `.../T19.12-loopback` | node RPC port on `127.0.0.1`, `[::1]` and every host address, `127.0.0.53:53` tcp/udp and a planted loopback echo give `EPERM`; such policies are refused at load |
+| T19.13 | `.../T19.13-egress-readback` | the IP-literal gateway in a peer namespace answers; readback asserts every property, the exact allow set, `ExecStart` and the nft default drop |
+| control | `TestRootT19DetectorControl` | the same probes in a unit WITHOUT the layers reach the plants, PID 1's `bus-api-system`, the planted loopback listener and the node RPC stand-in |
+
+Narrowing mutants live in `internal/slotd/testdata/t19-mutants/`. A workflow
+dispatch with `-f mutant=<name>` applies one and is green only when its named
+test fails: `m1-run-bind` (no `/run` tmpfs) is killed by `T19.4-plants`,
+`m2-skip-landlock` by `T19.3-abstract`, `m3-no-family-filter` by
+`T19.8-families`. `m4-egress-loopback` (accept `127/8`) is a portable mutant,
+killed by `TestT19EgressHostLocalRefusal`.
+
+The hosted runner has no agent wallet or node: the tests bind a fixture wallet
+and a node-RPC stand-in, and refuse to run where `/run/swarma-wallet` already
+exists. The real agent-walletd frame and the real node RPC are covered only by
+the station qualification.
 
 ## linuxos reuse
 

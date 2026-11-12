@@ -15,7 +15,7 @@ func TestInstalledUnitPropertyRefusals(t *testing.T) {
 	r.UnitToken = strings.Repeat("a", 32)
 	r.Cgroup = "/system.slice/" + r.Identity.Unit
 	r.UnitRuntimeUS = (2 * time.Minute).Microseconds()
-	v := map[string]string{"LoadState": "loaded", "ActiveState": "active", "Type": "exec", "User": r.Identity.Name, "Group": r.Identity.Name, "WorkingDirectory": r.Identity.Home, "MemoryMax": strconv.FormatUint(memoryBytes(p.Caps.MemoryMax), 10), "TasksMax": strconv.FormatUint(uint64(p.Caps.TasksMax), 10), "NoNewPrivileges": "yes", "ProtectSystem": "strict", "ProtectHome": "tmpfs", "PrivateTmp": "yes", "PrivateDevices": "yes", "ProtectKernelTunables": "yes", "ProtectKernelModules": "yes", "ProtectControlGroups": "yes", "RestrictSUIDSGID": "yes", "LockPersonality": "yes", "CapabilityBoundingSet": "", "Slice": "system.slice", "ControlGroup": r.Cgroup, "BindPaths": r.Identity.Home + ":" + r.Identity.Home + ":rbind", "BindReadOnlyPaths": "", "Description": unitMarker(&r), "CPUQuotaPerSecUSec": strings.TrimSuffix(p.Caps.CPUQuota, "%") + "0ms", "RuntimeMaxUSec": "2min", "IPAddressDeny": "0.0.0.0/0 ::/0"}
+	v := map[string]string{"LoadState": "loaded", "ActiveState": "active", "Type": "exec", "User": r.Identity.Name, "Group": r.Identity.Name, "WorkingDirectory": r.Identity.Home, "MemoryMax": strconv.FormatUint(memoryBytes(p.Caps.MemoryMax), 10), "TasksMax": strconv.FormatUint(uint64(p.Caps.TasksMax), 10), "NoNewPrivileges": "yes", "ProtectSystem": "strict", "ProtectHome": "tmpfs", "PrivateTmp": "yes", "PrivateDevices": "yes", "ProtectKernelTunables": "yes", "ProtectKernelModules": "yes", "ProtectControlGroups": "yes", "RestrictSUIDSGID": "yes", "LockPersonality": "yes", "CapabilityBoundingSet": "", "Slice": "system.slice", "ControlGroup": r.Cgroup, "BindPaths": r.Identity.Home + ":" + r.Identity.Home + ":rbind", "BindReadOnlyPaths": "-" + walletSocketDir + ":" + walletSocketDir + ":rbind " + p.Payload.Path + ":" + p.Payload.Path + ":rbind", "TemporaryFileSystem": "/run:ro /var:ro /dev/shm:ro", "RestrictAddressFamilies": "AF_INET AF_INET6 AF_UNIX", "PrivateIPC": "yes", "RestrictNamespaces": "yes", "ProtectProc": "invisible", "ProcSubset": "pid", "Description": unitMarker(&r), "CPUQuotaPerSecUSec": strings.TrimSuffix(p.Caps.CPUQuota, "%") + "0ms", "RuntimeMaxUSec": "2min", "IPAddressDeny": "0.0.0.0/0 ::/0"}
 	var allow []string
 	for _, property := range systemdAddressProperties(p)[1:] {
 		allow = append(allow, strings.TrimPrefix(property, "IPAddressAllow="))
@@ -36,6 +36,30 @@ func TestInstalledUnitPropertyRefusals(t *testing.T) {
 	}
 	if e := verifyUnitProperties(nil, p, &r); e == nil {
 		t.Fatal("missing unit admitted")
+	}
+	// T19 narrowing: each layer-1/3 property loses or widens one word. Every
+	// variant must be refused while the unchanged control above is admitted.
+	for key, values := range map[string][]string{
+		"TemporaryFileSystem":     {"/var:ro /dev/shm:ro", "/run:ro /dev/shm:ro", "/run:ro /var:ro", "/run /var:ro /dev/shm:ro", ""},
+		"BindReadOnlyPaths":       {"/run:/run:rbind " + p.Payload.Path + ":" + p.Payload.Path + ":rbind", p.Payload.Path + ":" + p.Payload.Path + ":rbind", "-" + walletSocketDir + ":" + walletSocketDir + ":rbind " + p.Payload.Path + ":" + p.Payload.Path + ":rbind /run/swarma-wallet-status:/run/swarma-wallet-status:rbind", walletSocketDir + "/wallet.sock:" + walletSocketDir + "/wallet.sock:rbind " + p.Payload.Path + ":" + p.Payload.Path + ":rbind"},
+		"RestrictAddressFamilies": {"AF_INET AF_INET6 AF_NETLINK AF_UNIX", "AF_INET AF_INET6 AF_PACKET AF_UNIX", "~AF_NETLINK", "", "AF_INET AF_INET6"},
+		"PrivateIPC":              {"no", ""},
+		"RestrictNamespaces":      {"no", "~user", ""},
+		"ProtectProc":             {"default", ""},
+		"ProcSubset":              {"all", ""},
+		"IPAddressDeny":           {"0.0.0.0/0", "", "127.0.0.0/8"},
+	} {
+		for _, value := range values {
+			before := v[key]
+			v[key] = value
+			if e := verifyUnitProperties(v, p, &r); e == nil {
+				t.Errorf("%s=%q admitted", key, value)
+			}
+			v[key] = before
+		}
+	}
+	if e := verifyUnitProperties(v, p, &r); e != nil {
+		t.Fatal("restored control refused", e)
 	}
 }
 

@@ -3,6 +3,7 @@ package slotd
 import (
 	"errors"
 	"github.com/relux-works/swarma-chain-lab/experiments/single-use/payloadlaunch"
+	"path"
 	"strconv"
 	"strings"
 	"time"
@@ -12,7 +13,42 @@ const (
 	systemdRunPath = "/usr/bin/systemd-run"
 	systemctlPath  = "/usr/bin/systemctl"
 	nftPath        = "/usr/sbin/nft"
+	// slotLauncherPath is the installed daemon binary. As the slot's ExecStart
+	// it applies the abstract-socket and signal Landlock scope, then execs the
+	// payload argv; it never runs a payload unconfined (T19 layer 2).
+	slotLauncherPath = "/usr/libexec/swarma-slotd-demo"
+	slotLaunchFlag   = "--slot-launch"
+	// walletSocketDir holds only the agent wallet's action socket. The slot
+	// sees it through a read-only DIRECTORY bind, so a wallet restart that
+	// recreates the socket inode stays reachable (T19 layer 1).
+	walletSocketDir = "/run/swarma-wallet"
 )
+
+// slotTemporaryFileSystems replaces every tree that can hold another
+// service's pathname socket with an empty read-only tmpfs. /dev/shm is listed
+// because PrivateDevices= binds the host's /dev/shm into the private /dev.
+var slotTemporaryFileSystems = []string{"/run:ro", "/var:ro", "/dev/shm:ro"}
+
+// slotHardening is T19 layer 3: no netlink/packet sockets, private SysV/POSIX
+// IPC, no new namespaces, and host processes invisible in the slot's /proc.
+var slotHardening = []string{"RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6", "PrivateIPC=yes", "RestrictNamespaces=yes", "ProtectProc=invisible", "ProcSubset=pid"}
+
+// slotReadOnlyBinds are the only host paths re-exposed below the hidden
+// trees: the wallet socket directory, the payload executable and, for a
+// station, its read-only inputs and static release. Writable binds stay in
+// BindPaths (home and station journal).
+// The wallet entry carries systemd's "-" (ignore if absent): a host without
+// the wallet still starts slots, which then have no AF_UNIX endpoint at all.
+func slotReadOnlyBinds(p policy, station *payloadlaunch.Manifest) []string {
+	binds := []string{"-" + walletSocketDir, p.payloadPath()}
+	if station != nil {
+		paths, err := payloadlaunch.PathsFor(station.UID)
+		if err == nil {
+			binds = append(binds, paths.Inputs, path.Dir(paths.StaticManifest))
+		}
+	}
+	return binds
+}
 
 type toolInvocation struct {
 	Path  string
@@ -55,6 +91,7 @@ func startInvocation(p policy, slot string, current record, now time.Time, stati
 	}
 	argv := p.Payload.Argv
 	binds := quoteSystemdWord(id.Home)
+	var manifest *payloadlaunch.Manifest
 	if p.Version == 2 {
 		if len(station) != 1 {
 			return toolInvocation{}, payloadlaunch.ErrMissing
@@ -72,6 +109,7 @@ func startInvocation(p policy, slot string, current record, now time.Time, stati
 			return toolInvocation{}, err
 		}
 		binds += " " + quoteSystemdWord(m.Journal.Path)
+		manifest = &m
 	} else if len(station) != 0 {
 		return toolInvocation{}, payloadlaunch.ErrBinding
 	}
@@ -91,6 +129,15 @@ func startInvocation(p policy, slot string, current record, now time.Time, stati
 		"LockPersonality=yes", "CapabilityBoundingSet=",
 		"StandardInput=null", "StandardOutput=journal", "StandardError=journal",
 	}
+	for _, tmpfs := range slotTemporaryFileSystems {
+		properties = append(properties, "TemporaryFileSystem="+tmpfs)
+	}
+	var readOnly []string
+	for _, bind := range slotReadOnlyBinds(p, manifest) {
+		readOnly = append(readOnly, quoteSystemdWord(bind))
+	}
+	properties = append(properties, "BindReadOnlyPaths="+strings.Join(readOnly, " "))
+	properties = append(properties, slotHardening...)
 	if p.Version == 2 {
 		properties = append(properties, "SupplementaryGroups=", "Environment=", "EnvironmentFile=", "PassEnvironment=")
 	}
@@ -99,7 +146,7 @@ func startInvocation(p policy, slot string, current record, now time.Time, stati
 	for _, property := range properties {
 		args = append(args, "--property="+property)
 	}
-	args = append(args, "--")
+	args = append(args, "--", slotLauncherPath, slotLaunchFlag)
 	args = append(args, argv...)
 	return toolInvocation{Path: systemdRunPath, Args: args}, nil
 }

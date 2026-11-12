@@ -22,8 +22,16 @@ func TestStationStartInvocation(t *testing.T) {
 		t.Fatal(err)
 	}
 	i := slices.Index(inv.Args, "--")
-	if i < 0 || payloadlaunch.ValidateArgv(m, inv.Args[i+1:]) != nil {
+	if i < 0 || len(inv.Args) < i+3 || inv.Args[i+1] != slotLauncherPath || inv.Args[i+2] != slotLaunchFlag || payloadlaunch.ValidateArgv(m, inv.Args[i+3:]) != nil {
 		t.Fatal("typed argv drift")
+	}
+	paths, err := payloadlaunch.PathsFor(m.UID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantRO := "--property=BindReadOnlyPaths=" + quoteSystemdWord("-"+walletSocketDir) + " " + quoteSystemdWord(p.Payload.StationProfile.Executable) + " " + quoteSystemdWord(paths.Inputs) + " " + quoteSystemdWord(paths.Envelope+"/static")
+	if !slices.Contains(inv.Args[:i], wantRO) {
+		t.Fatal("station read-only binds", inv.Args[:i])
 	}
 	want := "--property=BindPaths=" + quoteSystemdWord(r.Identity.Home) + " " + quoteSystemdWord(m.Journal.Path)
 	binds := 0
@@ -76,7 +84,7 @@ func TestStationLiteralModelArgv(t *testing.T) {
 	if i < 0 {
 		t.Fatal("missing executable boundary")
 	}
-	argv := inv.Args[i+1:]
+	argv := inv.Args[i+3:]
 	if len(argv) != 21 || argv[18] != "-ca" || payloadlaunch.ValidateArgv(m, argv) != nil {
 		t.Fatal("literal model changed")
 	}

@@ -117,7 +117,7 @@ func TestStationUnitEgressConfinement(t *testing.T) {
 	if strings.Count(text, " accept\n") != len(want) || !strings.HasSuffix(text, fmt.Sprintf("  meta skuid %d counter drop\n }\n}\n", r.Identity.UID)) {
 		t.Fatalf("nft layer is not allowlist-then-drop:\n%s", text)
 	}
-	if strings.Contains(text, "model.invalid") || strings.Contains(strings.Join(addressProperties(wide), " "), "model.invalid") {
+	if strings.Contains(text, "192.0.2.80") || strings.Contains(strings.Join(addressProperties(wide), " "), "192.0.2.80") {
 		t.Fatal("bootstrap model endpoint widened egress")
 	}
 }

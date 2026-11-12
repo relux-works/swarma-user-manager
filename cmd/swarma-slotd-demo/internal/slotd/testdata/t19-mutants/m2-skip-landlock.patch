@@ -1,0 +1,15 @@
+T19 narrowing mutant m2 (layer 2, Landlock): the launcher execs the payload
+without restricting itself. Killed by
+TestRootT19SlotConfinement/T19.3-abstract (and T19.10).
+
+--- a/cmd/swarma-slotd-demo/internal/slotd/launch_linux.go
++++ b/cmd/swarma-slotd-demo/internal/slotd/launch_linux.go
+@@ -41,7 +41,7 @@
+ 	// landlock_restrict_self binds the calling thread's credentials; exec from
+ 	// that same thread makes the new image inherit the domain.
+ 	runtime.LockOSThread()
+-	if err := restrictSlot(abi); err != nil {
++	if err := error(nil); err != nil {
+ 		fmt.Fprintln(os.Stderr, "slot launcher: landlock refused:", err)
+ 		return launchExitLandlock
+ 	}

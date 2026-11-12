@@ -19,7 +19,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-const fenceBinaryPath = "/usr/libexec/swarma-slotd-demo"
+const fenceBinaryPath = slotLauncherPath
 const fenceRootPath = "/run/swarma-slotd-demo-fences"
 const maxFenceBytes = 128 * 1024
 

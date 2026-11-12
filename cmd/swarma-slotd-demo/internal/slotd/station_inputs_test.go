@@ -18,13 +18,13 @@ import (
 
 // These credentials are fixed synthetic fixture bytes, never host inputs.
 func stationBootstrapFixture() []byte {
-	return []byte(`{"v":2,"booking_id":"` + strings.Repeat("b", 64) + `","station_name":"id/slotd-fixture","channel_secret":"` + base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{7}, 32)) + `","model_bearer":"` + base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{8}, 32)) + `","model_endpoint":"https://model.invalid","model_cert_sha256":"` + strings.Repeat("c", 64) + `"}`)
+	return []byte(`{"v":2,"booking_id":"` + strings.Repeat("b", 64) + `","station_name":"id/slotd-fixture","channel_secret":"` + base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{7}, 32)) + `","model_bearer":"` + base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{8}, 32)) + `","model_endpoint":"https://192.0.2.80","model_cert_sha256":"` + strings.Repeat("c", 64) + `"}`)
 }
 
 func stationModelFixture(t *testing.T, profile payloadlaunch.Profile) []byte {
 	t.Helper()
 	c := modelprofile.FileConfig{
-		Endpoint: modelprofile.Endpoint{URL: "https://model.invalid", CertSHA256: strings.Repeat("c", 64)},
+		Endpoint: modelprofile.Endpoint{URL: "https://192.0.2.80", CertSHA256: strings.Repeat("c", 64)},
 		Models:   map[string]modelprofile.Model{profile.Model: {ContextTokens: 256}},
 	}
 	if profile.Dialect == "responses" {
@@ -119,7 +119,7 @@ func TestStationPublicModelAdmission(t *testing.T) {
 	p, _ := stationRecordFixture(t)
 	profile := *p.Payload.StationProfile
 	goodBootstrap, goodModel := stationBootstrapFixture(), stationModelFixture(t, profile)
-	for _, name := range []string{"valid", "syntax", "unknown model", "budget", "dialect", "endpoint", "pin", "booking", "bootstrap hash"} {
+	for _, name := range []string{"valid", "syntax", "unknown model", "budget", "dialect", "endpoint", "pin", "booking", "bootstrap hash", "dns endpoint"} {
 		t.Run(name, func(t *testing.T) {
 			bootstrap, model, want := bytes.Clone(goodBootstrap), bytes.Clone(goodModel), profile
 			booking, hash, code := strings.Repeat("b", 64), digest(bootstrap), ""
@@ -133,13 +133,19 @@ func TestStationPublicModelAdmission(t *testing.T) {
 			case "dialect":
 				want.Dialect, code = "messages", "PAYLOAD_CONFIG"
 			case "endpoint":
-				model, code = bytes.Replace(model, []byte("https://model.invalid"), []byte("https://other.invalid"), 1), "PAYLOAD_CONFIG"
+				model, code = bytes.Replace(model, []byte("https://192.0.2.80"), []byte("https://192.0.2.81"), 1), "PAYLOAD_CONFIG"
 			case "pin":
 				model, code = bytes.Replace(model, []byte(strings.Repeat("c", 64)), []byte(strings.Repeat("d", 64)), 1), "PAYLOAD_CONFIG"
 			case "booking":
 				booking, code = strings.Repeat("d", 64), string(payloadlaunch.ErrBinding)
 			case "bootstrap hash":
 				hash, code = strings.Repeat("0", 64), "PAYLOAD_BOOTSTRAP"
+			case "dns endpoint":
+				// T19 DNS decision: the slot cannot resolve, so a name origin is
+				// refused even when bootstrap and model config agree on it.
+				bootstrap = bytes.Replace(bootstrap, []byte("https://192.0.2.80"), []byte("https://model.invalid"), 1)
+				model = bytes.Replace(model, []byte("https://192.0.2.80"), []byte("https://model.invalid"), 1)
+				hash, code = digest(bootstrap), "PAYLOAD_BOOTSTRAP"
 			}
 			beforeBootstrap, beforeModel := bytes.Clone(bootstrap), bytes.Clone(model)
 			err := validateStationModel(model, bootstrap, want, hash, booking)

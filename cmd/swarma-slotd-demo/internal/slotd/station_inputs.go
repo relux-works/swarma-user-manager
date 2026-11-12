@@ -2,6 +2,8 @@ package slotd
 
 import (
 	"errors"
+	"net/netip"
+	"net/url"
 
 	"github.com/relux-works/swarma-chain-lab/experiments/single-use/modelprofile"
 	"github.com/relux-works/swarma-chain-lab/experiments/single-use/payloadbootstrap"
@@ -28,8 +30,25 @@ func validateStationModel(model, bootstrap []byte, profile payloadlaunch.Profile
 	if b.BookingID != bookingID {
 		return payloadlaunch.ErrBinding
 	}
+	// The slot has no resolver: /run (stub socket) is hidden and 127.0.0.53 is
+	// outside its address allow-list. The model origin must be an IP literal;
+	// its certificate stays pinned by model_cert_sha256.
+	if !ipLiteralOrigin(b.ModelEndpoint) {
+		return errStationBootstrap
+	}
 	return modelprofile.ValidatePublicModelConfig(model, modelprofile.TypedProfile{
 		Dialect: profile.Dialect, Model: profile.Model, MaxTokens: profile.MaxTokens,
 		Endpoint: b.ModelEndpoint, CertSHA256: b.ModelCertSHA256,
 	})
+}
+
+// ipLiteralOrigin accepts only an https URL whose host is an IP literal; the
+// rest of the endpoint is validated by the shared model profile.
+func ipLiteralOrigin(endpoint string) bool {
+	u, err := url.Parse(endpoint)
+	if err != nil || u.Scheme != "https" || u.User != nil || u.Opaque != "" {
+		return false
+	}
+	addr, err := netip.ParseAddr(u.Hostname())
+	return err == nil && addr.Zone() == "" && !addr.IsUnspecified()
 }

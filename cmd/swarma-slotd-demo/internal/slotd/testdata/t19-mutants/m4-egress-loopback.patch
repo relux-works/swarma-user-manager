@@ -1,0 +1,15 @@
+T19 narrowing mutant m4 (layer 3, loopback egress): validateEgress accepts
+127.0.0.0/8. Portable; killed by TestT19EgressHostLocalRefusal (and
+TestT19GatewayLoopbackException, TestRootT19SlotConfinement/T19.12-loopback).
+
+--- a/cmd/swarma-slotd-demo/internal/slotd/policy.go
++++ b/cmd/swarma-slotd-demo/internal/slotd/policy.go
+@@ -292,7 +292,7 @@
+ 		if err != nil || addr.Zone() != "" || addr.IsUnspecified() || addr.IsMulticast() || addr.Is4In6() || addr.String() != rule.Addr || rule.Port == 0 || (rule.Proto != "tcp" && rule.Proto != "udp") || seen[rule] {
+ 			return nil, errors.New("invalid egress rule")
+ 		}
+-		if (addr.IsLoopback() || addr.IsLinkLocalUnicast()) && !(exempt && rule == gateway) {
++		if ((addr.Is6() && addr.IsLoopback()) || addr.IsLinkLocalUnicast()) && !(exempt && rule == gateway) {
+ 			return nil, errors.New("invalid egress rule: host-local address")
+ 		}
+ 		seen[rule] = true

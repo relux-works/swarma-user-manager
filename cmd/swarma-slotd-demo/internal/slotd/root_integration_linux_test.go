@@ -25,6 +25,18 @@ import (
 // The copied test executable is an inert, non-root fixture payload. This path
 // runs only as an explicit subprocess; it cannot select or enable root tests.
 func TestMain(m *testing.M) {
+	if len(os.Args) > 1 && os.Args[1] == "--slot-launch" {
+		os.Exit(testSlotLaunch(os.Args[2:]))
+	}
+	if len(os.Args) > 1 && os.Args[1] == "slotd-t19-probe" {
+		os.Exit(runT19Probe(os.Args[2:]))
+	}
+	if len(os.Args) > 1 && os.Args[1] == "slotd-t19-fake-abi" {
+		os.Exit(runT19FakeABIPayload(os.Args[2:]))
+	}
+	if len(os.Args) > 1 && os.Args[1] == "slotd-t19-local-probe" {
+		os.Exit(runT19LocalProbe(os.Args[2:]))
+	}
 	if len(os.Args) > 1 && os.Args[1] == "--enforcement-fence" {
 		os.Exit(testFenceEntry(os.Args[2:]))
 	}
@@ -547,11 +559,14 @@ func assertInstalledCaps(t *testing.T, p policy, r *durableRecord) {
 }
 
 // Proves real TCP/UDP IPv4/IPv6 enforcement by each layer and both, with a no-layer connectivity control and an unrelated-UID control. This is runner evidence only.
+// Targets live in a peer network namespace: loopback and host-own addresses
+// are no longer admissible egress (T19 matrix row 14).
 func TestRootEgressLayers(t *testing.T) {
 	requireHostedRoot(t)
+	peer := newT19Peer(t)
 	var targets []probeTarget
-	for _, pair := range [][2]string{{"tcp4", "127.0.0.1:0"}, {"udp4", "127.0.0.1:0"}, {"tcp6", "[::1]:0"}, {"udp6", "[::1]:0"}, {"tcp4", "127.0.0.2:0"}, {"udp4", "127.0.0.2:0"}, {"tcp4", "127.0.0.1:0"}, {"udp4", "127.0.0.1:0"}, {"tcp6", "[::1]:0"}, {"udp6", "[::1]:0"}} {
-		targets = append(targets, bindEcho(t, pair[0], pair[1]))
+	for _, pair := range [][2]string{{"tcp4", peer.v4 + ":0"}, {"udp4", peer.v4 + ":0"}, {"tcp6", "[" + peer.v6 + "]:0"}, {"udp6", "[" + peer.v6 + "]:0"}, {"tcp4", peer.v4b + ":0"}, {"udp4", peer.v4b + ":0"}, {"tcp4", peer.v4 + ":0"}, {"udp4", peer.v4 + ":0"}, {"tcp6", "[" + peer.v6 + "]:0"}, {"udp6", "[" + peer.v6 + "]:0"}} {
+		targets = append(targets, peer.echo(t, pair[0], pair[1]))
 	}
 	for _, mode := range []string{"control", "systemd", "nft", "both"} {
 		t.Run(mode, func(t *testing.T) {
@@ -560,8 +575,20 @@ func TestRootEgressLayers(t *testing.T) {
 			gate := ""
 			if mode == "systemd" {
 				// This root-written control belongs to the fixture, outside the
-				// slot-owned home whose foreign-entry refusal must remain strict.
-				gate = filepath.Join(dir, "network-release")
+				// slot-owned home whose foreign-entry refusal must remain strict,
+				// and outside /var, which the slot's mount view hides.
+				if err := os.MkdirAll("/srv", 0755); err != nil {
+					t.Fatal(err)
+				}
+				gateDir, err := os.MkdirTemp("/srv", "slotd-tests-gate-")
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { os.RemoveAll(gateDir) })
+				if err = os.Chmod(gateDir, 0755); err != nil {
+					t.Fatal(err)
+				}
+				gate = filepath.Join(gateDir, "network-release")
 			}
 			setProbePolicy(t, &p, dir, probeSpec{Report: report, Targets: targets, Hold: mode == "systemd" || mode == "both", Gate: gate})
 			p.Egress = nil

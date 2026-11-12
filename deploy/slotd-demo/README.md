@@ -33,6 +33,13 @@ in the [daemon README](../../cmd/swarma-slotd-demo/README.md#tools-and-verificat
 | Socket (daemon-created) | `/run/swarma-slotd-demo/sock`, root:manager-primary-group 0660; parent 0750 |
 | Fence requests (created at slot start) | `/run/swarma-slotd-demo-fences`, root:root 0700 |
 | Slot home parent | Policy `home_root`, operator-provisioned root:root 0755 |
+| Agent wallet socket (wallet unit) | `/run/swarma-wallet/wallet.sock`; the directory is bound read-only into every slot and must survive wallet restarts |
+| Operator status socket (wallet unit) | `/run/swarma-wallet-status/status.sock`, directory 0750 operator group; never bound into a slot |
+
+Slots additionally need Landlock ABI 6 or later (kernel 6.12+, `landlock` in
+`/sys/kernel/security/lsm`); below it every slot start fails closed. Station
+`model_endpoint` and gateway must be IP literals: slots have no resolver. See
+[slot confinement](../../cmd/swarma-slotd-demo/README.md#slot-confinement-t19).
 
 The **manager account must already exist** and be the policy's `caller_user`.
 `--manager-group` names its existing **primary group**, non-root and outside the

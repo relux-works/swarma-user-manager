@@ -13,6 +13,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/relux-works/swarma-chain-lab/experiments/single-use/payloadlaunch"
 )
 
 // Claim: typed unit readback (used after start and by the pre-exec fence) admits
@@ -28,6 +30,10 @@ func TestStationInstalledUnitReadback(t *testing.T) {
 	r.UnitToken = strings.Repeat("a", 32)
 	r.Cgroup = "/system.slice/" + r.Identity.Unit
 	r.UnitRuntimeUS = (2 * time.Minute).Microseconds()
+	paths, err := payloadlaunch.PathsFor(m.UID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	var allow []string
 	for _, property := range systemdAddressProperties(p)[1:] {
 		allow = append(allow, strings.TrimPrefix(property, "IPAddressAllow="))
@@ -36,7 +42,9 @@ func TestStationInstalledUnitReadback(t *testing.T) {
 		return map[string]string{"LoadState": "loaded", "ActiveState": "active", "Type": "exec", "User": r.Identity.Name, "Group": r.Identity.Name, "WorkingDirectory": r.Identity.Home,
 			"MemoryMax": strconv.FormatUint(memoryBytes(p.Caps.MemoryMax), 10), "TasksMax": strconv.FormatUint(uint64(p.Caps.TasksMax), 10), "NoNewPrivileges": "yes", "ProtectSystem": "strict", "ProtectHome": "tmpfs",
 			"PrivateTmp": "yes", "PrivateDevices": "yes", "ProtectKernelTunables": "yes", "ProtectKernelModules": "yes", "ProtectControlGroups": "yes", "RestrictSUIDSGID": "yes", "LockPersonality": "yes",
-			"CapabilityBoundingSet": "", "Slice": "system.slice", "ControlGroup": r.Cgroup, "BindReadOnlyPaths": "", "Description": unitMarker(&r),
+			"CapabilityBoundingSet": "", "Slice": "system.slice", "ControlGroup": r.Cgroup, "Description": unitMarker(&r),
+			"BindReadOnlyPaths":   "-" + walletSocketDir + ":" + walletSocketDir + ":rbind " + p.Payload.StationProfile.Executable + ":" + p.Payload.StationProfile.Executable + ":rbind " + paths.Inputs + ":" + paths.Inputs + ":rbind " + paths.Envelope + "/static:" + paths.Envelope + "/static:rbind",
+			"TemporaryFileSystem": "/run:ro /var:ro /dev/shm:ro", "RestrictAddressFamilies": "AF_INET AF_INET6 AF_UNIX", "PrivateIPC": "yes", "RestrictNamespaces": "yes", "ProtectProc": "invisible", "ProcSubset": "pid",
 			"CPUQuotaPerSecUSec": strings.TrimSuffix(p.Caps.CPUQuota, "%") + "0ms", "RuntimeMaxUSec": "2min", "IPAddressDeny": "0.0.0.0/0 ::/0", "IPAddressAllow": strings.Join(allow, " "),
 			"BindPaths":           r.Identity.Home + ":" + r.Identity.Home + ":rbind " + m.Journal.Path + ":" + m.Journal.Path + ":rbind",
 			"SupplementaryGroups": "", "Environment": "", "EnvironmentFiles": "", "PassEnvironment": ""}

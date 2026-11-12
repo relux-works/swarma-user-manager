@@ -11,6 +11,12 @@ on:
         required: true
         type: boolean
         default: false
+      mutant:
+        description: T19 narrowing mutant to apply; the run is green only when its named test kills it
+        required: false
+        type: choice
+        default: none
+        options: [none, m1-run-bind, m2-skip-landlock, m3-no-family-filter]
 
 permissions:
   contents: read
@@ -75,7 +81,7 @@ jobs:
     # privileged fixtures. All actual runner markers are forwarded unchanged.
     if: (github.event_name == 'push' && github.ref == 'refs/heads/slotd-demo') || (github.event_name == 'workflow_dispatch' && inputs.root_tests)
     runs-on: ubuntu-26.04
-    timeout-minutes: 15
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
@@ -102,8 +108,14 @@ jobs:
           test -x /usr/sbin/userdel
           test -x /usr/sbin/groupadd
           test -x /usr/sbin/groupdel
+          test -x /usr/bin/ip
+          test -x /usr/bin/find
+          test -x /usr/bin/journalctl
+          test -x /usr/bin/getent
       - name: Build and run isolated root fixtures
         shell: bash
+        env:
+          SLOTD_T19_MUTANT: ${{ inputs.mutant || 'none' }}
         run: |
           set -euo pipefail
           umask 077
@@ -123,6 +135,7 @@ jobs:
             GOENV=off GOROOT="$go_root" GOTOOLCHAIN=local GOWORK=off GOMAXPROCS=2 \
             GOPROXY=https://proxy.golang.org GOSUMDB=sum.golang.org \
             GITHUB_ACTIONS="$GITHUB_ACTIONS" RUNNER_ENVIRONMENT="$RUNNER_ENVIRONMENT" \
+            SLOTD_T19_MUTANT="$SLOTD_T19_MUTANT" \
             bash --noprofile --norc -s -- "$scratch" <<'SH'
           set -euo pipefail
           scratch="$1"
@@ -130,6 +143,12 @@ jobs:
           go version | tee "$scratch/evidence/go-version.log"
           test "$(go env GOVERSION)" = go1.26.10
           uname -srm > "$scratch/evidence/platform.log"
+          cat /sys/kernel/security/lsm > "$scratch/evidence/lsm.log"
+          run_filter='^TestRoot'
+          if [ "$SLOTD_T19_MUTANT" != none ]; then
+            git apply --verbose "cmd/swarma-slotd-demo/internal/slotd/testdata/t19-mutants/$SLOTD_T19_MUTANT.patch" 2>&1 | tee "$scratch/evidence/mutant.log"
+            run_filter='^TestRootT19'
+          fi
           /usr/bin/systemctl --version > "$scratch/evidence/systemd-version.log"
           /usr/bin/busctl --version > "$scratch/evidence/busctl-version.log"
           /usr/sbin/nft --version > "$scratch/evidence/nft-version.log"
@@ -144,11 +163,20 @@ jobs:
             GOENV=off GOROOT="$GOROOT" GOTOOLCHAIN=local GOWORK=off GOMAXPROCS=2 \
             GITHUB_ACTIONS="$GITHUB_ACTIONS" RUNNER_ENVIRONMENT="$RUNNER_ENVIRONMENT" \
             SLOTD_ROOT_TESTS=1 SLOTD_INSTALL_BINARY="$scratch/slotd-daemon" \
-            "$scratch/slotd-root.test" -test.v -test.run='^TestRoot' -test.timeout=5m \
-            2>&1 | go tool test2json -p slotd-root | tee "$scratch/evidence/root-tests.jsonl"
-          python3 - "$scratch/evidence/root-tests.jsonl" <<'PY'
+            "$scratch/slotd-root.test" -test.v -test.run="$run_filter" -test.timeout=30m \
+            2>&1 | go tool test2json -p slotd-root | tee "$scratch/evidence/root-tests.jsonl" || status=$?
+          echo "root test pipeline status ${status:-0}" | tee "$scratch/evidence/root-status.log"
+          python3 - "$scratch/evidence/root-tests.jsonl" "$SLOTD_T19_MUTANT" "${status:-0}" <<'PY'
           import json, sys
           events = [json.loads(line) for line in open(sys.argv[1])]
+          mutant, status = sys.argv[2], sys.argv[3]
+          if mutant != "none":
+              killers = {"m1-run-bind": "TestRootT19SlotConfinement/T19.4-plants", "m2-skip-landlock": "TestRootT19SlotConfinement/T19.3-abstract", "m3-no-family-filter": "TestRootT19SlotConfinement/T19.8-families"}
+              failed = {e["Test"] for e in events if e.get("Action") == "fail" and "Test" in e}
+              assert killers[mutant] in failed, ("mutant survived", mutant, sorted(failed))
+              print("mutant", mutant, "killed by", killers[mutant])
+              sys.exit(0)
+          assert status == "0", status
           assert not any(e.get("Action") in ("skip", "fail") for e in events)
           passed = {e["Test"] for e in events if e.get("Action") == "pass" and "Test" in e}
           assert {"TestRootRecordStore", "TestRootBootstrapExclusive", "TestRootHomeDeletionRefusals", "TestRootLifecycleRestart", "TestRootEgressLayers", "TestRootServiceRestart", "TestRootGate", "TestRootNFTOwnershipCreation", "TestRootInvalidHomeStartup", "TestRootEnforcementFence", "TestRootPayloadLeaves", "TestRootInstallPackage", "TestRootInstallRefusals", "TestRootInstallUnitNamespace", "TestRootInstallConfigInventory"} <= passed
@@ -157,6 +185,7 @@ jobs:
           assert "TestRootStationCrossUIDAccess" in passed
           assert {"TestRootStationLifecycleRetention", "TestRootStationPreexecRefusal", "TestRootStationExtraWritableBind"} <= passed
           assert "TestRootStationFenceHostView" in passed
+          assert {"TestRootT19SlotConfinement", "TestRootT19DetectorControl", "TestRootT19StatusSocketBound", "TestRootT19LandlockFailClosed"} <= passed
           PY
           SH
       - name: Preserve root evidence

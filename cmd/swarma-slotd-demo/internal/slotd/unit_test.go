@@ -25,7 +25,7 @@ func TestCPUQuotaMicros(t *testing.T) {
 	}
 }
 
-// Proves the generated vector contains every mandated cap/hardening property and preserves literal payload argv; no unit is started.
+// Proves the generated vector contains every mandated cap/hardening/T19 confinement property and runs the literal payload argv only behind the Landlock launcher; no unit is started.
 func TestStartInvocation(t *testing.T) {
 	p, err := parsePolicy(examplePolicy(t))
 	if err != nil {
@@ -54,13 +54,17 @@ func TestStartInvocation(t *testing.T) {
 		"--property=LockPersonality=yes", "--property=CapabilityBoundingSet=", "--property=IPAddressDeny=any",
 		"--property=IPAddressAllow=192.0.2.10/32", "--property=IPAddressAllow=2001:db8::10/128",
 		"--property=StandardInput=null", "--property=StandardOutput=journal", "--property=StandardError=journal",
+		"--property=TemporaryFileSystem=/run:ro", "--property=TemporaryFileSystem=/var:ro", "--property=TemporaryFileSystem=/dev/shm:ro",
+		`--property=BindReadOnlyPaths="-/run/swarma-wallet" "/opt/demo-payload/bin/run"`,
+		"--property=RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6", "--property=PrivateIPC=yes", "--property=RestrictNamespaces=yes",
+		"--property=ProtectProc=invisible", "--property=ProcSubset=pid",
 	} {
 		if !slices.Contains(got.Args, arg) {
 			t.Fatalf("missing %q", arg)
 		}
 	}
 	separator := slices.Index(got.Args, "--")
-	if separator < 0 || !reflect.DeepEqual(got.Args[separator+1:], p.Payload.Argv) {
+	if separator < 0 || !reflect.DeepEqual(got.Args[separator+1:], append([]string{slotLauncherPath, slotLaunchFlag}, p.Payload.Argv...)) {
 		t.Fatalf("payload argv changed: %v", got.Args)
 	}
 	for _, arg := range []string{"--scope", "--pipe", "--pty", "--wait", "--no-block", "--collect", "--shell"} {

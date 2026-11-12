@@ -15,7 +15,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-var unitPropertyNames = []string{"LoadState", "ActiveState", "SubState", "ControlPID", "ControlGroup", "Description", "User", "Group", "Type", "WorkingDirectory", "CPUQuotaPerSecUSec", "MemoryMax", "TasksMax", "RuntimeMaxUSec", "NoNewPrivileges", "ProtectSystem", "ProtectHome", "PrivateTmp", "PrivateDevices", "ProtectKernelTunables", "ProtectKernelModules", "ProtectControlGroups", "RestrictSUIDSGID", "LockPersonality", "CapabilityBoundingSet", "IPAddressDeny", "IPAddressAllow", "Slice", "BindPaths", "BindReadOnlyPaths", "SupplementaryGroups", "Environment", "EnvironmentFiles", "PassEnvironment"}
+var unitPropertyNames = []string{"LoadState", "ActiveState", "SubState", "ControlPID", "ControlGroup", "Description", "User", "Group", "Type", "WorkingDirectory", "CPUQuotaPerSecUSec", "MemoryMax", "TasksMax", "RuntimeMaxUSec", "NoNewPrivileges", "ProtectSystem", "ProtectHome", "PrivateTmp", "PrivateDevices", "ProtectKernelTunables", "ProtectKernelModules", "ProtectControlGroups", "RestrictSUIDSGID", "LockPersonality", "CapabilityBoundingSet", "IPAddressDeny", "IPAddressAllow", "Slice", "BindPaths", "BindReadOnlyPaths", "SupplementaryGroups", "Environment", "EnvironmentFiles", "PassEnvironment", "TemporaryFileSystem", "RestrictAddressFamilies", "PrivateIPC", "RestrictNamespaces", "ProtectProc", "ProcSubset"}
 
 func unitProperties(ctx context.Context, id slotIdentity) (map[string]string, error) {
 	b, e := runFixedTool(ctx, toolInvocation{Path: systemctlPath, Args: []string{"--system", "--no-ask-password", "--no-pager", "--all", "--plain", "--full", "--output=json", "list-units", "--", id.Unit}})
@@ -213,13 +213,15 @@ func verifyUnitPropertiesAt(v map[string]string, p policy, r *durableRecord, act
 	if e := ownedUnit(v, r); e != nil {
 		return e
 	}
-	expected := map[string]string{"LoadState": "loaded", "ActiveState": "active", "Type": "exec", "User": r.Identity.Name, "Group": r.Identity.Name, "WorkingDirectory": r.Identity.Home, "MemoryMax": strconv.FormatUint(memoryBytes(p.Caps.MemoryMax), 10), "TasksMax": strconv.FormatUint(uint64(p.Caps.TasksMax), 10), "NoNewPrivileges": "yes", "ProtectSystem": "strict", "ProtectHome": "tmpfs", "PrivateTmp": "yes", "PrivateDevices": "yes", "ProtectKernelTunables": "yes", "ProtectKernelModules": "yes", "ProtectControlGroups": "yes", "RestrictSUIDSGID": "yes", "LockPersonality": "yes", "CapabilityBoundingSet": "", "Slice": "system.slice", "ControlGroup": "/system.slice/" + r.Identity.Unit, "BindPaths": r.Identity.Home + ":" + r.Identity.Home + ":rbind", "BindReadOnlyPaths": ""}
+	expected := map[string]string{"LoadState": "loaded", "ActiveState": "active", "Type": "exec", "User": r.Identity.Name, "Group": r.Identity.Name, "WorkingDirectory": r.Identity.Home, "MemoryMax": strconv.FormatUint(memoryBytes(p.Caps.MemoryMax), 10), "TasksMax": strconv.FormatUint(uint64(p.Caps.TasksMax), 10), "NoNewPrivileges": "yes", "ProtectSystem": "strict", "ProtectHome": "tmpfs", "PrivateTmp": "yes", "PrivateDevices": "yes", "ProtectKernelTunables": "yes", "ProtectKernelModules": "yes", "ProtectControlGroups": "yes", "RestrictSUIDSGID": "yes", "LockPersonality": "yes", "CapabilityBoundingSet": "", "Slice": "system.slice", "ControlGroup": "/system.slice/" + r.Identity.Unit, "BindPaths": r.Identity.Home + ":" + r.Identity.Home + ":rbind", "PrivateIPC": "yes", "RestrictNamespaces": "yes", "ProtectProc": "invisible", "ProcSubset": "pid"}
 	expected["ActiveState"] = active
+	var manifest *payloadlaunch.Manifest
 	if p.Version == 2 {
 		m, err := stationManifest(r)
 		if err != nil {
 			return err
 		}
+		manifest = &m
 		if err = payloadlaunch.CheckProfile(m, *p.Payload.StationProfile); err != nil {
 			return err
 		}
@@ -235,6 +237,21 @@ func verifyUnitPropertiesAt(v map[string]string, p policy, r *durableRecord, act
 		if v[key] != want {
 			return errors.New("installed unit property mismatch: " + key)
 		}
+	}
+	// T19 layers 1 and 3: the exact hidden trees, the exact read-only binds
+	// below them and the exact address-family allow-list.
+	if !sameWords(v["TemporaryFileSystem"], slotTemporaryFileSystems) {
+		return errors.New("installed unit property mismatch: TemporaryFileSystem")
+	}
+	var readOnly []string
+	for _, bind := range slotReadOnlyBinds(p, manifest) {
+		readOnly = append(readOnly, bind+":"+strings.TrimPrefix(bind, "-")+":rbind")
+	}
+	if !sameWords(v["BindReadOnlyPaths"], readOnly) {
+		return errors.New("installed unit property mismatch: BindReadOnlyPaths")
+	}
+	if !sameWords(v["RestrictAddressFamilies"], []string{"AF_UNIX", "AF_INET", "AF_INET6"}) {
+		return errors.New("installed unit property mismatch: RestrictAddressFamilies")
 	}
 	quota, e := parseSystemdTime(v["CPUQuotaPerSecUSec"])
 	if e != nil {
@@ -327,8 +344,44 @@ func startUnit(ctx context.Context, p policy, r *durableRecord, persist func() e
 	if e = verifyUnitProperties(values, p, r); e != nil {
 		return e
 	}
-	if p.Version == 2 {
-		return verifyStationUnitExec(ctx, r)
+	if e = verifyUnitExec(ctx, p, r); e != nil {
+		return e
 	}
-	return nil
+	return awaitSlotExec(ctx, r)
+}
+
+// awaitSlotExec makes a launcher refusal a start failure. Type=exec reports
+// success once the LAUNCHER is exec'd; the slot counts as started only after
+// the unit's main process image is no longer the launcher, which the launcher
+// reaches only through a successful Landlock restriction.
+func awaitSlotExec(ctx context.Context, r *durableRecord) error {
+	var launcher unix.Stat_t
+	if e := unix.Stat(slotLauncherPath, &launcher); e != nil {
+		return e
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		b, e := runFixedTool(ctx, toolInvocation{Path: systemctlPath, Args: []string{"--system", "--no-ask-password", "--no-pager", "show", "--property=ActiveState,MainPID,ExecMainStatus", "--", r.Identity.Unit}})
+		if e != nil {
+			return e
+		}
+		state := map[string]string{}
+		for _, line := range strings.Split(strings.TrimSpace(string(b)), "\n") {
+			k, v, _ := strings.Cut(line, "=")
+			state[k] = v
+		}
+		if state["ActiveState"] != "active" {
+			return errors.New("slot launcher refused: unit " + state["ActiveState"] + " status " + state["ExecMainStatus"])
+		}
+		if pid, pe := strconv.ParseUint(state["MainPID"], 10, 31); pe == nil && pid > 1 {
+			var image unix.Stat_t
+			if unix.Stat("/proc/"+state["MainPID"]+"/exe", &image) == nil && (image.Dev != launcher.Dev || image.Ino != launcher.Ino) {
+				return nil
+			}
+		}
+		if time.Now().After(deadline) {
+			return errors.New("slot launch unconfirmed")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 }

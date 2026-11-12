@@ -1,0 +1,26 @@
+T19 narrowing mutant m3 (layer 3, address families): RestrictAddressFamilies
+is dropped from the unit and from the readback. Killed by
+TestRootT19SlotConfinement/T19.8-families.
+
+--- a/cmd/swarma-slotd-demo/internal/slotd/unit.go
++++ b/cmd/swarma-slotd-demo/internal/slotd/unit.go
+@@ -31,7 +31,7 @@
+ 
+ // slotHardening is T19 layer 3: no netlink/packet sockets, private SysV/POSIX
+ // IPC, no new namespaces, and host processes invisible in the slot's /proc.
+-var slotHardening = []string{"RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6", "PrivateIPC=yes", "RestrictNamespaces=yes", "ProtectProc=invisible", "ProcSubset=pid"}
++var slotHardening = []string{"PrivateIPC=yes", "RestrictNamespaces=yes", "ProtectProc=invisible", "ProcSubset=pid"}
+ 
+ // slotReadOnlyBinds are the only host paths re-exposed below the hidden
+ // trees: the wallet socket directory, the payload executable and, for a
+--- a/cmd/swarma-slotd-demo/internal/slotd/systemd_linux.go
++++ b/cmd/swarma-slotd-demo/internal/slotd/systemd_linux.go
+@@ -250,7 +250,7 @@
+ 	if !sameWords(v["BindReadOnlyPaths"], readOnly) {
+ 		return errors.New("installed unit property mismatch: BindReadOnlyPaths")
+ 	}
+-	if !sameWords(v["RestrictAddressFamilies"], []string{"AF_UNIX", "AF_INET", "AF_INET6"}) {
++	if false {
+ 		return errors.New("installed unit property mismatch: RestrictAddressFamilies")
+ 	}
+ 	quota, e := parseSystemdTime(v["CPUQuotaPerSecUSec"])

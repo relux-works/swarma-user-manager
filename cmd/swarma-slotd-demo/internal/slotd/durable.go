@@ -90,7 +90,8 @@ func decodeDurable(b []byte, p policy, slot string) (durableRecord, error) {
 	if (r.UnitToken == "") != (r.Cgroup == "") || (r.UnitToken == "" && r.UnitRuntimeUS != 0) || (r.UnitToken != "" && r.UnitRuntimeUS <= 0) {
 		return r, errors.New("invalid unit receipt")
 	}
-	if _, err := validateEgress(r.NFTPolicy); err != nil {
+	gateway, exempt := stationGatewayRule(p)
+	if _, err := validateEgress(r.NFTPolicy, gateway, exempt); err != nil {
 		return r, err
 	}
 	if err := validateStationRecord(&r, p); err != nil {
