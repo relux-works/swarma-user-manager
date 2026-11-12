@@ -208,7 +208,7 @@ software that creates sockets there. AppArmor `unix` rules are not used.
 | T19.9 | `.../T19.9-tamper` | `unshare(NEWUSER\|NEWNET)`, an empty-scope ruleset, an unscoped second Landlock layer and `prctl` games restore no access |
 | T19.10 | `TestRootT19LandlockFailClosed` | with the ABI faked to 5, slotd's production start fails, the payload never runs, the journal has the refusal |
 | T19.11 | `.../T19.11-status-absent`, `TestRootT19StatusSocketBound` | status.sock gives `ENOENT` in the slot; bound on purpose it gives `EACCES` while the wallet connects; no operator GID |
-| T19.12 | `.../T19.12-loopback` | node RPC port on `127.0.0.1`, `[::1]` and every host address, `127.0.0.53:53` tcp/udp and a planted loopback echo give `EPERM`; such policies are refused at load |
+| T19.12 | `.../T19.12-loopback` | node RPC port on `127.0.0.1`, `[::1]` and every host address, `127.0.0.53:53` tcp/udp and a planted loopback echo are dropped: TCP `connect()` times out (the SYN never leaves), UDP send gets `EPERM`; such policies are refused at load |
 | T19.13 | `.../T19.13-egress-readback` | the IP-literal gateway in a peer namespace answers; readback asserts every property, the exact allow set, `ExecStart` and the nft default drop |
 | control | `TestRootT19DetectorControl` | the same probes in a unit WITHOUT the layers reach the pathname and abstract plants, the planted loopback listener and the node RPC stand-in, and get the host's own verdict for every host abstract name |
 

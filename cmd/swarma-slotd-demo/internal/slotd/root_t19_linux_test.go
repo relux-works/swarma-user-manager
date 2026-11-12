@@ -22,6 +22,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -300,10 +301,16 @@ type t19Peer struct {
 	name, hostIf string
 }
 
+var t19PeerIndex atomic.Uint32
+
 func newT19Peer(t *testing.T) *t19Peer {
 	t.Helper()
 	suffix := t19Nonce()[:6]
-	p := &t19Peer{name: "slotdt19-" + suffix, hostIf: "st19h" + suffix, v4: "198.51.100.2", v4b: "198.51.100.3", v6: "2001:db8:19::2"}
+	// Each peer gets its own /29 and /64: a previous peer's namespace may
+	// outlive its deletion briefly, and an overlapping route would steer
+	// packets into it.
+	k := t19PeerIndex.Add(1) % 31
+	p := &t19Peer{name: "slotdt19-" + suffix, hostIf: "st19h" + suffix, v4: fmt.Sprintf("198.51.100.%d", 8*k+2), v4b: fmt.Sprintf("198.51.100.%d", 8*k+3), v6: fmt.Sprintf("2001:db8:19:%x::2", k)}
 	peerIf := "st19p" + suffix
 	ip := func(args ...string) {
 		t.Helper()
@@ -318,9 +325,14 @@ func newT19Peer(t *testing.T) *t19Peer {
 		}
 	})
 	ip("link", "add", p.hostIf, "type", "veth", "peer", "name", peerIf)
+	t.Cleanup(func() {
+		if out, err := exec.Command("/usr/bin/ip", "link", "del", p.hostIf).CombinedOutput(); err != nil {
+			t.Errorf("ip link del: %v %s", err, out)
+		}
+	})
 	ip("link", "set", peerIf, "netns", p.name)
-	ip("addr", "add", "198.51.100.1/29", "dev", p.hostIf)
-	ip("-6", "addr", "add", "2001:db8:19::1/64", "dev", p.hostIf, "nodad")
+	ip("addr", "add", fmt.Sprintf("198.51.100.%d/29", 8*k+1), "dev", p.hostIf)
+	ip("-6", "addr", "add", fmt.Sprintf("2001:db8:19:%x::1/64", k), "dev", p.hostIf, "nodad")
 	ip("link", "set", p.hostIf, "up")
 	ip("-n", p.name, "addr", "add", p.v4+"/29", "dev", peerIf)
 	ip("-n", p.name, "addr", "add", p.v4b+"/29", "dev", peerIf)
@@ -588,7 +600,9 @@ func t19Journal(t *testing.T, unit, needle string) string {
 	deadline := time.Now().Add(20 * time.Second)
 	var out []byte
 	for time.Now().Before(deadline) {
-		out, _ = exec.Command("/usr/bin/journalctl", "--system", "--no-pager", "-o", "cat", "-u", unit).CombinedOutput()
+		// No --system: the slot UID's stdout/stderr lands in its per-user
+		// journal file (journald SplitMode=uid), which --system excludes.
+		out, _ = exec.Command("/usr/bin/journalctl", "--no-pager", "-o", "cat", "-u", unit).CombinedOutput()
 		if bytes.Contains(out, []byte(needle)) {
 			return string(out)
 		}
@@ -607,6 +621,9 @@ func TestRootT19SlotConfinement(t *testing.T) {
 	plants := t19Plant(t)
 	peer := newT19Peer(t)
 	gateway := peer.echo(t, "tcp4", peer.v4+":0")
+	if v := ipVerdict(t19Target{gateway.Network, gateway.Address, true}); v != "ok" {
+		t.Fatal("gateway fixture does not answer the host:", v)
+	}
 	ipSet := t19IPTargets(t)
 	hostPaths, hostAbstract := t19HostInventory(t)
 	if !slices.Contains(hostPaths, t19StatusSock) || !slices.Contains(hostPaths, t19WalletSock) {
@@ -750,10 +767,18 @@ func TestRootT19SlotConfinement(t *testing.T) {
 		}
 	})
 	t.Run("T19.12-loopback", func(t *testing.T) {
+		// The cgroup filter and the per-UID nft rule DROP the packet. A UDP
+		// send reports EPERM; a TCP SYN never leaves, so connect() keeps
+		// retransmitting until the dial deadline ("timeout"). The detector
+		// control proves each of these listeners answers within that deadline.
 		for _, target := range ipSet.all() {
 			key := target.Network + " " + target.Address
-			if got := first.IP[key]; got != "EPERM" {
-				t.Errorf("%s: %s, want EPERM", key, got)
+			want := "timeout"
+			if strings.HasPrefix(target.Network, "udp") {
+				want = "EPERM"
+			}
+			if got := first.IP[key]; got != want {
+				t.Errorf("%s: %s, want %s", key, got, want)
 			}
 		}
 		if v := ipVerdict(ipSet.Planted); v != "ok" {
@@ -782,7 +807,7 @@ func TestRootT19SlotConfinement(t *testing.T) {
 	t.Run("T19.13-egress-readback", func(t *testing.T) {
 		key := gateway.Network + " " + gateway.Address
 		if got := first.IP[key]; got != "ok" {
-			t.Errorf("gateway %s: %s", key, got)
+			t.Errorf("gateway %s: %s (host now: %s)", key, got, ipVerdict(t19Target{gateway.Network, gateway.Address, true}))
 		}
 		values, err := unitProperties(context.Background(), r.Identity)
 		if err != nil {
