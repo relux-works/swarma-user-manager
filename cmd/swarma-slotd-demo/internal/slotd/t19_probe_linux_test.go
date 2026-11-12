@@ -49,7 +49,7 @@ type t19Report struct {
 	UID           int
 	Groups        []int
 	Sockets       []string
-	WalkErrors    int
+	WalkErrors    []t19WalkError
 	Pathnames     map[string]string
 	Abstract      map[string]string
 	Wallet        string
@@ -226,9 +226,14 @@ func runT19Probe(args []string) int {
 	report := t19Report{UID: os.Getuid(), Pathnames: map[string]string{}, Abstract: map[string]string{}, IP: map[string]string{}}
 	report.Groups, _ = os.Getgroups()
 	if spec.Inventory {
+		// Every failure keeps its path, errno and whether this UID can still
+		// resolve names below it. /proc is procfs (socketless); root's view
+		// walk checks that by mount facts, so it is recorded like a failure.
+		var st unix.Stat_t
+		report.WalkErrors = append(report.WalkErrors, t19WalkError{Path: "/proc", Errno: "pruned", Search: errnoName(unix.Stat("/proc/.", &st))})
 		_ = filepath.WalkDir("/", func(p string, d fs.DirEntry, err error) error {
 			if err != nil {
-				report.WalkErrors++
+				report.WalkErrors = append(report.WalkErrors, t19WalkError{Path: p, Errno: errnoName(err), Search: errnoName(unix.Stat(p+"/.", &st))})
 				if d != nil && d.IsDir() {
 					return fs.SkipDir
 				}

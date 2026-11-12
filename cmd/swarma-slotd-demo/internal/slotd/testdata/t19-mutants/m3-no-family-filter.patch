@@ -4,12 +4,12 @@ TestRootT19SlotConfinement/T19.8-families.
 
 --- a/cmd/swarma-slotd-demo/internal/slotd/unit.go
 +++ b/cmd/swarma-slotd-demo/internal/slotd/unit.go
-@@ -31,7 +31,7 @@
- 
- // slotHardening is T19 layer 3: no netlink/packet sockets, private SysV/POSIX
+@@ -33,7 +33,7 @@
  // IPC, no new namespaces, and host processes invisible in the slot's /proc.
--var slotHardening = []string{"RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6", "PrivateIPC=yes", "RestrictNamespaces=yes", "ProtectProc=invisible", "ProcSubset=pid"}
-+var slotHardening = []string{"PrivateIPC=yes", "RestrictNamespaces=yes", "ProtectProc=invisible", "ProcSubset=pid"}
+ // SystemCallArchitectures=native is part of the family filter: systemd cannot
+ // filter i386 socketcall(), so without it a 386 payload opens AF_NETLINK.
+-var slotHardening = []string{"RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6", "SystemCallArchitectures=native", "PrivateIPC=yes", "RestrictNamespaces=yes", "ProtectProc=invisible", "ProcSubset=pid"}
++var slotHardening = []string{"SystemCallArchitectures=native", "PrivateIPC=yes", "RestrictNamespaces=yes", "ProtectProc=invisible", "ProcSubset=pid"}
  
  // slotReadOnlyBinds are the only host paths re-exposed below the hidden
  // trees: the wallet socket directory, the payload executable and, for a

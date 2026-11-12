@@ -190,12 +190,18 @@ func fixturePayload(t *testing.T, dir string) string {
 	if e != nil {
 		t.Fatal(e)
 	}
+	return fixturePayloadFrom(t, dir, source, "probe")
+}
+
+// fixturePayloadFrom copies source into dir/name as a root-owned 0755 payload.
+func fixturePayloadFrom(t *testing.T, dir, source, base string) string {
+	t.Helper()
 	in, e := os.Open(source)
 	if e != nil {
 		t.Fatal(e)
 	}
 	defer in.Close()
-	name := filepath.Join(dir, "probe")
+	name := filepath.Join(dir, base)
 	out, e := os.OpenFile(name, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0755)
 	if e != nil {
 		t.Fatal(e)

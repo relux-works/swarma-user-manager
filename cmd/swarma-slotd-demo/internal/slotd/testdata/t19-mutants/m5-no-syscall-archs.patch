@@ -1,0 +1,26 @@
+T19 narrowing mutant m5 (layer 3, executable ABIs): SystemCallArchitectures=native
+is dropped from the unit and from the readback; RestrictAddressFamilies stays.
+Killed by TestRootT19AlternateABI (the 386 payload reports netlink=ok).
+
+--- a/cmd/swarma-slotd-demo/internal/slotd/unit.go
++++ b/cmd/swarma-slotd-demo/internal/slotd/unit.go
+@@ -33,7 +33,7 @@
+ // IPC, no new namespaces, and host processes invisible in the slot's /proc.
+ // SystemCallArchitectures=native is part of the family filter: systemd cannot
+ // filter i386 socketcall(), so without it a 386 payload opens AF_NETLINK.
+-var slotHardening = []string{"RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6", "SystemCallArchitectures=native", "PrivateIPC=yes", "RestrictNamespaces=yes", "ProtectProc=invisible", "ProcSubset=pid"}
++var slotHardening = []string{"RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6", "PrivateIPC=yes", "RestrictNamespaces=yes", "ProtectProc=invisible", "ProcSubset=pid"}
+ 
+ // slotReadOnlyBinds are the only host paths re-exposed below the hidden
+ // trees: the wallet socket directory, the payload executable and, for a
+--- a/cmd/swarma-slotd-demo/internal/slotd/systemd_linux.go
++++ b/cmd/swarma-slotd-demo/internal/slotd/systemd_linux.go
+@@ -213,7 +213,7 @@
+ 	if e := ownedUnit(v, r); e != nil {
+ 		return e
+ 	}
+-	expected := map[string]string{"LoadState": "loaded", "ActiveState": "active", "Type": "exec", "User": r.Identity.Name, "Group": r.Identity.Name, "WorkingDirectory": r.Identity.Home, "MemoryMax": strconv.FormatUint(memoryBytes(p.Caps.MemoryMax), 10), "TasksMax": strconv.FormatUint(uint64(p.Caps.TasksMax), 10), "NoNewPrivileges": "yes", "ProtectSystem": "strict", "ProtectHome": "tmpfs", "PrivateTmp": "yes", "PrivateDevices": "yes", "ProtectKernelTunables": "yes", "ProtectKernelModules": "yes", "ProtectControlGroups": "yes", "RestrictSUIDSGID": "yes", "LockPersonality": "yes", "CapabilityBoundingSet": "", "Slice": "system.slice", "ControlGroup": "/system.slice/" + r.Identity.Unit, "BindPaths": r.Identity.Home + ":" + r.Identity.Home + ":rbind", "SystemCallArchitectures": "native", "PrivateIPC": "yes", "RestrictNamespaces": "yes", "ProtectProc": "invisible", "ProcSubset": "pid"}
++	expected := map[string]string{"LoadState": "loaded", "ActiveState": "active", "Type": "exec", "User": r.Identity.Name, "Group": r.Identity.Name, "WorkingDirectory": r.Identity.Home, "MemoryMax": strconv.FormatUint(memoryBytes(p.Caps.MemoryMax), 10), "TasksMax": strconv.FormatUint(uint64(p.Caps.TasksMax), 10), "NoNewPrivileges": "yes", "ProtectSystem": "strict", "ProtectHome": "tmpfs", "PrivateTmp": "yes", "PrivateDevices": "yes", "ProtectKernelTunables": "yes", "ProtectKernelModules": "yes", "ProtectControlGroups": "yes", "RestrictSUIDSGID": "yes", "LockPersonality": "yes", "CapabilityBoundingSet": "", "Slice": "system.slice", "ControlGroup": "/system.slice/" + r.Identity.Unit, "BindPaths": r.Identity.Home + ":" + r.Identity.Home + ":rbind", "PrivateIPC": "yes", "RestrictNamespaces": "yes", "ProtectProc": "invisible", "ProcSubset": "pid"}
+ 	expected["ActiveState"] = active
+ 	var manifest *payloadlaunch.Manifest
+ 	if p.Version == 2 {

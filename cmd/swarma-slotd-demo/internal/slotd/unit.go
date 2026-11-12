@@ -31,7 +31,9 @@ var slotTemporaryFileSystems = []string{"/run:ro", "/var:ro", "/dev/shm:ro"}
 
 // slotHardening is T19 layer 3: no netlink/packet sockets, private SysV/POSIX
 // IPC, no new namespaces, and host processes invisible in the slot's /proc.
-var slotHardening = []string{"RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6", "PrivateIPC=yes", "RestrictNamespaces=yes", "ProtectProc=invisible", "ProcSubset=pid"}
+// SystemCallArchitectures=native is part of the family filter: systemd cannot
+// filter i386 socketcall(), so without it a 386 payload opens AF_NETLINK.
+var slotHardening = []string{"RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6", "SystemCallArchitectures=native", "PrivateIPC=yes", "RestrictNamespaces=yes", "ProtectProc=invisible", "ProcSubset=pid"}
 
 // slotReadOnlyBinds are the only host paths re-exposed below the hidden
 // trees: the wallet socket directory, the payload executable and, for a

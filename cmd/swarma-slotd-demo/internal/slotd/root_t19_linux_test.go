@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net"
 	"net/netip"
 	"os"
@@ -254,22 +255,104 @@ func t19Plant(t *testing.T) t19Plants {
 	return plants
 }
 
-// t19HostInventory is T19.1 host side: every pathname socket on all mounts
-// (find / with /proc pruned) and every abstract name in /proc/net/unix.
-func t19HostInventory(t *testing.T) ([]string, []string) {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Minute)
-	defer cancel()
-	start := time.Now()
-	var stdout bytes.Buffer
-	cmd := exec.CommandContext(ctx, "/usr/bin/find", "/", "-path", "/proc", "-prune", "-o", "-type", "s", "-print")
-	cmd.Stdout = &stdout
-	err := cmd.Run()
-	var exit *exec.ExitError
-	if err != nil && !(errors.As(err, &exit) && exit.ExitCode() == 1) {
-		t.Fatal("host find:", err)
+// t19Walk lists every pathname socket below root (a directory path; "/" or
+// "/proc/<pid>/root/") as the calling root user and reports paths relative to
+// root. Every traversal failure keeps its path and errno. A mount point is
+// pruned only when it and every mount below it are socketless by mounts, the
+// mountinfo of the namespace being walked. Each mount point is also lstat'ed:
+// readdir reports the covered inode's type, so a socket mounted over a file
+// would otherwise be missed. The walk fails past deadline.
+func t19Walk(root string, mounts []t19Mount, deadline time.Time) (t19ViewInventory, error) {
+	base := strings.TrimSuffix(root, "/")
+	mounts = slices.Clone(mounts)
+	var mountSockets []string
+	for i := range mounts {
+		fi, err := os.Lstat(base + "/" + strings.TrimPrefix(mounts[i].Point, "/"))
+		switch {
+		case err != nil:
+			mounts[i].Unreachable = true
+		case !fi.IsDir():
+			mounts[i].File = true
+			if fi.Mode()&fs.ModeSocket != 0 {
+				mountSockets = append(mountSockets, mounts[i].Point)
+			}
+		}
 	}
-	paths := strings.Fields(stdout.String())
+	inv := t19ViewInventory{Mounts: mounts}
+	points := map[string]bool{}
+	for _, m := range mounts {
+		points[m.Point] = true
+	}
+	var late error
+	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+		rel := "/" + strings.TrimPrefix(strings.TrimPrefix(p, base), "/")
+		if time.Now().After(deadline) {
+			late = errors.New("socket inventory exceeded its time bound at " + strconv.Quote(rel))
+			return fs.SkipAll
+		}
+		if err != nil {
+			inv.Errors = append(inv.Errors, t19WalkError{Path: rel, Errno: errnoName(err)})
+			if d != nil && d.IsDir() {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		if d.IsDir() && points[rel] && t19SocketlessSubtree(mounts, rel) {
+			inv.Pruned = append(inv.Pruned, rel)
+			return fs.SkipDir
+		}
+		if d.Type()&fs.ModeSocket != 0 {
+			inv.Sockets = append(inv.Sockets, rel)
+		}
+		return nil
+	})
+	inv.Sockets = append(inv.Sockets, mountSockets...)
+	slices.Sort(inv.Sockets)
+	inv.Sockets = slices.Compact(inv.Sockets)
+	return inv, errors.Join(err, late)
+}
+
+func t19Mounts(t *testing.T, path string) []t19Mount {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mounts, err := parseT19Mountinfo(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return mounts
+}
+
+// t19HostPathnames is T19.2's attempt list: every pathname socket on the
+// host's socket-capable mounts. Each traversal failure is classified: a
+// directory that vanished between listing and reading (ENOENT) holds no
+// socket now; any other failure stops the test, because the attempt list
+// would silently shrink. This list is evidence for T19.2 only; T19.1's
+// completeness rests on root's walk of the slot's own view (t19ViewWalk).
+func t19HostPathnames(t *testing.T) []string {
+	t.Helper()
+	start := time.Now()
+	inv, err := t19Walk("/", t19Mounts(t, "/proc/self/mountinfo"), start.Add(6*time.Minute))
+	if err != nil {
+		t.Fatal("host inventory:", err)
+	}
+	var vanished []t19WalkError
+	for _, e := range inv.Errors {
+		if e.Errno != "ENOENT" {
+			t.Fatalf("host inventory cannot read %q: %s (all errors %+v)", e.Path, e.Errno, inv.Errors)
+		}
+		vanished = append(vanished, e)
+	}
+	t.Logf("T19.2 host inventory: %d pathname sockets in %s; pruned socketless %q; vanished during the walk %+v", len(inv.Sockets), time.Since(start).Round(time.Millisecond), inv.Pruned, vanished)
+	t.Logf("T19.2 host pathname sockets: %q", inv.Sockets)
+	return inv.Sockets
+}
+
+// t19HostAbstract lists every abstract name in the host's /proc/net/unix.
+func t19HostAbstract(t *testing.T) []string {
+	t.Helper()
 	b, err := os.ReadFile("/proc/net/unix")
 	if err != nil {
 		t.Fatal(err)
@@ -286,10 +369,27 @@ func t19HostInventory(t *testing.T) ([]string, []string) {
 			}
 		}
 	}
-	t.Logf("T19.1 host inventory: %d pathname sockets, %d abstract names in %s", len(paths), len(abstract), time.Since(start).Round(time.Millisecond))
-	t.Logf("T19.1 host pathname sockets: %q", paths)
-	t.Logf("T19.1 host abstract names: %q", abstract)
-	return paths, abstract
+	t.Logf("T19.3 host abstract names: %q", abstract)
+	return abstract
+}
+
+// t19ViewWalk is root's walk of a running slot's mount view through
+// /proc/<MainPID>/root, pruned only by that view's own mount facts. The
+// slot's main process must be holding.
+func t19ViewWalk(t *testing.T, unit string) t19ViewInventory {
+	t.Helper()
+	out, err := exec.Command(systemctlPath, "--system", "--no-pager", "show", "--property=MainPID", "--value", "--", unit).Output()
+	pid, perr := strconv.Atoi(strings.TrimSpace(string(out)))
+	if err != nil || perr != nil || pid <= 1 {
+		t.Fatalf("main PID of %s: %q %v %v", unit, out, err, perr)
+	}
+	start := time.Now()
+	view, err := t19Walk(fmt.Sprintf("/proc/%d/root/", pid), t19Mounts(t, fmt.Sprintf("/proc/%d/mountinfo", pid)), start.Add(5*time.Minute))
+	if err != nil {
+		t.Fatal("slot view inventory:", err)
+	}
+	t.Logf("root walk of the slot view (pid %d) in %s: sockets %q, errors %+v, pruned socketless %q, mounts %+v", pid, time.Since(start).Round(time.Millisecond), view.Sockets, view.Errors, view.Pruned, view.Mounts)
+	return view
 }
 
 // t19Peer is a separate network namespace reached over a veth pair. Its
@@ -559,7 +659,7 @@ func t19DropLayers(args []string) []string {
 	for i := 0; i < len(args); i++ {
 		a := args[i]
 		dropped := false
-		for _, prefix := range []string{"TemporaryFileSystem=", "BindReadOnlyPaths=", "PrivateTmp=", "PrivateDevices=", "RestrictAddressFamilies=", "PrivateIPC=", "RestrictNamespaces=", "ProtectProc=", "ProcSubset=", "IPAddressDeny=", "IPAddressAllow="} {
+		for _, prefix := range []string{"TemporaryFileSystem=", "BindReadOnlyPaths=", "PrivateTmp=", "PrivateDevices=", "RestrictAddressFamilies=", "SystemCallArchitectures=", "PrivateIPC=", "RestrictNamespaces=", "ProtectProc=", "ProcSubset=", "IPAddressDeny=", "IPAddressAllow="} {
 			if strings.HasPrefix(a, "--property="+prefix) {
 				dropped = true
 			}
@@ -625,7 +725,7 @@ func TestRootT19SlotConfinement(t *testing.T) {
 		t.Fatal("gateway fixture does not answer the host:", v)
 	}
 	ipSet := t19IPTargets(t)
-	hostPaths, hostAbstract := t19HostInventory(t)
+	hostPaths, hostAbstract := t19HostPathnames(t), t19HostAbstract(t)
 	if !slices.Contains(hostPaths, t19StatusSock) || !slices.Contains(hostPaths, t19WalletSock) {
 		t.Fatal("host inventory misses the wallet or status socket; the inventory cannot be trusted")
 	}
@@ -654,12 +754,21 @@ func TestRootT19SlotConfinement(t *testing.T) {
 	final := awaitT19Report(t, report, 90*time.Second)
 	j, _ := json.MarshalIndent(final, "", " ")
 	t.Logf("slot report: %s", j)
+	view := t19ViewWalk(t, r.Identity.Unit)
 	uid := strconv.FormatUint(uint64(r.Identity.UID), 10)
 
 	t.Run("T19.1-inventory", func(t *testing.T) {
-		// The slot view holds exactly the wallet socket; status.sock is absent.
-		if !slices.Equal(first.Sockets, []string{t19WalletSock}) {
-			t.Fatalf("slot socket inventory %q, want exactly %q (walk errors %d)", first.Sockets, t19WalletSock, first.WalkErrors)
+		// The reachable pathname-socket set is exactly the wallet socket, and
+		// it is certified, not inferred: root's walk of the same view is
+		// complete, and every slot omission is unsearchable for the slot UID
+		// or holds no socket in root's view. status.sock is absent.
+		reachable, problems := t19InventoryVerdict(view, first.Sockets, first.WalkErrors)
+		t.Logf("slot walk omissions: %+v", first.WalkErrors)
+		for _, problem := range problems {
+			t.Error(problem)
+		}
+		if !slices.Equal(reachable, []string{t19WalletSock}) || !slices.Equal(first.Sockets, []string{t19WalletSock}) {
+			t.Fatalf("reachable %q, slot inventory %q, want exactly %q", reachable, first.Sockets, t19WalletSock)
 		}
 	})
 	t.Run("T19.2-pathname", func(t *testing.T) {
@@ -813,7 +922,7 @@ func TestRootT19SlotConfinement(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		t.Logf("installed: TemporaryFileSystem=%q BindReadOnlyPaths=%q RestrictAddressFamilies=%q PrivateIPC=%q RestrictNamespaces=%q ProtectProc=%q ProcSubset=%q PrivateTmp=%q PrivateDevices=%q IPAddressDeny=%q IPAddressAllow=%q", values["TemporaryFileSystem"], values["BindReadOnlyPaths"], values["RestrictAddressFamilies"], values["PrivateIPC"], values["RestrictNamespaces"], values["ProtectProc"], values["ProcSubset"], values["PrivateTmp"], values["PrivateDevices"], values["IPAddressDeny"], values["IPAddressAllow"])
+		t.Logf("installed: TemporaryFileSystem=%q BindReadOnlyPaths=%q RestrictAddressFamilies=%q SystemCallArchitectures=%q PrivateIPC=%q RestrictNamespaces=%q ProtectProc=%q ProcSubset=%q PrivateTmp=%q PrivateDevices=%q IPAddressDeny=%q IPAddressAllow=%q", values["TemporaryFileSystem"], values["BindReadOnlyPaths"], values["RestrictAddressFamilies"], values["SystemCallArchitectures"], values["PrivateIPC"], values["RestrictNamespaces"], values["ProtectProc"], values["ProcSubset"], values["PrivateTmp"], values["PrivateDevices"], values["IPAddressDeny"], values["IPAddressAllow"])
 		if err = verifyUnitProperties(values, p, &r); err != nil {
 			t.Fatal(err)
 		}
@@ -851,7 +960,7 @@ func TestRootT19DetectorControl(t *testing.T) {
 	t19Wallets(t)
 	plants := t19Plant(t)
 	ipSet := t19IPTargets(t)
-	_, hostAbstract := t19HostInventory(t)
+	hostAbstract := t19HostAbstract(t)
 	setT19Policy(t, &p, dir)
 	p.Egress = nil
 	_, _ = t19Created(t, p, &r, dir)
@@ -949,5 +1058,171 @@ func TestRootT19LandlockFailClosed(t *testing.T) {
 	time.Sleep(500 * time.Millisecond)
 	if _, err := os.Stat(marker); !errors.Is(err, os.ErrNotExist) {
 		t.Fatal("payload ran behind the refused launcher")
+	}
+}
+
+// TestRootT19AlternateABI is the alternate-ABI control for layer 3. systemd
+// cannot filter i386 socketcall(), so RestrictAddressFamilies alone does not
+// refuse AF_NETLINK to a 386 payload; SystemCallArchitectures=native must.
+//   - Executable positive neighbour: the same production vector with ONLY
+//     SystemCallArchitectures=native removed runs the 386 build of this probe
+//     as the slot UID, and its socketcall() opens AF_NETLINK. This proves the
+//     runner executes 386 code and that the probe sees the bypass.
+//   - Refusal: slotd's own start of the same 386 payload, with the production
+//     properties, ends in SIGSYS (status=31/SYS) before the probe can report.
+//
+// The native positive neighbour under the full property set is T19.8.
+// Limit: x32 is not exercised (no Go x32 target); systemd's family filter
+// covers the x32 socket() syscall directly.
+func TestRootT19AlternateABI(t *testing.T) {
+	p, r, dir := rootFixture(t)
+	alt := os.Getenv("SLOTD_T19_ALT_ABI_PROBE")
+	if alt == "" {
+		t.Fatal("SLOTD_T19_ALT_ABI_PROBE names no 386 build of this test binary; the alternate-ABI control cannot run")
+	}
+	report := filepath.Join(r.Identity.Home, "t19-abi")
+	setT19Policy(t, &p, dir, t19SpecArgv(t19Spec{Report: report, Families: true})...)
+	path := fixturePayloadFrom(t, dir, alt, "probe-386")
+	b, err := os.ReadFile(path)
+	if err != nil || len(b) < 5 || string(b[1:4]) != "ELF" || b[4] != 1 {
+		t.Fatalf("%s is not a 32-bit ELF: %v", alt, err)
+	}
+	p.Payload.Path, p.Payload.SHA256 = path, digest(b)
+	p.Payload.Argv[0] = path
+	p.Egress = nil
+	engine, q := t19Created(t, p, &r, dir)
+
+	neighbour := filepath.Join(r.Identity.Home, "t19-abi-neighbour")
+	t19FixtureUnit(t, p, &r, "swarma-t19-abi-"+r.Slot+".service", t19SpecArgv(t19Spec{Report: neighbour, Families: true}), func(args []string) []string {
+		out := slices.DeleteFunc(slices.Clone(args), func(a string) bool { return a == "--property=SystemCallArchitectures=native" })
+		if len(out) != len(args)-1 {
+			t.Fatalf("production vector does not carry SystemCallArchitectures=native exactly once: %q", args)
+		}
+		return out
+	})
+	got := awaitT19Report(t, neighbour, time.Minute)
+	t.Logf("386 neighbour without the architecture restriction: uid %d families %v", got.UID, got.Families)
+	if got.UID != int(r.Identity.UID) || got.Families["netlink"] != "ok" || got.Families["unix"] != "ok" || got.Families["inet"] != "ok" {
+		t.Fatalf("386 neighbour: uid %d families %v, want the slot UID with netlink, unix and inet open", got.UID, got.Families)
+	}
+
+	since := strconv.FormatInt(time.Now().Unix()-1, 10)
+	q.Op = "start"
+	started, code := engine.apply(context.Background(), q)
+	if started != nil {
+		r = *started
+	}
+	t.Logf("production start of the 386 payload: code %q", code)
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		if b, err := os.ReadFile(report); err == nil {
+			t.Fatalf("386 payload ran under the production unit and reported %s", b)
+		}
+		out, _ := exec.Command("/usr/bin/journalctl", "--no-pager", "-o", "cat", "--since", "@"+since, "-u", r.Identity.Unit).CombinedOutput()
+		if bytes.Contains(out, []byte("status=31/SYS")) {
+			t.Logf("production unit journal: %s", out)
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("no SIGSYS for the 386 payload in %s: %s", r.Identity.Unit, out)
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	time.Sleep(time.Second)
+	if _, err := os.Stat(report); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("386 payload reported under the production unit:", err)
+	}
+}
+
+// TestRootT19InventoryOmission is the regression control for an omitted but
+// socket-bearing subtree. In a visible host tree (/opt), a directory the slot
+// UID may search but not list (0711) holds a listening 0666 socket; the
+// inaccessible neighbour (0700) holds another. In a slot that slotd starts:
+//   - the slot's walk lists neither and records both omissions with errno
+//     and search fact; root's walk of the same view finds both;
+//   - the slot connects to the first by name and gets EACCES on the second;
+//   - the T19.1 certification refuses because of the first and classifies
+//     the second as unreachable, so it neither accepts nor rejects everything.
+//
+// It also shows the limit stated in the README: visible trees are not hidden,
+// so the T19.1 certification is what keeps such a host from qualifying.
+func TestRootT19InventoryOmission(t *testing.T) {
+	p, r, dir := rootFixture(t)
+	t19Wallets(t)
+	base := "/opt/swarma-t19-omit"
+	searchable, closed := base+"/searchable", base+"/closed"
+	for path, mode := range map[string]os.FileMode{base: 0755, searchable: 0711, closed: 0700} {
+		if err := os.Mkdir(path, mode); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(path, mode); err != nil {
+			t.Fatal(err)
+		}
+		if path == base {
+			t.Cleanup(func() { os.RemoveAll(base) })
+		}
+	}
+	plants := []string{searchable + "/ctl.sock", closed + "/ctl.sock"}
+	for _, path := range plants {
+		l, err := net.Listen("unix", path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { l.Close() })
+		if err = os.Chmod(path, 0666); err != nil {
+			t.Fatal(err)
+		}
+		go func() {
+			for {
+				c, err := l.Accept()
+				if err != nil {
+					return
+				}
+				c.Close()
+			}
+		}()
+	}
+	report := filepath.Join(r.Identity.Home, "t19-omission")
+	setT19Policy(t, &p, dir, t19SpecArgv(t19Spec{Report: report, Inventory: true, Pathnames: append(slices.Clone(plants), t19WalletSock), Hold: true})...)
+	p.Egress = nil
+	engine, q := t19Created(t, p, &r, dir)
+	q.Op = "start"
+	started, code := engine.apply(context.Background(), q)
+	if code != "" {
+		t.Fatal("production start:", code)
+	}
+	r = *started
+	got := awaitT19Report(t, report, 6*time.Minute)
+	view := t19ViewWalk(t, r.Identity.Unit)
+	t.Logf("slot sockets %q, verdicts %v, omissions %+v", got.Sockets, got.Pathnames, got.WalkErrors)
+
+	if got.Pathnames[plants[0]] != "ok" || got.Pathnames[plants[1]] != "EACCES" || got.Pathnames[t19WalletSock] != "ok" {
+		t.Fatalf("connect verdicts %v, want ok for the searchable plant and the wallet, EACCES for the closed plant", got.Pathnames)
+	}
+	if !slices.Contains(view.Sockets, plants[0]) || !slices.Contains(view.Sockets, plants[1]) {
+		t.Fatalf("root's view walk misses a plant: %q", view.Sockets)
+	}
+	if slices.Contains(got.Sockets, plants[0]) || slices.Contains(got.Sockets, plants[1]) {
+		t.Fatalf("the slot listed a plant, so no omission is exercised: %q", got.Sockets)
+	}
+	if !slices.Contains(got.WalkErrors, t19WalkError{searchable, "EACCES", "ok"}) || !slices.Contains(got.WalkErrors, t19WalkError{closed, "EACCES", "EACCES"}) {
+		t.Fatalf("slot omissions %+v lack the searchable and closed plant directories", got.WalkErrors)
+	}
+	reachable, problems := t19InventoryVerdict(view, got.Sockets, got.WalkErrors)
+	t.Logf("certification: reachable %q, problems %q", reachable, problems)
+	if !slices.ContainsFunc(problems, func(s string) bool { return strings.Contains(s, strconv.Quote(plants[0])) }) {
+		t.Errorf("certification did not refuse the omitted, connectable %s", plants[0])
+	}
+	for _, problem := range problems {
+		if strings.Contains(problem, closed) {
+			t.Errorf("the inaccessible neighbour raised a problem: %s", problem)
+		}
+	}
+	if !slices.Contains(reachable, plants[0]) || slices.Contains(reachable, plants[1]) || !slices.Contains(reachable, t19WalletSock) {
+		t.Errorf("reachable %q, want the searchable plant and the wallet, never the closed plant", reachable)
+	}
+	q.Op = "stop"
+	if _, code = engine.apply(context.Background(), q); code != "" {
+		t.Fatal("stop:", code)
 	}
 }

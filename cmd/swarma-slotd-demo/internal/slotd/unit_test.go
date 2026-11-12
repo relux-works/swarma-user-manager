@@ -56,7 +56,7 @@ func TestStartInvocation(t *testing.T) {
 		"--property=StandardInput=null", "--property=StandardOutput=journal", "--property=StandardError=journal",
 		"--property=TemporaryFileSystem=/run:ro", "--property=TemporaryFileSystem=/var:ro", "--property=TemporaryFileSystem=/dev/shm:ro",
 		`--property=BindReadOnlyPaths="-/run/swarma-wallet" "/opt/demo-payload/bin/run"`,
-		"--property=RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6", "--property=PrivateIPC=yes", "--property=RestrictNamespaces=yes",
+		"--property=RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6", "--property=SystemCallArchitectures=native", "--property=PrivateIPC=yes", "--property=RestrictNamespaces=yes",
 		"--property=ProtectProc=invisible", "--property=ProcSubset=pid",
 	} {
 		if !slices.Contains(got.Args, arg) {

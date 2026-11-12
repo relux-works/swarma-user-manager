@@ -1,0 +1,17 @@
+T19 narrowing mutant m6 (T19.1 certification): every slot omission is treated
+as unsearchable, so a listable-by-name subtree the slot could not list is
+excluded instead of refused. Portable; killed by
+TestT19InventoryVerdict/searchable_omission_holds_a_socket (and
+TestRootT19InventoryOmission).
+
+--- a/cmd/swarma-slotd-demo/internal/slotd/t19_inventory_test.go
++++ b/cmd/swarma-slotd-demo/internal/slotd/t19_inventory_test.go
+@@ -140,7 +140,7 @@
+ 			problems = append(problems, "slot omission without path, errno or search fact: "+strconv.Quote(e.Path)+" "+e.Errno+" "+e.Search)
+ 			continue
+ 		}
+-		if e.Search == "EACCES" {
++		if e.Search != "" {
+ 			unsearchable = append(unsearchable, e.Path)
+ 			continue
+ 		}

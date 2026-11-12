@@ -1,0 +1,15 @@
+T19 narrowing mutant m7 (T19.1 certification): failures of root's view walk
+are ignored, so an incomplete view walk certifies absence. Portable; killed by
+TestT19InventoryVerdict/root_view_error_on_a_socket-capable_mount.
+
+--- a/cmd/swarma-slotd-demo/internal/slotd/t19_inventory_test.go
++++ b/cmd/swarma-slotd-demo/internal/slotd/t19_inventory_test.go
+@@ -125,7 +125,7 @@
+ 		problems = append(problems, "root view: no mount facts")
+ 	}
+ 	for _, e := range view.Errors {
+-		if e.Path == "" || e.Errno == "" || !t19SocketlessSubtree(view.Mounts, e.Path) {
++		if false {
+ 			problems = append(problems, "root view incomplete: "+strconv.Quote(e.Path)+" "+e.Errno)
+ 		}
+ 	}

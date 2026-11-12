@@ -16,7 +16,7 @@ on:
         required: false
         type: choice
         default: none
-        options: [none, m1-run-bind, m2-skip-landlock, m3-no-family-filter]
+        options: [none, m1-run-bind, m2-skip-landlock, m3-no-family-filter, m5-no-syscall-archs]
 
 permissions:
   contents: read
@@ -153,6 +153,9 @@ jobs:
           /usr/bin/busctl --version > "$scratch/evidence/busctl-version.log"
           /usr/sbin/nft --version > "$scratch/evidence/nft-version.log"
           go test -c -o "$scratch/slotd-root.test" ./cmd/swarma-slotd-demo/internal/slotd
+          # The 386 build of the same test binary is the alternate-ABI payload
+          # of TestRootT19AlternateABI.
+          GOOS=linux GOARCH=386 go test -c -o "$scratch/slotd-root-386.test" ./cmd/swarma-slotd-demo/internal/slotd
           go build -o "$scratch/slotd-daemon" ./cmd/swarma-slotd-demo
           cd cmd/swarma-slotd-demo/internal/slotd
           sudo -n /usr/bin/env -i PATH="$PATH" \
@@ -163,6 +166,7 @@ jobs:
             GOENV=off GOROOT="$GOROOT" GOTOOLCHAIN=local GOWORK=off GOMAXPROCS=2 \
             GITHUB_ACTIONS="$GITHUB_ACTIONS" RUNNER_ENVIRONMENT="$RUNNER_ENVIRONMENT" \
             SLOTD_ROOT_TESTS=1 SLOTD_INSTALL_BINARY="$scratch/slotd-daemon" \
+            SLOTD_T19_ALT_ABI_PROBE="$scratch/slotd-root-386.test" \
             "$scratch/slotd-root.test" -test.v -test.run="$run_filter" -test.timeout=30m \
             2>&1 | go tool test2json -p slotd-root | tee "$scratch/evidence/root-tests.jsonl" || status=$?
           echo "root test pipeline status ${status:-0}" | tee "$scratch/evidence/root-status.log"
@@ -171,7 +175,7 @@ jobs:
           events = [json.loads(line) for line in open(sys.argv[1])]
           mutant, status = sys.argv[2], sys.argv[3]
           if mutant != "none":
-              killers = {"m1-run-bind": "TestRootT19SlotConfinement/T19.4-plants", "m2-skip-landlock": "TestRootT19SlotConfinement/T19.3-abstract", "m3-no-family-filter": "TestRootT19SlotConfinement/T19.8-families"}
+              killers = {"m1-run-bind": "TestRootT19SlotConfinement/T19.4-plants", "m2-skip-landlock": "TestRootT19SlotConfinement/T19.3-abstract", "m3-no-family-filter": "TestRootT19SlotConfinement/T19.8-families", "m5-no-syscall-archs": "TestRootT19AlternateABI"}
               failed = {e["Test"] for e in events if e.get("Action") == "fail" and "Test" in e}
               assert killers[mutant] in failed, ("mutant survived", mutant, sorted(failed))
               print("mutant", mutant, "killed by", killers[mutant])
@@ -186,6 +190,7 @@ jobs:
           assert {"TestRootStationLifecycleRetention", "TestRootStationPreexecRefusal", "TestRootStationExtraWritableBind"} <= passed
           assert "TestRootStationFenceHostView" in passed
           assert {"TestRootT19SlotConfinement", "TestRootT19DetectorControl", "TestRootT19StatusSocketBound", "TestRootT19LandlockFailClosed"} <= passed
+          assert {"TestRootT19AlternateABI", "TestRootT19InventoryOmission"} <= passed
           PY
           SH
       - name: Preserve root evidence
