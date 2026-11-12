@@ -10,11 +10,14 @@ import (
 	"strconv"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/relux-works/swarma-chain-lab/experiments/single-use/payloadlaunch"
 )
 
 const maxPolicyBytes = 64 * 1024
 
 type policy struct {
+	Version    int           `json:"version,omitempty"`
 	CallerUser string        `json:"caller_user"`
 	UIDBase    uint32        `json:"uid_base"`
 	HomeRoot   string        `json:"home_root"`
@@ -25,9 +28,23 @@ type policy struct {
 }
 
 type payloadPolicy struct {
-	Path   string   `json:"path"`
-	SHA256 string   `json:"sha256"`
-	Argv   []string `json:"argv"`
+	Path           string                 `json:"path,omitempty"`
+	SHA256         string                 `json:"sha256,omitempty"`
+	Argv           []string               `json:"argv,omitempty"`
+	StationProfile *payloadlaunch.Profile `json:"station_profile,omitempty"`
+}
+
+func (p policy) payloadPath() string {
+	if p.Payload.StationProfile != nil {
+		return p.Payload.StationProfile.Executable
+	}
+	return p.Payload.Path
+}
+func (p policy) payloadDigest() string {
+	if p.Payload.StationProfile != nil {
+		return p.Payload.StationProfile.ExecutableSHA256
+	}
+	return p.Payload.SHA256
 }
 
 type capsPolicy struct {
@@ -56,8 +73,15 @@ func parsePolicy(b []byte) (policy, error) {
 	if len(b) > maxPolicyBytes {
 		return p, errors.New("policy too large")
 	}
-	f, ok := objectFields(b, "caller_user", "uid_base", "home_root", "socket", "payload", "caps", "egress")
-	if !ok || len(f) != 7 {
+	f, ok := objectFields(b, "version", "caller_user", "uid_base", "home_root", "socket", "payload", "caps", "egress")
+	if !ok || (len(f) != 7 && len(f) != 8) {
+		return p, errors.New("invalid policy fields")
+	}
+	if _, present := f["version"]; present {
+		if len(f) != 8 || !decodeFields(f, map[string]any{"version": &p.Version}) || p.Version != 2 {
+			return p, errors.New("unsupported policy version")
+		}
+	} else if len(f) != 7 {
 		return p, errors.New("invalid policy fields")
 	}
 	if !decodeFields(f, map[string]any{
@@ -65,17 +89,34 @@ func parsePolicy(b []byte) (policy, error) {
 	}) {
 		return p, errors.New("invalid policy value types")
 	}
-	payload, ok := objectFields(f["payload"], "path", "sha256", "argv")
-	if !ok || len(payload) != 3 || !decodeFields(payload, map[string]any{"path": &p.Payload.Path, "sha256": &p.Payload.SHA256, "argv": &p.Payload.Argv}) {
-		return p, errors.New("invalid payload fields")
-	}
-	var rawArgv []json.RawMessage
-	if json.Unmarshal(payload["argv"], &rawArgv) != nil {
-		return p, errors.New("invalid payload argv")
-	}
-	for _, arg := range rawArgv {
-		if len(arg) == 0 || arg[0] != '"' {
-			return p, errors.New("invalid payload argument type")
+	if p.Version == 2 {
+		payload, valid := objectFields(f["payload"], "station_profile")
+		if !valid || len(payload) != 1 {
+			return p, errors.New("invalid station payload fields")
+		}
+		profile, valid := objectFields(payload["station_profile"], "v", "kind", "executable", "executable_sha256", "static_release_sha256", "gateway", "gateway_cert_sha256", "dialect", "model", "max_tokens")
+		var typed payloadlaunch.Profile
+		if !valid || len(profile) != 10 || !decodeFields(profile, map[string]any{
+			"v": &typed.Version, "kind": &typed.Kind, "executable": &typed.Executable, "executable_sha256": &typed.ExecutableSHA256,
+			"static_release_sha256": &typed.StaticReleaseSHA256, "gateway": &typed.Gateway, "gateway_cert_sha256": &typed.GatewayCertSHA256,
+			"dialect": &typed.Dialect, "model": &typed.Model, "max_tokens": &typed.MaxTokens,
+		}) {
+			return p, errors.New("invalid station profile fields")
+		}
+		p.Payload.StationProfile = &typed
+	} else {
+		payload, valid := objectFields(f["payload"], "path", "sha256", "argv")
+		if !valid || len(payload) != 3 || !decodeFields(payload, map[string]any{"path": &p.Payload.Path, "sha256": &p.Payload.SHA256, "argv": &p.Payload.Argv}) {
+			return p, errors.New("invalid payload fields")
+		}
+		var rawArgv []json.RawMessage
+		if json.Unmarshal(payload["argv"], &rawArgv) != nil {
+			return p, errors.New("invalid payload argv")
+		}
+		for _, arg := range rawArgv {
+			if len(arg) == 0 || arg[0] != '"' {
+				return p, errors.New("invalid payload argument type")
+			}
 		}
 	}
 	caps, ok := objectFields(f["caps"], "cpu_quota", "memory_max", "tasks_max")
@@ -136,8 +177,25 @@ func (p policy) validate() error {
 	if !cleanAbsolutePath(p.HomeRoot) || strings.ContainsRune(p.HomeRoot, ':') || !cleanAbsolutePath(p.Socket) || len(p.Socket) >= 108 || strings.HasPrefix(p.Socket, p.HomeRoot+"/") || p.Socket == p.HomeRoot {
 		return errors.New("invalid home or socket path")
 	}
-	if !cleanAbsolutePath(p.Payload.Path) || strings.HasPrefix(p.Payload.Path, p.HomeRoot+"/") || !digestPattern.MatchString(p.Payload.SHA256) || len(p.Payload.Argv) == 0 || len(p.Payload.Argv) > 128 || p.Payload.Argv[0] != p.Payload.Path {
+	if p.Version == 2 {
+		if p.Payload.StationProfile == nil || p.Payload.Path != "" || p.Payload.SHA256 != "" || p.Payload.Argv != nil {
+			return errors.New("typed profile cannot contain literal launch options")
+		}
+		if _, err := payloadlaunch.EncodeProfile(*p.Payload.StationProfile); err != nil {
+			return err
+		}
+		for _, c := range p.HomeRoot {
+			if !strings.ContainsRune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789/._-", c) {
+				return errors.New("invalid station home path")
+			}
+		}
+	} else if p.Version != 0 || p.Payload.StationProfile != nil {
+		return errors.New("unsupported policy profile")
+	} else if !cleanAbsolutePath(p.Payload.Path) || !digestPattern.MatchString(p.Payload.SHA256) || len(p.Payload.Argv) == 0 || len(p.Payload.Argv) > 128 || p.Payload.Argv[0] != p.Payload.Path {
 		return errors.New("invalid payload binding")
+	}
+	if p.payloadPath() == p.HomeRoot || strings.HasPrefix(p.payloadPath(), p.HomeRoot+"/") {
+		return errors.New("payload inside writable home root")
 	}
 	argvBytes := 0
 	for _, arg := range p.Payload.Argv {
@@ -153,15 +211,32 @@ func (p policy) validate() error {
 	if !cpuPattern.MatchString(p.Caps.CPUQuota) || err != nil || cpu <= 0 || !validMemoryMax(p.Caps.MemoryMax) || p.Caps.TasksMax == 0 {
 		return errors.New("invalid resource caps")
 	}
+	seen, err := validateEgress(p.Egress)
+	if err != nil {
+		return err
+	}
+	if p.Version == 2 {
+		gateway, _ := netip.ParseAddrPort(p.Payload.StationProfile.Gateway)
+		if !seen[egressRule{Addr: gateway.Addr().String(), Port: gateway.Port(), Proto: "tcp"}] {
+			return errors.New("station gateway missing from egress policy")
+		}
+	}
+	return nil
+}
+
+func validateEgress(rules []egressRule) (map[egressRule]bool, error) {
+	if len(rules) > 256 {
+		return nil, errors.New("invalid egress list")
+	}
 	seen := make(map[egressRule]bool)
-	for _, rule := range p.Egress {
+	for _, rule := range rules {
 		addr, err := netip.ParseAddr(rule.Addr)
 		if err != nil || addr.Zone() != "" || addr.IsUnspecified() || addr.IsMulticast() || addr.Is4In6() || addr.String() != rule.Addr || rule.Port == 0 || (rule.Proto != "tcp" && rule.Proto != "udp") || seen[rule] {
-			return errors.New("invalid egress rule")
+			return nil, errors.New("invalid egress rule")
 		}
 		seen[rule] = true
 	}
-	return nil
+	return seen, nil
 }
 
 func validMemoryMax(value string) bool {

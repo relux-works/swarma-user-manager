@@ -427,6 +427,13 @@ calls; prepared-host review remains necessary. Test budgets are unchanged.
 
 The optional race build exceeded the 20-minute test target and tripped existing journal deadline assertions (no data race reported); tracked separately.
 
+### Slot demo tools
+
+The demo's [typed station payload profile](cmd/swarma-slotd-demo/STATION-PAYLOAD.md)
+documents the fixed read-only `busctl` D-Bus argv checks, protected per-UID static
+staging and its pending source/runtime qualification. Its producer logs belong
+under `.temp/slotd-dk5b/`; this is separate from the station core and wire helper.
+
 ### PC2 specification tools
 
 For the pure manager codecs, run `go test ./internal/pc2state` and

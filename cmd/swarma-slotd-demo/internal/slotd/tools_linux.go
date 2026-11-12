@@ -34,7 +34,7 @@ func (w *boundedOutput) Write(b []byte) (int, error) {
 
 func fixedToolCommand(ctx context.Context, invocation toolInvocation) (*exec.Cmd, error) {
 	switch invocation.Path {
-	case systemdRunPath, systemctlPath, nftPath:
+	case systemdRunPath, systemctlPath, nftPath, busctlPath:
 	default:
 		return nil, errors.New("unsupported tool")
 	}

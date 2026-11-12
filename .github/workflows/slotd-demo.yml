@@ -96,6 +96,7 @@ jobs:
           sudo -n apt-get install -y --no-install-recommends nftables
           test -x /usr/bin/systemd-run
           test -x /usr/bin/systemctl
+          test -x /usr/bin/busctl
           test -x /usr/sbin/nft
           test -x /usr/sbin/useradd
           test -x /usr/sbin/userdel
@@ -130,6 +131,7 @@ jobs:
           test "$(go env GOVERSION)" = go1.26.10
           uname -srm > "$scratch/evidence/platform.log"
           /usr/bin/systemctl --version > "$scratch/evidence/systemd-version.log"
+          /usr/bin/busctl --version > "$scratch/evidence/busctl-version.log"
           /usr/sbin/nft --version > "$scratch/evidence/nft-version.log"
           go test -c -o "$scratch/slotd-root.test" ./cmd/swarma-slotd-demo/internal/slotd
           cd cmd/swarma-slotd-demo/internal/slotd
@@ -149,6 +151,10 @@ jobs:
           assert not any(e.get("Action") in ("skip", "fail") for e in events)
           passed = {e["Test"] for e in events if e.get("Action") == "pass" and "Test" in e}
           assert {"TestRootRecordStore", "TestRootBootstrapExclusive", "TestRootHomeDeletionRefusals", "TestRootLifecycleRestart", "TestRootEgressLayers", "TestRootServiceRestart", "TestRootGate", "TestRootNFTOwnershipCreation", "TestRootInvalidHomeStartup", "TestRootEnforcementFence", "TestRootPayloadLeaves"} <= passed
+          assert {"TestRootStationDescriptorCustody", "TestRootStationDestroyPreflight", "TestRootStationMissingJournalState", "TestRootStationCreationBoundaries"} <= passed
+          assert {"TestRootStationMetadataRefusals", "TestRootStationMountRefusal"} <= passed
+          assert "TestRootStationCrossUIDAccess" in passed
+          assert {"TestRootStationLifecycleRetention", "TestRootStationPreexecRefusal", "TestRootStationExtraWritableBind"} <= passed
           PY
           SH
       - name: Preserve root evidence

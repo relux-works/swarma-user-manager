@@ -32,11 +32,16 @@ the nonblocking slot lock. Expiry planning excludes failed records.
 placeholder and its allowlist uses documentation addresses. Actual policies are
 root-owned configuration outside this repository.
 
-The JSON schema requires all seven top-level fields, with exact lowercase keys:
+The legacy JSON schema requires all seven top-level fields, with exact lowercase keys:
 `caller_user`, `uid_base`, `home_root`, `socket`, `payload`, `caps`, `egress`.
 Unknown, duplicate, missing, null and incorrectly typed fields are refused,
 including in nested objects. Policy input is bounded to 64 KiB and the allowlist
 to 256 rules.
+
+The separate [typed station payload profile](STATION-PAYLOAD.md) adds root
+policy `version:2` and a closed `payload.station_profile`, with fixed codec
+argv, protected input custody and preinitialized retained journal. Its composed
+source and runtime qualification are pending; it does not change wire v1 r4.
 
 - `caller_user` is a non-root Unix account name outside the derived slot names.
 - The 10,000-ID range beginning at `uid_base` must exclude zero, UID 65534 and

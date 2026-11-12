@@ -109,6 +109,43 @@ func testFenceEntry(args []string) int {
 func plantFenceFault(kind string, q fenceRequest) error {
 	path := "/sys/fs/cgroup" + q.Record.Cgroup
 	switch kind {
+	case "station_bootstrap":
+		// Baseline admission must succeed before the bounded known violation.
+		// The caller already verified this is its positively owned test cgroup.
+		roots, err := openStationRoots()
+		if err != nil {
+			return err
+		}
+		defer roots.close()
+		if err = verifyStationInputs(roots, q.Policy, &q.Record); err != nil {
+			return err
+		}
+		view, err := openStationView(roots, &q.Record)
+		if err != nil {
+			return err
+		}
+		defer view.close()
+		parent, err := stationParent(roots, q.Record.Identity.UID, stationSpecFor("bootstrap"))
+		if err != nil {
+			return err
+		}
+		defer parent.Close()
+		f, err := childFD(parent, "bootstrap", unix.O_WRONLY|unix.O_NONBLOCK, 0)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		identity, ok := q.Record.Station.object("bootstrap")
+		if !ok {
+			return errStationCustody
+		}
+		if err = checkStationObject(f, stationSpecFor("bootstrap"), q.Record.Identity.UID, identity); err != nil {
+			return err
+		}
+		if err = f.Truncate(0); err != nil {
+			return err
+		}
+		return f.Sync()
 	case "wrong_limit":
 		return os.WriteFile(filepath.Join(path, "memory.max"), []byte(strconv.FormatUint(memoryBytes(q.Policy.Caps.MemoryMax)+4096, 10)), 0600)
 	case "missing_nft":

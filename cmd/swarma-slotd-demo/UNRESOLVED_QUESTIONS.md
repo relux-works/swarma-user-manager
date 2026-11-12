@@ -1,5 +1,20 @@
 # Deployment qualification still required
 
+The [DK5b typed profile](STATION-PAYLOAD.md) remains an implementation draft.
+Public bootstrap/model and staged-config adapters use the independently
+verified API composition landed at chain-lab `288d63e1`. Its published
+`single-use` module still requires an older `sealwatch` lacking `ValidateJSON`;
+a local upstream replace masked that external-consumer compile failure. The
+dependency owner must land the corrected public module graph before the final
+pin and draft can be qualified. A diagnostic selection of the real published
+sealwatch from the same signed commit permits scoped Linux vet, build and test
+compilation; no tests were executed. No typed Create/start qualification,
+deployment or automatic migration is claimed. Require real two-UID sandbox/custody and pre-exec refusal controls,
+interrupted Create/Destroy evidence, retained journal identity, exact composed
+payload consumer and independent review before activation. The separate install
+package draft must explicitly provision the new protected shared parents and
+approved per-UID staging; it is not assumed landed or already installed.
+
 The demo-local filesystem and receipt-backed restart-retirement contract is
 implemented without changing `internal/linuxos`. Its previous API integration
 gaps no longer block this implementation.

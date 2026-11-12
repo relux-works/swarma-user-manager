@@ -62,7 +62,7 @@ func (w *witnessEffects) enter(name, phase string) error {
 	}
 	return nil
 }
-func (w *witnessEffects) prepareCreate(context.Context, *durableRecord) error {
+func (w *witnessEffects) prepareCreate(context.Context, *durableRecord, []byte) error {
 	return w.enter("prepare-create", "")
 }
 func (w *witnessEffects) create(_ context.Context, r *durableRecord, _ []byte, persist func() error) error {

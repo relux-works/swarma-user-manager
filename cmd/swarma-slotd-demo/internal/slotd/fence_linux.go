@@ -252,6 +252,25 @@ func verifyFence(ctx context.Context, q fenceRequest) error {
 	if err = verifyNFT(ctx, q.Policy, r); err != nil {
 		return errFenceNFT
 	}
+	if q.Policy.Version == 2 {
+		if err = verifyUnitPropertiesAt(v, q.Policy, r, "activating"); err != nil {
+			return errFenceInput
+		}
+		if err = verifyStationUnitExec(ctx, r); err != nil {
+			return errFenceInput
+		}
+		// ExecStartPre=+ intentionally sees the host mount view required for
+		// kernel enforcement. Main proves its own strict view before effects.
+		roots, e := openStationRoots()
+		if e != nil {
+			return errFenceInput
+		}
+		err = verifyStationInputs(roots, q.Policy, r)
+		roots.close()
+		if err != nil {
+			return errFenceInput
+		}
+	}
 	return verifyKernelLimits(cgroup, q.Policy)
 }
 

@@ -11,7 +11,7 @@ import (
 
 // Proves command construction has an empty environment and cwd /, and refuses arbitrary executables; no command runs.
 func TestFixedToolConstruction(t *testing.T) {
-	for _, path := range []string{systemdRunPath, systemctlPath, nftPath} {
+	for _, path := range []string{systemdRunPath, systemctlPath, nftPath, busctlPath} {
 		cmd, err := fixedToolCommand(context.Background(), toolInvocation{Path: path, Args: []string{"--help"}})
 		if err != nil || cmd.Path != path || cmd.Dir != "/" || cmd.Env == nil || len(cmd.Env) != 0 {
 			t.Fatalf("unsafe command %v, %v", cmd, err)

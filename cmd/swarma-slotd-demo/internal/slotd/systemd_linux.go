@@ -11,10 +11,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/relux-works/swarma-chain-lab/experiments/single-use/payloadlaunch"
 	"golang.org/x/sys/unix"
 )
 
-var unitPropertyNames = []string{"LoadState", "ActiveState", "SubState", "ControlPID", "ControlGroup", "Description", "User", "Group", "Type", "WorkingDirectory", "CPUQuotaPerSecUSec", "MemoryMax", "TasksMax", "RuntimeMaxUSec", "NoNewPrivileges", "ProtectSystem", "ProtectHome", "PrivateTmp", "PrivateDevices", "ProtectKernelTunables", "ProtectKernelModules", "ProtectControlGroups", "RestrictSUIDSGID", "LockPersonality", "CapabilityBoundingSet", "IPAddressDeny", "IPAddressAllow", "Slice", "BindPaths", "BindReadOnlyPaths"}
+var unitPropertyNames = []string{"LoadState", "ActiveState", "SubState", "ControlPID", "ControlGroup", "Description", "User", "Group", "Type", "WorkingDirectory", "CPUQuotaPerSecUSec", "MemoryMax", "TasksMax", "RuntimeMaxUSec", "NoNewPrivileges", "ProtectSystem", "ProtectHome", "PrivateTmp", "PrivateDevices", "ProtectKernelTunables", "ProtectKernelModules", "ProtectControlGroups", "RestrictSUIDSGID", "LockPersonality", "CapabilityBoundingSet", "IPAddressDeny", "IPAddressAllow", "Slice", "BindPaths", "BindReadOnlyPaths", "SupplementaryGroups", "Environment", "EnvironmentFiles", "PassEnvironment"}
 
 func unitProperties(ctx context.Context, id slotIdentity) (map[string]string, error) {
 	b, e := runFixedTool(ctx, toolInvocation{Path: systemctlPath, Args: []string{"--system", "--no-ask-password", "--no-pager", "--all", "--plain", "--full", "--output=json", "list-units", "--", id.Unit}})
@@ -191,6 +192,9 @@ func sameWords(actual string, expected []string) bool {
 	return strings.Join(a, " ") == strings.Join(b, " ")
 }
 func verifyUnitProperties(v map[string]string, p policy, r *durableRecord) error {
+	return verifyUnitPropertiesAt(v, p, r, "active")
+}
+func verifyUnitPropertiesAt(v map[string]string, p policy, r *durableRecord, active string) error {
 	if v == nil {
 		return errors.New("unit absent after start")
 	}
@@ -198,6 +202,23 @@ func verifyUnitProperties(v map[string]string, p policy, r *durableRecord) error
 		return e
 	}
 	expected := map[string]string{"LoadState": "loaded", "ActiveState": "active", "Type": "exec", "User": r.Identity.Name, "Group": r.Identity.Name, "WorkingDirectory": r.Identity.Home, "MemoryMax": strconv.FormatUint(memoryBytes(p.Caps.MemoryMax), 10), "TasksMax": strconv.FormatUint(uint64(p.Caps.TasksMax), 10), "NoNewPrivileges": "yes", "ProtectSystem": "strict", "ProtectHome": "tmpfs", "PrivateTmp": "yes", "PrivateDevices": "yes", "ProtectKernelTunables": "yes", "ProtectKernelModules": "yes", "ProtectControlGroups": "yes", "RestrictSUIDSGID": "yes", "LockPersonality": "yes", "CapabilityBoundingSet": "", "Slice": "system.slice", "ControlGroup": "/system.slice/" + r.Identity.Unit, "BindPaths": r.Identity.Home + ":" + r.Identity.Home + ":rbind", "BindReadOnlyPaths": ""}
+	expected["ActiveState"] = active
+	if p.Version == 2 {
+		m, err := stationManifest(r)
+		if err != nil {
+			return err
+		}
+		if err = payloadlaunch.CheckProfile(m, *p.Payload.StationProfile); err != nil {
+			return err
+		}
+		if !sameWords(v["BindPaths"], []string{r.Identity.Home + ":" + r.Identity.Home + ":rbind", m.Journal.Path + ":" + m.Journal.Path + ":rbind"}) {
+			return errStationUnit
+		}
+		delete(expected, "BindPaths")
+		for _, key := range []string{"SupplementaryGroups", "Environment", "EnvironmentFiles", "PassEnvironment"} {
+			expected[key] = ""
+		}
+	}
 	for key, want := range expected {
 		if v[key] != want {
 			return errors.New("installed unit property mismatch: " + key)
@@ -228,11 +249,11 @@ func verifyUnitProperties(v map[string]string, p policy, r *durableRecord) error
 	return nil
 }
 func verifyPayload(p policy) error {
-	b, e := readProtected(p.Payload.Path, 0, 512*1024*1024)
+	b, e := readProtected(p.payloadPath(), 0, 512*1024*1024)
 	if e != nil {
 		return e
 	}
-	if digest(b) != p.Payload.SHA256 {
+	if digest(b) != p.payloadDigest() {
 		return errors.New("payload file digest mismatch")
 	}
 	return nil
@@ -266,7 +287,15 @@ func startUnit(ctx context.Context, p policy, r *durableRecord, persist func() e
 		return e
 	}
 	defer fenceRoot.Close()
-	inv, e := startInvocation(p, r.Slot, r.Binding, now)
+	var manifests []payloadlaunch.Manifest
+	if p.Version == 2 {
+		m, err := stationManifest(r)
+		if err != nil {
+			return err
+		}
+		manifests = append(manifests, m)
+	}
+	inv, e := startInvocation(p, r.Slot, r.Binding, now, manifests...)
 	if e != nil {
 		return e
 	}
@@ -283,5 +312,11 @@ func startUnit(ctx context.Context, p policy, r *durableRecord, persist func() e
 	if e != nil {
 		return e
 	}
-	return verifyUnitProperties(values, p, r)
+	if e = verifyUnitProperties(values, p, r); e != nil {
+		return e
+	}
+	if p.Version == 2 {
+		return verifyStationUnitExec(ctx, r)
+	}
+	return nil
 }

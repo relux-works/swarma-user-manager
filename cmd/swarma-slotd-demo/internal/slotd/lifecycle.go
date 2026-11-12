@@ -2,6 +2,8 @@ package slotd
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"slices"
 	"time"
@@ -13,7 +15,7 @@ type stateStore interface {
 	all() ([]*durableRecord, error)
 }
 type lifecycleEffects interface {
-	prepareCreate(context.Context, *durableRecord) error
+	prepareCreate(context.Context, *durableRecord, []byte) error
 	create(context.Context, *durableRecord, []byte, func() error) error
 	prepareStart(context.Context, *durableRecord) error
 	start(context.Context, *durableRecord, func() error, time.Time) error
@@ -74,7 +76,7 @@ func (e *lifecycle) applyLocked(ctx context.Context, req request) (*durableRecor
 	if r != nil {
 		binding = &r.Binding
 	}
-	next, code := planTransition(req, binding, e.policy.Payload.SHA256, e.now())
+	next, code := planTransition(req, binding, e.policy.payloadDigest(), e.now())
 	if code != "" {
 		return r, code
 	}
@@ -82,6 +84,17 @@ func (e *lifecycle) applyLocked(ctx context.Context, req request) (*durableRecor
 		return r, ""
 	}
 	if req.Op == "create" {
+		var station *stationRecord
+		if e.policy.Version == 2 {
+			if e.policy.Payload.StationProfile == nil {
+				return r, internalError
+			}
+			public, err := decodeStationBootstrap(req.Bootstrap, req.BootstrapSHA256)
+			if err != nil {
+				return r, invalidBootstrap
+			}
+			station = &stationRecord{Version: 1, BookingID: public.BookingID, Profile: *e.policy.Payload.StationProfile}
+		}
 		if r != nil && r.Binding.State == created {
 			return r, ""
 		}
@@ -93,8 +106,16 @@ func (e *lifecycle) applyLocked(ctx context.Context, req request) (*durableRecor
 		if err != nil {
 			return r, internalError
 		}
-		candidate := &durableRecord{Version: 1, Slot: req.Slot, Identity: id, BootID: boot, Binding: record{State: failed, NotAfter: req.NotAfter, PayloadSHA256: e.policy.Payload.SHA256, BootstrapSHA256: req.BootstrapSHA256}}
-		if err = e.effects.prepareCreate(ctx, candidate); err != nil {
+		candidate := &durableRecord{Version: 1, Slot: req.Slot, Identity: id, BootID: boot, Binding: record{State: failed, NotAfter: req.NotAfter, PayloadSHA256: e.policy.payloadDigest(), BootstrapSHA256: req.BootstrapSHA256}}
+		if station != nil {
+			var generation [16]byte
+			if _, err = rand.Read(generation[:]); err != nil {
+				return r, internalError
+			}
+			station.Generation = hex.EncodeToString(generation[:])
+			candidate.Version, candidate.Station = 2, station
+		}
+		if err = e.effects.prepareCreate(ctx, candidate, req.Bootstrap); err != nil {
 			return r, internalError
 		}
 		candidate.Phase = "account-create"
@@ -149,10 +170,16 @@ func (e *lifecycle) applyLocked(ctx context.Context, req request) (*durableRecor
 				}
 				return r, e.failure(r, err)
 			}
-			for _, step := range []struct {
+			steps := []struct {
 				phase string
 				run   func(context.Context, *durableRecord) error
-			}{{"nft-remove", e.effects.removeNFT}, {"account-remove", e.effects.retire}, {"home-remove", e.effects.removeHome}} {
+			}{{"nft-remove", e.effects.removeNFT}, {"account-remove", e.effects.retire}, {"home-remove", e.effects.removeHome}}
+			// Retire typed identity only after every per-renter secret/state tree
+			// is gone. Failure retains the record and forbids reuse.
+			if r.Station != nil {
+				steps[1], steps[2] = steps[2], steps[1]
+			}
+			for _, step := range steps {
 				r.Phase = step.phase
 				if err = e.store.save(r); err != nil {
 					return r, internalError

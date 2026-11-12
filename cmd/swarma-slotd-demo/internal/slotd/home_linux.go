@@ -75,6 +75,10 @@ func (h *homeRoot) create(r *durableRecord, bootstrap []byte, persist func() err
 	if e = f.Sync(); e != nil {
 		return e
 	}
+	if r.Station != nil {
+		r.Phase = ""
+		return persist()
+	}
 	r.Phase = "bootstrap-create"
 	if e = persist(); e != nil {
 		return e

@@ -26,6 +26,7 @@ type durableRecord struct {
 	UnitToken     string          `json:"unit_token"`
 	Cgroup        string          `json:"cgroup"`
 	UnitRuntimeUS int64           `json:"unit_runtime_us"`
+	Station       *stationRecord  `json:"station,omitempty"`
 }
 
 type accountReceipt struct {
@@ -59,7 +60,7 @@ func decodeDurable(b []byte, p policy, slot string) (durableRecord, error) {
 		return r, errors.New("noncanonical record")
 	}
 	id, err := p.identity(slot)
-	if err != nil || r.Version != 1 || r.Slot != slot || r.Identity != id || !bootPattern.MatchString(r.BootID) || !digestPattern.MatchString(r.Binding.PayloadSHA256) || !digestPattern.MatchString(r.Binding.BootstrapSHA256) || r.Binding.NotAfter.IsZero() || r.Binding.NotAfter.Nanosecond() != 0 || r.Binding.NotAfter.Location() != time.UTC {
+	if err != nil || (r.Version != 1 && r.Version != 2) || r.Slot != slot || r.Identity != id || !bootPattern.MatchString(r.BootID) || !digestPattern.MatchString(r.Binding.PayloadSHA256) || !digestPattern.MatchString(r.Binding.BootstrapSHA256) || r.Binding.NotAfter.IsZero() || r.Binding.NotAfter.Nanosecond() != 0 || r.Binding.NotAfter.Location() != time.UTC {
 		return r, errors.New("invalid record binding")
 	}
 	switch r.Binding.State {
@@ -68,7 +69,7 @@ func decodeDurable(b []byte, p policy, slot string) (durableRecord, error) {
 		return r, errors.New("invalid stored state")
 	}
 	switch r.Phase {
-	case "", "account-create", "home-create", "bootstrap-create", "nft-install", "unit-start", "unit-stop", "nft-remove", "account-remove", "home-remove":
+	case "", "account-create", "home-create", "bootstrap-create", "station-create", "station-remove", "nft-install", "unit-start", "unit-stop", "nft-remove", "account-remove", "home-remove":
 	default:
 		return r, errors.New("invalid effect intent")
 	}
@@ -89,9 +90,10 @@ func decodeDurable(b []byte, p policy, slot string) (durableRecord, error) {
 	if (r.UnitToken == "") != (r.Cgroup == "") || (r.UnitToken == "" && r.UnitRuntimeUS != 0) || (r.UnitToken != "" && r.UnitRuntimeUS <= 0) {
 		return r, errors.New("invalid unit receipt")
 	}
-	check := p
-	check.Egress = r.NFTPolicy
-	if err := check.validate(); err != nil {
+	if _, err := validateEgress(r.NFTPolicy); err != nil {
+		return r, err
+	}
+	if err := validateStationRecord(&r, p); err != nil {
 		return r, err
 	}
 	// A crash never turns an intent into a receipt or a repeatable successful op.

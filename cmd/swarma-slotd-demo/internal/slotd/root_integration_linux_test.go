@@ -28,11 +28,20 @@ func TestMain(m *testing.M) {
 	if len(os.Args) > 1 && os.Args[1] == "--enforcement-fence" {
 		os.Exit(testFenceEntry(os.Args[2:]))
 	}
+	if len(os.Args) > 1 && os.Args[1] == "-slot-profile" {
+		os.Exit(runStationMainViewProbe(os.Args))
+	}
 	if len(os.Args) > 1 && os.Args[1] == "slotd-test-probe" {
 		if os.Geteuid() == 0 {
 			os.Exit(90)
 		}
 		os.Exit(runProbe(os.Args[2:]))
+	}
+	if len(os.Args) > 1 && os.Args[1] == "slotd-station-access-probe" {
+		if os.Geteuid() == 0 {
+			os.Exit(90)
+		}
+		os.Exit(runStationAccessProbe(os.Args[2:]))
 	}
 	os.Exit(m.Run())
 }
@@ -295,7 +304,11 @@ func accountCleanup(t *testing.T, e *linuxEffects, r *durableRecord) {
 			t.Error(err)
 			return
 		}
-		for _, step := range []func(context.Context, *durableRecord) error{e.removeNFT, e.retire, e.removeHome} {
+		steps := []func(context.Context, *durableRecord) error{e.removeNFT, e.retire, e.removeHome}
+		if r.Station != nil {
+			steps[1], steps[2] = steps[2], steps[1]
+		}
+		for _, step := range steps {
 			if err := step(ctx, r); err != nil {
 				t.Error(err)
 				return
@@ -448,7 +461,7 @@ func TestRootLifecycleRestart(t *testing.T) {
 // starts only its reserved fixture UID, records its PID and cancels that child.
 func assertUnmanagedProcessRefusal(t *testing.T, engine *lifecycle, effects *linuxEffects, r *durableRecord, dir string) {
 	t.Helper()
-	if e := effects.prepareCreate(context.Background(), r); e != nil {
+	if e := effects.prepareCreate(context.Background(), r, nil); e != nil {
 		t.Fatal(e)
 	}
 	orphan := filepath.Join(dir, "orphan")
@@ -566,7 +579,7 @@ func TestRootEgressLayers(t *testing.T) {
 			effects := &linuxEffects{policy: p, homes: h}
 			accountCleanup(t, effects, &r)
 			ctx := context.Background()
-			if err = effects.prepareCreate(ctx, &r); err != nil {
+			if err = effects.prepareCreate(ctx, &r, nil); err != nil {
 				t.Fatal(err)
 			}
 			// An isolated fixture store records the real intent/receipts even in the
@@ -897,7 +910,7 @@ func TestRootNFTOwnershipCreation(t *testing.T) {
 	defer h.close()
 	effects := &linuxEffects{policy: p, homes: h}
 	ctx := context.Background()
-	if e = effects.prepareCreate(ctx, &r); e != nil {
+	if e = effects.prepareCreate(ctx, &r, nil); e != nil {
 		t.Fatal(e)
 	}
 	s, e := openStoreAt(p, filepath.Join(dir, "state"))
