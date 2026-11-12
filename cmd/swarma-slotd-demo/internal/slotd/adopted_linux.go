@@ -400,8 +400,10 @@ func systemCronUsers(b []byte) ([]string, error) {
 	return users, nil
 }
 
-// systemCronAssignment reports a crontab environment line: an optionally
-// quoted name, optional blanks, then "=".
+// systemCronAssignment reports a crontab environment line the way cron's
+// load_env reads one: a name (quoted, or every character up to the first
+// blank or "="), optional blanks, then "=". A job line never has "=" right
+// after its first field.
 func systemCronAssignment(line string) bool {
 	rest := line
 	if q := line[0]; q == '"' || q == '\'' {
@@ -411,9 +413,7 @@ func systemCronAssignment(line string) bool {
 		}
 		rest = line[end+2:]
 	} else {
-		n := strings.IndexFunc(line, func(r rune) bool {
-			return !(r == '_' || r >= 'A' && r <= 'Z' || r >= 'a' && r <= 'z' || r >= '0' && r <= '9')
-		})
+		n := strings.IndexAny(line, " \t=")
 		if n <= 0 {
 			return false
 		}

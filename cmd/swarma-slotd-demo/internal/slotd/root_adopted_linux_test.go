@@ -664,11 +664,10 @@ func TestRootAdoptedKeyAncestry(t *testing.T) {
 	if err := os.Chmod(keys, 0755); err != nil {
 		t.Fatal(err)
 	}
+	// Move the fixture key (0600, owned by the UID) so it stays the one
+	// UID-owned file the gate admits; a second copy would be residue.
 	key := filepath.Join(keys, "agent.key")
-	if err := os.WriteFile(key, []byte("fixture agent key\n"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chown(key, int(a.h.UID), int(a.h.UID)); err != nil {
+	if err := os.Rename(a.h.KeyFile, key); err != nil {
 		t.Fatal(err)
 	}
 	link := filepath.Join(dir, "keylink-"+t19Nonce()[:6])
@@ -715,7 +714,11 @@ func TestRootAdoptedKeyAncestry(t *testing.T) {
 
 	// Public lifecycle: create refuses over a writable parent and creates
 	// nothing; start refuses over it; the restored layout admits both.
+	// The gate passes and the key check refuses, so the refused create is
+	// attributable to the key ancestry alone.
+	a.gate("before the refused create", "")
 	chmod(0775)
+	check("group-writable parent before create", false)
 	a.expect("create over a writable key parent", "create", internalError)
 	if stored, err := a.store.load(a.r.Slot); err != nil || stored != nil {
 		t.Fatalf("refused adoption stored a record: %v %v", stored, err)
@@ -726,6 +729,7 @@ func TestRootAdoptedKeyAncestry(t *testing.T) {
 	chmod(0755)
 	a.expect("create over the valid layout", "create", "")
 	chmod(0757)
+	check("other-writable parent before start", false)
 	a.expect("start over a writable key parent", "start", internalError)
 	if a.r.Binding.State != failed {
 		t.Fatalf("refused start left state %s", a.r.Binding.State)

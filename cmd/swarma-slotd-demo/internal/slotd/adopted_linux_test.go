@@ -107,8 +107,8 @@ func TestAdoptedCallerOverlap(t *testing.T) {
 // Proves the system-crontab reader over a private /etc stand-in: a job line
 // scheduled as the account (by name, by numeric UID, with leading zeros, or
 // as "@keyword name") in crontab or in any cron.d file refuses with the
-// scheduled-entry error, while comments, environment lines (also quoted and
-// with blanks around "="), other users, a prefix-sharing user and a cron.d
+// scheduled-entry error, while comments, environment lines (also quoted,
+// with blanks around "=", and with a non-identifier name), other users, a prefix-sharing user and a cron.d
 // subdirectory pass; a symlinked cron.d file is followed as cron does. An
 // unparsable job line, a FIFO (without blocking), an oversized file and
 // (when not root) an unreadable file or directory refuse with another error.
@@ -134,7 +134,7 @@ func TestSystemCronScheduledAs(t *testing.T) {
 		}
 	}
 	scheduled("no crontab, no cron.d", nil)
-	neighbours := "SHELL=/bin/sh\nMAILTO=swarma-agent\n\"QUOTED\" = swarma-agent\nCRON_TZ = UTC\n\n" +
+	neighbours := "SHELL=/bin/sh\nMAILTO=swarma-agent\n\"QUOTED\" = swarma-agent\nCRON_TZ = UTC\nMY-VAR=swarma-agent\n\n" +
 		"# 0 0 31 2 * swarma-agent /bin/true\n   # indented comment swarma-agent\n" +
 		"17 * * * * root cd / && run-parts --report /etc/cron.hourly\n" +
 		"0 0 31 2 * swarma-agent-other /bin/true\n@daily root /bin/true\n0 0 31 2 * 61001 /bin/true\n"
