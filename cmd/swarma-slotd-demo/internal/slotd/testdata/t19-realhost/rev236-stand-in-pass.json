@@ -1,0 +1,417 @@
+{
+  "property_template_sha256": "19ef32bca2d7a181a92177798786e6f000d4e0791aa34f7040ceb01ca4ef61d6",
+  "wallet_kind": "STAND_IN",
+  "restoration": {
+    "hosted_commit": "",
+    "hosted_run_id": 0,
+    "id": "restoration",
+    "verdict": "PASS",
+    "evidence": [
+      {
+        "claim": "restoration fixture"
+      }
+    ]
+  },
+  "schema": "swarma.t19.realhost.v1",
+  "host": "rt-stations",
+  "slot": "100",
+  "policy_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "binary_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "probe_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "hosted_root_ci": {
+    "commit": "aed02d69d8e360567faf6bb9133c6b242613b2ef",
+    "run_id": 43282197583,
+    "job_id": 131406508394,
+    "log_sha256": "4fd39ebf14d35b280811e9924a8fdc79fc1402933d1e5ed390a1b04d06fc73ac",
+    "url": "",
+    "verified": true
+  },
+  "items": [
+    {
+      "hosted_commit": "aed02d69d8e360567faf6bb9133c6b242613b2ef",
+      "hosted_run_id": 43282197583,
+      "id": "T19.1",
+      "verdict": "PASS",
+      "evidence": [
+        {
+          "claim": "complete mount-view inventory, adopted identity and read-only key",
+          "observed": {
+            "Probe": {
+              "UID": 210001,
+              "GID": 210001,
+              "Groups": [
+                210001,
+                210101
+              ],
+              "KeyRead": "ok",
+              "KeyWrite": "EROFS",
+              "KeyChmod": "EROFS",
+              "Sockets": [
+                "/run/swarma-wallet/wallet.sock"
+              ],
+              "WalkErrors": null,
+              "Pathnames": {
+                "/dev/log": "ENOENT",
+                "/dev/shm/swarma-t19rh-100.sock": "ENOENT",
+                "/run/dbus/system_bus_socket": "ENOENT",
+                "/run/swarma-t19rh-100.sock": "ENOENT",
+                "/run/swarma-wallet-status/status.sock": "ENOENT",
+                "/run/swarma-wallet/wallet.sock": "ok",
+                "/run/systemd/journal/socket": "ENOENT",
+                "/run/systemd/private": "ENOENT",
+                "/tmp/swarma-t19rh-100.sock": "ENOENT",
+                "/var/lib/swarma-t19rh-100.sock": "ENOENT"
+              },
+              "Abstract": {
+                "@swarma-t19rh-100": "EPERM"
+              },
+              "Wallet": "",
+              "WalletErr": "",
+              "WalletRestart": "",
+              "Families": {
+                "inet": "ok",
+                "inet6": "ok",
+                "netlink": "EAFNOSUPPORT",
+                "packet": "EAFNOSUPPORT",
+                "unix": "ok"
+              },
+              "Tamper": {
+                "prctl-ambient-net-admin": "EPERM",
+                "prctl-no-new-privs-0": "EINVAL",
+                "unshare-user-net": "EPERM"
+              },
+              "AfterTamper": {
+                "/dev/shm/swarma-t19rh-100.sock": "ENOENT",
+                "/run/swarma-t19rh-100.sock": "ENOENT",
+                "/tmp/swarma-t19rh-100.sock": "ENOENT",
+                "/var/lib/swarma-t19rh-100.sock": "ENOENT",
+                "@swarma-t19rh-100": "EPERM"
+              },
+              "IP": {
+                "tcp4 127.0.0.1:18336": "timeout",
+                "tcp4 127.0.0.1:8336": "timeout",
+                "tcp4 127.0.0.53:53": "timeout",
+                "tcp4 192.0.2.10:443": "ok",
+                "tcp6 [::1]:8336": "timeout",
+                "udp4 127.0.0.53:53": "EPERM"
+              }
+            },
+            "View": {
+              "Sockets": [
+                "/run/swarma-wallet/wallet.sock"
+              ],
+              "Errors": null,
+              "Pruned": null,
+              "Mounts": [
+                {
+                  "Point": "/",
+                  "FSType": "ext4",
+                  "File": false,
+                  "Unreachable": false
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "hosted_commit": "aed02d69d8e360567faf6bb9133c6b242613b2ef",
+      "hosted_run_id": 43282197583,
+      "id": "T19.2",
+      "verdict": "PASS",
+      "evidence": [
+        {
+          "claim": "every enumerated pathname socket refused except the wallet",
+          "observed": {
+            "/dev/log": "ENOENT",
+            "/dev/shm/swarma-t19rh-100.sock": "ENOENT",
+            "/run/dbus/system_bus_socket": "ENOENT",
+            "/run/swarma-t19rh-100.sock": "ENOENT",
+            "/run/swarma-wallet-status/status.sock": "ENOENT",
+            "/run/swarma-wallet/wallet.sock": "ok",
+            "/run/systemd/journal/socket": "ENOENT",
+            "/run/systemd/private": "ENOENT",
+            "/tmp/swarma-t19rh-100.sock": "ENOENT",
+            "/var/lib/swarma-t19rh-100.sock": "ENOENT"
+          }
+        }
+      ]
+    },
+    {
+      "hosted_commit": "aed02d69d8e360567faf6bb9133c6b242613b2ef",
+      "hosted_run_id": 43282197583,
+      "id": "T19.3",
+      "verdict": "PASS",
+      "evidence": [
+        {
+          "claim": "host-connectable abstract names get EPERM",
+          "observed": {
+            "Slot": {
+              "@swarma-t19rh-100": "EPERM"
+            },
+            "Host": {
+              "@swarma-t19rh-100": "ok"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "hosted_commit": "aed02d69d8e360567faf6bb9133c6b242613b2ef",
+      "hosted_run_id": 43282197583,
+      "id": "T19.4",
+      "verdict": "PASS",
+      "evidence": [
+        {
+          "claim": "owned pathname and abstract plants hidden",
+          "observed": {
+            "/dev/log": "ENOENT",
+            "/dev/shm/swarma-t19rh-100.sock": "ENOENT",
+            "/run/dbus/system_bus_socket": "ENOENT",
+            "/run/swarma-t19rh-100.sock": "ENOENT",
+            "/run/swarma-wallet-status/status.sock": "ENOENT",
+            "/run/swarma-wallet/wallet.sock": "ok",
+            "/run/systemd/journal/socket": "ENOENT",
+            "/run/systemd/private": "ENOENT",
+            "/tmp/swarma-t19rh-100.sock": "ENOENT",
+            "/var/lib/swarma-t19rh-100.sock": "ENOENT"
+          }
+        }
+      ]
+    },
+    {
+      "hosted_commit": "aed02d69d8e360567faf6bb9133c6b242613b2ef",
+      "hosted_run_id": 43282197583,
+      "id": "T19.5",
+      "verdict": "PASS",
+      "evidence": [
+        {
+          "claim": "STAND_IN: connect and kernel peer identification only; no wallet RPC or files",
+          "observed": {
+            "uid": 0,
+            "gid": 0,
+            "pid": 42
+          }
+        }
+      ]
+    },
+    {
+      "hosted_commit": "aed02d69d8e360567faf6bb9133c6b242613b2ef",
+      "hosted_run_id": 43282197583,
+      "id": "T19.6",
+      "verdict": "COVERED_BY_HOSTED_ROOT_CI",
+      "evidence": [
+        {
+          "claim": "fixture/hook experiment; not executed on this host",
+          "observed": {
+            "commit": "aed02d69d8e360567faf6bb9133c6b242613b2ef",
+            "run_id": 43282197583,
+            "job_id": 131406508394,
+            "log_sha256": "4fd39ebf14d35b280811e9924a8fdc79fc1402933d1e5ed390a1b04d06fc73ac",
+            "url": "",
+            "verified": true
+          }
+        }
+      ]
+    },
+    {
+      "hosted_commit": "aed02d69d8e360567faf6bb9133c6b242613b2ef",
+      "hosted_run_id": 43282197583,
+      "id": "T19.7",
+      "verdict": "PASS",
+      "evidence": [
+        {
+          "claim": "stdout reaches journal while direct journal sockets are hidden",
+          "observed": true
+        }
+      ]
+    },
+    {
+      "hosted_commit": "aed02d69d8e360567faf6bb9133c6b242613b2ef",
+      "hosted_run_id": 43282197583,
+      "id": "T19.8",
+      "verdict": "PASS",
+      "evidence": [
+        {
+          "claim": "native address-family observations; alternate ABI is a hosted control",
+          "observed": {
+            "inet": "ok",
+            "inet6": "ok",
+            "netlink": "EAFNOSUPPORT",
+            "packet": "EAFNOSUPPORT",
+            "unix": "ok"
+          }
+        }
+      ]
+    },
+    {
+      "hosted_commit": "aed02d69d8e360567faf6bb9133c6b242613b2ef",
+      "hosted_run_id": 43282197583,
+      "id": "T19.9",
+      "verdict": "PASS",
+      "evidence": [
+        {
+          "claim": "tampering restores no pathname or abstract access",
+          "observed": {
+            "Tamper": {
+              "prctl-ambient-net-admin": "EPERM",
+              "prctl-no-new-privs-0": "EINVAL",
+              "unshare-user-net": "EPERM"
+            },
+            "After": {
+              "/dev/shm/swarma-t19rh-100.sock": "ENOENT",
+              "/run/swarma-t19rh-100.sock": "ENOENT",
+              "/tmp/swarma-t19rh-100.sock": "ENOENT",
+              "/var/lib/swarma-t19rh-100.sock": "ENOENT",
+              "@swarma-t19rh-100": "EPERM"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "hosted_commit": "aed02d69d8e360567faf6bb9133c6b242613b2ef",
+      "hosted_run_id": 43282197583,
+      "id": "T19.10",
+      "verdict": "COVERED_BY_HOSTED_ROOT_CI",
+      "evidence": [
+        {
+          "claim": "fixture/hook experiment; not executed on this host",
+          "observed": {
+            "commit": "aed02d69d8e360567faf6bb9133c6b242613b2ef",
+            "run_id": 43282197583,
+            "job_id": 131406508394,
+            "log_sha256": "4fd39ebf14d35b280811e9924a8fdc79fc1402933d1e5ed390a1b04d06fc73ac",
+            "url": "",
+            "verified": true
+          }
+        }
+      ]
+    },
+    {
+      "hosted_commit": "aed02d69d8e360567faf6bb9133c6b242613b2ef",
+      "hosted_run_id": 43282197583,
+      "id": "T19.11",
+      "verdict": "PASS",
+      "evidence": [
+        {
+          "claim": "status absent; bound-on-purpose permission control is hosted only",
+          "observed": "ENOENT"
+        }
+      ]
+    },
+    {
+      "hosted_commit": "aed02d69d8e360567faf6bb9133c6b242613b2ef",
+      "hosted_run_id": 43282197583,
+      "id": "T19.12",
+      "verdict": "PASS",
+      "evidence": [
+        {
+          "claim": "loopback/host-RPC/resolver attempts denied, owned echo answers host",
+          "observed": {
+            "tcp4 127.0.0.1:18336": "timeout",
+            "tcp4 127.0.0.1:8336": "timeout",
+            "tcp4 127.0.0.53:53": "timeout",
+            "tcp4 192.0.2.10:443": "ok",
+            "tcp6 [::1]:8336": "timeout",
+            "udp4 127.0.0.53:53": "EPERM"
+          }
+        }
+      ]
+    },
+    {
+      "hosted_commit": "aed02d69d8e360567faf6bb9133c6b242613b2ef",
+      "hosted_run_id": 43282197583,
+      "id": "T19.13",
+      "verdict": "PASS",
+      "evidence": [
+        {
+          "claim": "policy-bound unit properties, ExecStart, exact NFT and allowed IP connection",
+          "observed": {
+            "Expected": "",
+            "Properties": null,
+            "IP": {
+              "tcp4 127.0.0.1:18336": "timeout",
+              "tcp4 127.0.0.1:8336": "timeout",
+              "tcp4 127.0.0.53:53": "timeout",
+              "tcp4 192.0.2.10:443": "ok",
+              "tcp6 [::1]:8336": "timeout",
+              "udp4 127.0.0.53:53": "EPERM"
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "controls": [
+    {
+      "hosted_commit": "",
+      "hosted_run_id": 0,
+      "id": "detector-control",
+      "verdict": "COVERED_BY_HOSTED_ROOT_CI",
+      "evidence": [
+        {
+          "claim": "edited-unit or alternate-ABI control; not executed on this host",
+          "observed": {
+            "commit": "aed02d69d8e360567faf6bb9133c6b242613b2ef",
+            "run_id": 43282197583,
+            "job_id": 131406508394,
+            "log_sha256": "4fd39ebf14d35b280811e9924a8fdc79fc1402933d1e5ed390a1b04d06fc73ac",
+            "url": "",
+            "verified": true
+          }
+        }
+      ]
+    },
+    {
+      "hosted_commit": "",
+      "hosted_run_id": 0,
+      "id": "bound-status-control",
+      "verdict": "COVERED_BY_HOSTED_ROOT_CI",
+      "evidence": [
+        {
+          "claim": "edited-unit or alternate-ABI control; not executed on this host",
+          "observed": {
+            "commit": "aed02d69d8e360567faf6bb9133c6b242613b2ef",
+            "run_id": 43282197583,
+            "job_id": 131406508394,
+            "log_sha256": "4fd39ebf14d35b280811e9924a8fdc79fc1402933d1e5ed390a1b04d06fc73ac",
+            "url": "",
+            "verified": true
+          }
+        }
+      ]
+    },
+    {
+      "hosted_commit": "",
+      "hosted_run_id": 0,
+      "id": "alternate-ABI-control",
+      "verdict": "COVERED_BY_HOSTED_ROOT_CI",
+      "evidence": [
+        {
+          "claim": "edited-unit or alternate-ABI control; not executed on this host",
+          "observed": {
+            "commit": "aed02d69d8e360567faf6bb9133c6b242613b2ef",
+            "run_id": 43282197583,
+            "job_id": 131406508394,
+            "log_sha256": "4fd39ebf14d35b280811e9924a8fdc79fc1402933d1e5ed390a1b04d06fc73ac",
+            "url": "",
+            "verified": true
+          }
+        }
+      ]
+    }
+  ],
+  "cleanup": {
+    "hosted_commit": "",
+    "hosted_run_id": 0,
+    "id": "cleanup",
+    "verdict": "PASS",
+    "evidence": [
+      {
+        "claim": "clean fixture"
+      }
+    ]
+  }
+}

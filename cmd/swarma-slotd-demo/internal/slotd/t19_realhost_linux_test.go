@@ -767,8 +767,8 @@ func runT19RealHost(args []string) int {
 	// All exits after output creation write the JSON, including interrupted runs.
 	window := t19Window{ProductionBackup: *productionBackup, ProductionSHA256: *productionPin, TemporaryPolicy: *temporaryPolicy, Ready: *readyPath, WalletKind: *walletKind, PeerUID: uint32(*peerUID)}
 	code := t19RunObserved(ctx, p, *policyPath, *pin, *slot, *echo, *ciDir, window, &report)
-	if t19ReportExit(report) != 0 {
-		code = 1
+	if reportCode := t19ReportExit(report); reportCode != 0 {
+		code = reportCode
 	}
 	data, err := json.MarshalIndent(report, "", "  ")
 	if err != nil {

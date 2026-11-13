@@ -1,0 +1,212 @@
+--- a/cmd/swarma-slotd-demo/internal/slotd/t19_realhost_report_linux_test.go
++++ b/cmd/swarma-slotd-demo/internal/slotd/t19_realhost_report_linux_test.go
+@@ -203,105 +203,106 @@
+ func t19RealHostVerdicts(f t19HostFacts) []t19Item {
+-	expect := t19Expectations()
+-	r := t19NewReport("", "").Items
+-	got := f.Probe
+-	problems := []string{}
+-	require := func(ok bool, msg string) {
+-		if !ok {
+-			problems = append(problems, msg)
+-		}
+-	}
+-	finish := func(id int, claim string, obs any) {
+-		r[id-1] = t19Observation(id, claim, obs, problems...)
+-		problems = nil
+-	}
+-	reachable, issues := t19InventoryVerdict(f.View, got.Sockets, got.WalkErrors)
+-	problems = append(problems, issues...)
+-	require(slices.Equal(reachable, []string{t19WalletSock}) && slices.Equal(got.Sockets, []string{t19WalletSock}), "reachable socket inventory must be exactly wallet.sock")
+-	groups := groupSet(got.Groups)
+-	want := []int{int(f.Identity.UID), int(f.Identity.SocketGID)}
+-	slices.Sort(want)
+-	require(got.UID == int(f.Identity.UID) && got.GID == int(f.Identity.UID) && slices.Equal(groups, want), "slot UID/GID/groups differ from adopted policy")
+-	require(got.KeyRead == expect.KeyRead && got.KeyWrite == expect.KeyWrite && got.KeyChmod == expect.KeyChmod, "key read/write/chmod differs from read-only contract")
+-	finish(1, "complete mount-view inventory, adopted identity and read-only key", struct {
+-		Probe t19Report
+-		View  t19ViewInventory
+-	}{got, f.View})
+-	for _, path := range f.Spec.Pathnames {
+-		v := got.Pathnames[path]
+-		if path == t19WalletSock {
+-			require(v == expect.Connected, "wallet is not connectable")
+-		} else {
+-			require(slices.Contains(expect.PathDenied, v), fmt.Sprintf("%s: %s", path, v))
+-		}
+-	}
+-	finish(2, "every enumerated pathname socket refused except the wallet", got.Pathnames)
+-	live := 0
+-	for _, name := range f.Spec.Abstract {
+-		v := got.Abstract["@"+name]
+-		host := f.HostAbstract["@"+name]
+-		if host == expect.Connected {
+-			live++
+-			require(v == expect.Abstract, "abstract socket not scoped: "+name)
+-		} else {
+-			require(v != "" && v != expect.Connected, "missing or reachable abstract target: "+name)
+-		}
+-	}
+-	require(live > 0, "no connectable host abstract control")
+-	finish(3, "host-connectable abstract names get EPERM", struct{ Slot, Host map[string]string }{got.Abstract, f.HostAbstract})
+-	for _, path := range f.Plants {
+-		require(got.Pathnames[path] == expect.Hidden, "pathname plant visible: "+path)
+-	}
+-	require(got.Abstract["@"+f.AbstractPlant] == expect.Abstract, "abstract plant not scoped")
+-	finish(4, "owned pathname and abstract plants hidden", got.Pathnames)
+-	require(got.Pathnames[t19WalletSock] == expect.Connected, "wallet connect failed")
+-	require(f.WalletPeerError == "" && f.WalletPeer.PID > 0 && f.WalletPeer.UID == f.ExpectedPeerUID, "wallet peer identification failed or differs from operator pin")
+-	finish(5, f.WalletKind+": connect and kernel peer identification only; no wallet RPC or files", f.WalletPeer)
+-	if f.WalletKind == t19StandIn && r[4].Verdict == t19Pass {
+-		r[4].Verdict = t19StandIn
+-	}
+-	require(f.JournalFound, "probe stdout marker absent from unit journal")
+-	for _, p := range []string{"/run/systemd/journal/socket", "/dev/log"} {
+-		require(got.Pathnames[p] == expect.Hidden, "journald socket visible: "+p)
+-	}
+-	finish(7, "stdout reaches journal while direct journal sockets are hidden", f.JournalFound)
+-	for family, want := range expect.Families {
+-		require(got.Families[family] == want, "family verdict differs: "+family)
+-	}
+-	finish(8, "native address-family observations; alternate ABI is a hosted control", got.Families)
+-	require(got.Tamper["unshare-user-net"] != "" && got.Tamper["unshare-user-net"] != expect.Connected, "unshare did not refuse")
+-	for k, want := range expect.Tamper {
+-		require(got.Tamper[k] == want, "tamper verdict differs: "+k)
+-	}
+-	require(got.AfterTamper["@"+f.AbstractPlant] == expect.Abstract, "abstract reachable after tamper")
+-	for _, p := range f.Plants {
+-		require(got.AfterTamper[p] == expect.Hidden, "plant reachable after tamper: "+p)
+-	}
+-	for name, v := range got.AfterTamper {
+-		require(v != expect.Connected || name == t19WalletSock, "non-wallet reachable after tamper: "+name)
+-	}
+-	finish(9, "tampering restores no pathname or abstract access", struct{ Tamper, After map[string]string }{got.Tamper, got.AfterTamper})
+-	require(got.Pathnames[t19StatusSock] == expect.Hidden, "operator status socket visible")
+-	finish(11, "status absent; bound-on-purpose permission control is hosted only", got.Pathnames[t19StatusSock])
+-	for _, target := range f.Spec.IP[:max(0, len(f.Spec.IP)-1)] {
+-		key := target.Network + " " + target.Address
+-		want := expect.TCPDenied
+-		if strings.HasPrefix(target.Network, "udp") {
+-			want = expect.UDPDenied
+-		}
+-		require(got.IP[key] == want, "host-local verdict differs: "+key)
+-	}
+-	require(len(f.Spec.IP) >= 6, "missing required IP attempt set")
+-	require(f.HostEcho == expect.Connected, "host loopback echo positive control failed")
+-	finish(12, "loopback/host-RPC/resolver attempts denied, owned echo answers host", got.IP)
+-	gateway := t19Gateway(f.Spec)
+-	require(gateway.Address != "" && got.IP[gateway.Network+" "+gateway.Address] == expect.Connected, "allowed gateway not connectable")
+-	require(f.UnitError == "", "unit properties: "+f.UnitError)
+-	require(f.ExecError == "", "unit ExecStart: "+f.ExecError)
+-	require(f.NFTError == "", "nft readback: "+f.NFTError)
+-	finish(13, "policy-bound unit properties, ExecStart, exact NFT and allowed IP connection", struct {
+-		Expected   string
+-		Properties map[string]string
+-		IP         map[string]string
+-	}{f.ExpectedProperties, f.Properties, got.IP})
+-	return r
++	expect := t19Expectations()
++	expect.PathDenied = append(expect.PathDenied, "EIO")
++	r := t19NewReport("", "").Items
++	got := f.Probe
++	problems := []string{}
++	require := func(ok bool, msg string) {
++		if !ok {
++			problems = append(problems, msg)
++		}
++	}
++	finish := func(id int, claim string, obs any) {
++		r[id-1] = t19Observation(id, claim, obs, problems...)
++		problems = nil
++	}
++	reachable, issues := t19InventoryVerdict(f.View, got.Sockets, got.WalkErrors)
++	problems = append(problems, issues...)
++	require(slices.Equal(reachable, []string{t19WalletSock}) && slices.Equal(got.Sockets, []string{t19WalletSock}), "reachable socket inventory must be exactly wallet.sock")
++	groups := groupSet(got.Groups)
++	want := []int{int(f.Identity.UID), int(f.Identity.SocketGID)}
++	slices.Sort(want)
++	require(got.UID == int(f.Identity.UID) && got.GID == int(f.Identity.UID) && slices.Equal(groups, want), "slot UID/GID/groups differ from adopted policy")
++	require(got.KeyRead == expect.KeyRead && got.KeyWrite == expect.KeyWrite && got.KeyChmod == expect.KeyChmod, "key read/write/chmod differs from read-only contract")
++	finish(1, "complete mount-view inventory, adopted identity and read-only key", struct {
++		Probe t19Report
++		View  t19ViewInventory
++	}{got, f.View})
++	for _, path := range f.Spec.Pathnames {
++		v := got.Pathnames[path]
++		if path == t19WalletSock {
++			require(v == expect.Connected, "wallet is not connectable")
++		} else {
++			require(slices.Contains(expect.PathDenied, v), fmt.Sprintf("%s: %s", path, v))
++		}
++	}
++	finish(2, "every enumerated pathname socket refused except the wallet", got.Pathnames)
++	live := 0
++	for _, name := range f.Spec.Abstract {
++		v := got.Abstract["@"+name]
++		host := f.HostAbstract["@"+name]
++		if host == expect.Connected {
++			live++
++			require(v == expect.Abstract, "abstract socket not scoped: "+name)
++		} else {
++			require(v != "" && v != expect.Connected, "missing or reachable abstract target: "+name)
++		}
++	}
++	require(live > 0, "no connectable host abstract control")
++	finish(3, "host-connectable abstract names get EPERM", struct{ Slot, Host map[string]string }{got.Abstract, f.HostAbstract})
++	for _, path := range f.Plants {
++		require(got.Pathnames[path] == expect.Hidden, "pathname plant visible: "+path)
++	}
++	require(got.Abstract["@"+f.AbstractPlant] == expect.Abstract, "abstract plant not scoped")
++	finish(4, "owned pathname and abstract plants hidden", got.Pathnames)
++	require(got.Pathnames[t19WalletSock] == expect.Connected, "wallet connect failed")
++	require(f.WalletPeerError == "" && f.WalletPeer.PID > 0 && f.WalletPeer.UID == f.ExpectedPeerUID, "wallet peer identification failed or differs from operator pin")
++	finish(5, f.WalletKind+": connect and kernel peer identification only; no wallet RPC or files", f.WalletPeer)
++	if f.WalletKind == t19StandIn && r[4].Verdict == t19Pass {
++		r[4].Verdict = t19StandIn
++	}
++	require(f.JournalFound, "probe stdout marker absent from unit journal")
++	for _, p := range []string{"/run/systemd/journal/socket", "/dev/log"} {
++		require(got.Pathnames[p] == expect.Hidden, "journald socket visible: "+p)
++	}
++	finish(7, "stdout reaches journal while direct journal sockets are hidden", f.JournalFound)
++	for family, want := range expect.Families {
++		require(got.Families[family] == want, "family verdict differs: "+family)
++	}
++	finish(8, "native address-family observations; alternate ABI is a hosted control", got.Families)
++	require(got.Tamper["unshare-user-net"] != "" && got.Tamper["unshare-user-net"] != expect.Connected, "unshare did not refuse")
++	for k, want := range expect.Tamper {
++		require(got.Tamper[k] == want, "tamper verdict differs: "+k)
++	}
++	require(got.AfterTamper["@"+f.AbstractPlant] == expect.Abstract, "abstract reachable after tamper")
++	for _, p := range f.Plants {
++		require(got.AfterTamper[p] == expect.Hidden, "plant reachable after tamper: "+p)
++	}
++	for name, v := range got.AfterTamper {
++		require(v != expect.Connected || name == t19WalletSock, "non-wallet reachable after tamper: "+name)
++	}
++	finish(9, "tampering restores no pathname or abstract access", struct{ Tamper, After map[string]string }{got.Tamper, got.AfterTamper})
++	require(got.Pathnames[t19StatusSock] == expect.Hidden, "operator status socket visible")
++	finish(11, "status absent; bound-on-purpose permission control is hosted only", got.Pathnames[t19StatusSock])
++	for _, target := range f.Spec.IP[:max(0, len(f.Spec.IP)-1)] {
++		key := target.Network + " " + target.Address
++		want := expect.TCPDenied
++		if strings.HasPrefix(target.Network, "udp") {
++			want = expect.UDPDenied
++		}
++		require(got.IP[key] == want, "host-local verdict differs: "+key)
++	}
++	require(len(f.Spec.IP) >= 6, "missing required IP attempt set")
++	require(f.HostEcho == expect.Connected, "host loopback echo positive control failed")
++	finish(12, "loopback/host-RPC/resolver attempts denied, owned echo answers host", got.IP)
++	gateway := t19Gateway(f.Spec)
++	require(gateway.Address != "" && got.IP[gateway.Network+" "+gateway.Address] == expect.Connected, "allowed gateway not connectable")
++	require(f.UnitError == "", "unit properties: "+f.UnitError)
++	require(f.ExecError == "", "unit ExecStart: "+f.ExecError)
++	require(f.NFTError == "", "nft readback: "+f.NFTError)
++	finish(13, "policy-bound unit properties, ExecStart, exact NFT and allowed IP connection", struct {
++		Expected   string
++		Properties map[string]string
++		IP         map[string]string
++	}{f.ExpectedProperties, f.Properties, got.IP})
++	return r
+ }

@@ -8,9 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"go/ast"
-	"go/parser"
-	"go/token"
 	"io"
 	"net"
 	"os"
@@ -81,45 +78,32 @@ func TestT19SharedExpectationContract(t *testing.T) {
 	}
 }
 
-// Proves both actual consumer bodies call the sole table constructor once and
-// read every table field. This wiring check complements the independent value
-// oracle and breach tests; it does not establish kernel enforcement.
+// Both actual T19.2 consumers decide on the same probe report. Every named
+// Linux errno (plus missing/custom outcomes) is checked beside valid wallet
+// and denial controls. This detects consumer-local overrides, not just table
+// wiring. It proves pathname verdict agreement over this bounded corpus;
+// fixture-only wallet protocol assertions remain intentionally out of scope.
 func TestT19RootAndRealHostReadSameTable(t *testing.T) {
-	required := []string{"Abstract", "Connected", "Families", "Hidden", "KeyChmod", "KeyRead", "KeyWrite", "PathDenied", "TCPDenied", "Tamper", "UDPDenied"}
-	for file, name := range map[string]string{"root_t19_linux_test.go": "TestRootT19SlotConfinement", "t19_realhost_report_linux_test.go": "t19RealHostVerdicts"} {
-		f, err := parser.ParseFile(token.NewFileSet(), file, nil, 0)
-		if err != nil {
-			t.Fatal(err)
+	verdicts := []string{"ok", "ENOENT", "EACCES", "EIO", "", "timeout", "error:custom"}
+	for errno := unix.Errno(1); errno < 4096; errno++ {
+		if name := unix.ErrnoName(errno); name != "" && !slices.Contains(verdicts, name) {
+			verdicts = append(verdicts, name)
 		}
-		calls := 0
-		fields := map[string]bool{}
-		found := false
-		for _, decl := range f.Decls {
-			fn, ok := decl.(*ast.FuncDecl)
-			if !ok || fn.Name.Name != name {
-				continue
+	}
+	base := t19ValidFacts(t)
+	paths := append([]string{"/run/systemd/private"}, base.Spec.Pathnames...)
+	for _, path := range paths {
+		for _, verdict := range verdicts {
+			f := t19ValidFacts(t)
+			f.Probe.Pathnames[path] = verdict
+			rootAllowed := len(t19RootPathnameProblems(f.Probe, f.Spec.Pathnames)) == 0
+			hostAllowed := t19RealHostVerdicts(f)[1].Verdict == t19Pass
+			want := verdict == "ENOENT" || verdict == "EACCES"
+			if path == t19WalletSock {
+				want = verdict == "ok"
 			}
-			found = true
-			ast.Inspect(fn.Body, func(n ast.Node) bool {
-				switch node := n.(type) {
-				case *ast.CallExpr:
-					if id, ok := node.Fun.(*ast.Ident); ok && id.Name == "t19Expectations" {
-						calls++
-					}
-				case *ast.SelectorExpr:
-					if id, ok := node.X.(*ast.Ident); ok && id.Name == "expect" {
-						fields[node.Sel.Name] = true
-					}
-				}
-				return true
-			})
-		}
-		if !found || calls != 1 {
-			t.Fatalf("%s does not read the single shared table once", name)
-		}
-		for _, field := range required {
-			if !fields[field] {
-				t.Fatalf("%s does not consume shared %s", name, field)
+			if rootAllowed != hostAllowed || rootAllowed != want {
+				t.Fatalf("consumer divergence/contract failure: path=%q verdict=%q root=%v host=%v want=%v", path, verdict, rootAllowed, hostAllowed, want)
 			}
 		}
 	}
@@ -172,7 +156,7 @@ func t19ValidFacts(t *testing.T) t19HostFacts {
 // complete positive fixture. These are evaluator tests, not real-host claims.
 func TestT19ObservationalVerdicts(t *testing.T) {
 	for _, it := range t19RealHostVerdicts(t19ValidFacts(t)) {
-		if it.ID != "T19.6" && it.ID != "T19.10" && it.Verdict != t19Pass {
+		if it.ID != "T19.6" && it.ID != "T19.10" && it.Verdict != t19Pass && !(it.ID == "T19.5" && it.Verdict == t19StandIn) {
 			t.Fatalf("positive fixture: %+v", it)
 		}
 	}
@@ -387,10 +371,21 @@ func t19ValidReport(t *testing.T) t19RealHostReport {
 	return r
 }
 
+func t19ValidRealReport(t *testing.T) t19RealHostReport {
+	t.Helper()
+	r := t19ValidReport(t)
+	r.Host = "stations1"
+	r.WalletKind = "REAL"
+	facts := t19ValidFacts(t)
+	facts.WalletKind = "REAL"
+	r.Items[4] = t19RealHostVerdicts(facts)[4]
+	return r
+}
+
 // Proves cardinality, status vocabulary, historical tree/run binding and all
 // closing gates survive JSON roundtrip; any FAIL or missing restoration blocks.
 func TestT19ReportSchemaAndClosingRule(t *testing.T) {
-	r := t19ValidReport(t)
+	r := t19ValidRealReport(t)
 	b, err := json.Marshal(r)
 	if err != nil {
 		t.Fatal(err)
@@ -429,11 +424,11 @@ func TestT19ReportSchemaAndClosingRule(t *testing.T) {
 		{"no binary hash", func(r *t19RealHostReport) { r.BinarySHA256 = "" }},
 		{"missing retirement", func(r *t19RealHostReport) { r.Cleanup.Verdict = t19Fail }},
 		{"missing restoration", func(r *t19RealHostReport) { r.Restoration.Verdict = t19Fail }},
-		{"stand-in mislabelled real", func(r *t19RealHostReport) { r.WalletKind = "REAL" }},
-		{"stations1 stand-in", func(r *t19RealHostReport) { r.Host = "stations1" }},
+		{"stand-in mislabelled real", func(r *t19RealHostReport) { *r = t19ValidReport(t); r.WalletKind = "REAL" }},
+		{"stations1 stand-in", func(r *t19RealHostReport) { *r = t19ValidReport(t); r.Host = "stations1" }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			r := t19ValidReport(t)
+			r := t19ValidRealReport(t)
 			tc.edit(&r)
 			if t19ReportExit(r) == 0 {
 				t.Fatal("invalid report closed matrix item")
@@ -691,6 +686,70 @@ func TestT19ProbeKeyParentShape(t *testing.T) {
 		edit(&s)
 		if t19KeyParentMetadata(s) == nil {
 			t.Fatal("non-real-run parent shape admitted")
+		}
+	}
+}
+
+// Regression for rev236 stand-in-pass-closes: successful stand-in evidence is
+// explicitly STAND_IN, exits 2, and never closes. The reviewer's original
+// STAND_IN-as-PASS JSON is rejected beside a valid REAL/stations1 report.
+func TestT19StandInCannotCloseMatrix(t *testing.T) {
+	real := t19ValidRealReport(t)
+	if t19ReportExit(real) != 0 {
+		t.Fatal("REAL stations1 positive control did not close")
+	}
+	standin := t19ValidReport(t)
+	if standin.Items[4].Verdict != t19StandIn {
+		t.Fatal("stand-in emitted as a wallet PASS")
+	}
+	if err := t19ValidateReport(standin); err != nil {
+		t.Fatal("valid scoped stand-in report rejected:", err)
+	}
+	if code := t19ReportExit(standin); code != 2 {
+		t.Fatalf("stand-in exit=%d, want scoped/non-closing exit 2", code)
+	}
+	b, err := os.ReadFile("testdata/t19-realhost/rev236-stand-in-pass.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var plant t19RealHostReport
+	if err = json.Unmarshal(b, &plant); err != nil {
+		t.Fatal(err)
+	}
+	if plant.WalletKind != t19StandIn || plant.Items[4].Verdict != t19Pass {
+		t.Fatal("reviewer regression fixture no longer plants stand-in-as-PASS")
+	}
+	if err := t19ValidateReport(plant); err == nil || err.Error() != "stand-in wallet cannot be reported as PASS" {
+		t.Fatalf("reviewer fixture did not hit the intended stand-in rejection: %v", err)
+	}
+	if t19ReportExit(plant) == 0 {
+		t.Fatal("reviewer's stand-in-as-PASS report closes")
+	}
+	encoded, err := json.Marshal(standin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := t19DecodeReport(encoded)
+	if err != nil || t19ReportExit(decoded) != 2 {
+		t.Fatalf("stand-in schema roundtrip changed scoped verdict: %v", err)
+	}
+	real.Items[4].Verdict = t19StandIn
+	if err := t19ValidateReport(real); err == nil || err.Error() != "real-wallet report contains stand-in evidence" {
+		t.Fatalf("real report accepted stand-in item: %v", err)
+	}
+	real = t19ValidRealReport(t)
+	for _, host := range []string{"rt-stations", "other-host"} {
+		r := real
+		r.Host = host
+		if t19ReportExit(r) == 0 {
+			t.Fatal("non-stations1 REAL report closed")
+		}
+	}
+	for _, id := range []int{0, 7, 12} {
+		r := t19ValidRealReport(t)
+		r.Items[id].Verdict = t19StandIn
+		if t19ReportExit(r) == 0 {
+			t.Fatal("stand-in outside wallet item closed")
 		}
 	}
 }

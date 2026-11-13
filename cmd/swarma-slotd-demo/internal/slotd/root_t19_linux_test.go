@@ -783,17 +783,8 @@ func TestRootT19SlotConfinement(t *testing.T) {
 		}
 	})
 	t.Run("T19.2-pathname", func(t *testing.T) {
-		for _, path := range attempt {
-			got := first.Pathnames[path]
-			if path == t19WalletSock {
-				if got != expect.Connected {
-					t.Errorf("wallet %s: %s", path, got)
-				}
-				continue
-			}
-			if !slices.Contains(expect.PathDenied, got) {
-				t.Errorf("%s: %s, want ENOENT or EACCES", path, got)
-			}
+		for _, problem := range t19RootPathnameProblems(first, attempt) {
+			t.Error(problem)
 		}
 	})
 	t.Run("T19.3-abstract", func(t *testing.T) {
@@ -1259,4 +1250,25 @@ func TestRootT19InventoryOmission(t *testing.T) {
 	if _, code = engine.apply(context.Background(), q); code != "" {
 		t.Fatal("stop:", code)
 	}
+}
+
+// t19RootPathnameProblems is the root suite's actual T19.2 consumer, kept
+// callable without executing a root fixture so behavioral agreement can be
+// tested with the host consumer on the identical probe report.
+func t19RootPathnameProblems(report t19Report, attempt []string) []string {
+	expect := t19Expectations()
+	var problems []string
+	for _, path := range attempt {
+		got := report.Pathnames[path]
+		if path == t19WalletSock {
+			if got != expect.Connected {
+				problems = append(problems, fmt.Sprintf("wallet %s: %s", path, got))
+			}
+			continue
+		}
+		if !slices.Contains(expect.PathDenied, got) {
+			problems = append(problems, fmt.Sprintf("%s: %s, want ENOENT or EACCES", path, got))
+		}
+	}
+	return problems
 }

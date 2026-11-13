@@ -24,6 +24,7 @@ const (
 	t19HostedLogHash = "4fd39ebf14d35b280811e9924a8fdc79fc1402933d1e5ed390a1b04d06fc73ac"
 	t19Pass          = "PASS"
 	t19Fail          = "FAIL"
+	t19StandIn       = "STAND_IN"
 	t19Covered       = "COVERED_BY_HOSTED_ROOT_CI"
 )
 
@@ -255,6 +256,9 @@ func t19RealHostVerdicts(f t19HostFacts) []t19Item {
 	require(got.Pathnames[t19WalletSock] == expect.Connected, "wallet connect failed")
 	require(f.WalletPeerError == "" && f.WalletPeer.PID > 0 && f.WalletPeer.UID == f.ExpectedPeerUID, "wallet peer identification failed or differs from operator pin")
 	finish(5, f.WalletKind+": connect and kernel peer identification only; no wallet RPC or files", f.WalletPeer)
+	if f.WalletKind == t19StandIn && r[4].Verdict == t19Pass {
+		r[4].Verdict = t19StandIn
+	}
 	require(f.JournalFound, "probe stdout marker absent from unit journal")
 	for _, p := range []string{"/run/systemd/journal/socket", "/dev/log"} {
 		require(got.Pathnames[p] == expect.Hidden, "journald socket visible: "+p)
@@ -356,6 +360,12 @@ func t19ValidateReport(r t19RealHostReport) error {
 	if r.Host == "stations1" && r.WalletKind != "REAL" {
 		return errors.New("stations1 requires a real-wallet observation")
 	}
+	if r.WalletKind == t19StandIn && r.Items[4].Verdict == t19Pass {
+		return errors.New("stand-in wallet cannot be reported as PASS")
+	}
+	if r.WalletKind == "REAL" && r.Items[4].Verdict == t19StandIn {
+		return errors.New("real-wallet report contains stand-in evidence")
+	}
 	return t19ValidateVerdict(r.Cleanup, r.Hosted, false)
 }
 func t19ValidateVerdict(it t19Item, ci t19CIEvidence, hosted bool) error {
@@ -363,7 +373,7 @@ func t19ValidateVerdict(it t19Item, ci t19CIEvidence, hosted bool) error {
 		return errors.New("empty evidence")
 	}
 	for _, e := range it.Evidence {
-		if e.Claim == "" || (it.Verdict == t19Pass && len(e.Problems) > 0) {
+		if e.Claim == "" || ((it.Verdict == t19Pass || it.Verdict == t19StandIn) && len(e.Problems) > 0) {
 			return errors.New("inconsistent evidence")
 		}
 	}
@@ -376,6 +386,10 @@ func t19ValidateVerdict(it t19Item, ci t19CIEvidence, hosted bool) error {
 		if !hosted || !ci.Verified || ci.Commit != t19HostedCommit || ci.RunID != t19HostedRun || ci.JobID != t19HostedJob || ci.LogSHA256 != t19HostedLogHash || ci.Error != "" {
 			return errors.New("unverified hosted coverage")
 		}
+	case t19StandIn:
+		if hosted || it.ID != "T19.5" {
+			return errors.New("stand-in verdict is only valid for the observed wallet item")
+		}
 	case t19Fail:
 	default:
 		return errors.New("unknown verdict")
@@ -387,10 +401,18 @@ func t19ReportExit(r t19RealHostReport) int {
 		return 1
 	}
 	for _, it := range append(slices.Clone(r.Items), r.Controls...) {
-		if it.Verdict != t19Pass && it.Verdict != t19Covered {
+		if it.Verdict != t19Pass && it.Verdict != t19Covered && it.Verdict != t19StandIn {
 			return 1
 		}
 	}
+	// Exit 2 is an explicitly scoped stand-in observation, never matrix closure.
+	if r.WalletKind == t19StandIn {
+		return 2
+	}
+	if r.Host != "stations1" || r.WalletKind != "REAL" {
+		return 1
+	}
+
 	return 0
 }
 

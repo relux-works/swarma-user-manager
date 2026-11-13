@@ -265,14 +265,16 @@ operator window sequence, strict installed-unit property comparison and
 production-policy restoration/refusal control. Build the harness as the same
 Go test executable that contains the unchanged reviewed probe. Its scalar
 expectation table is shared with `TestRootT19SlotConfinement`; independent value
-and consumer-wiring tests prevent a shared weakening from silently passing.
+and behavioral root/host pathname agreement tests reject both a shared
+weakening and a consumer-local override over the tested verdict corpus.
 
 Real hosts never run the ABI-5, edited-unit detector, deliberately bound status
 or alternate-ABI controls. Their pinned full hosted-root evidence remains
 separate from host observations. On stations1 wallet observation sends zero
 application bytes and identifies the listener using `SO_PEERCRED`; rt-stations
-wallet evidence is explicitly `STAND_IN`. A report cannot exit zero until the
-temporary policy is removed, original production bytes are read back and the
+wallet item verdict is explicitly `STAND_IN` and successful stand-in runs exit
+2 without matrix closure. Only a REAL-wallet run on stations1 may exit zero,
+after the temporary policy is removed, original production bytes are read back and the
 same stopped probe binding is refused under the restored policy, followed by
 receipt-backed destruction and residue readback. Local non-root test success
 is not an installed-host qualification result.

@@ -1,0 +1,39 @@
+--- a/cmd/swarma-slotd-demo/internal/slotd/t19_realhost_report_linux_test.go
++++ b/cmd/swarma-slotd-demo/internal/slotd/t19_realhost_report_linux_test.go
+@@ -399,19 +399,19 @@
+ func t19ReportExit(r t19RealHostReport) int {
+-	if t19ValidateReport(r) != nil || len(r.Errors) > 0 || r.Cleanup.Verdict != t19Pass || r.Restoration.Verdict != t19Pass {
+-		return 1
+-	}
+-	for _, it := range append(slices.Clone(r.Items), r.Controls...) {
+-		if it.Verdict != t19Pass && it.Verdict != t19Covered && it.Verdict != t19StandIn {
+-			return 1
+-		}
+-	}
+-	// Exit 2 is an explicitly scoped stand-in observation, never matrix closure.
+-	if r.WalletKind == t19StandIn {
+-		return 2
+-	}
+-	if r.Host != "stations1" || r.WalletKind != "REAL" {
+-		return 1
+-	}
+-
+-	return 0
++	if t19ValidateReport(r) != nil || len(r.Errors) > 0 || r.Cleanup.Verdict != t19Pass || r.Restoration.Verdict != t19Pass {
++		return 1
++	}
++	for _, it := range append(slices.Clone(r.Items), r.Controls...) {
++		if it.Verdict != t19Pass && it.Verdict != t19Covered && it.Verdict != t19StandIn {
++			return 1
++		}
++	}
++	// Exit 2 is an explicitly scoped stand-in observation, never matrix closure.
++	if r.WalletKind == t19StandIn {
++		return 0
++	}
++	if r.Host != "stations1" || r.WalletKind != "REAL" {
++		return 1
++	}
++
++	return 0
+ }

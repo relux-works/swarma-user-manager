@@ -272,8 +272,10 @@ across restoration; typed-v2 profile migration is not part of this harness.
 
 rt-stations has no agent-walletd or node. A separately started root stand-in
 listens as root:swarma-wallet-peer 0660 and speaks **no** application protocol.
-The JSON marks the wallet evidence `STAND_IN`; it never represents a real-wallet
-PASS. That stand-in mode refuses every host except exactly `rt-stations`, and
+The JSON marks both the run (`wallet_kind`) and T19.5 item verdict as
+`STAND_IN`, never PASS. A successful stand-in observation exits **2** and cannot
+close the matrix item; exit 0 requires a REAL wallet on exactly stations1.
+That stand-in mode refuses every host except exactly `rt-stations`, and
 refuses any existing `/run/swarma-wallet` directory. On stations1 use the real
 wallet, `--wallet-kind REAL` and its reviewed listener UID; never start the
 stand-in there. No node RPC is sent: node checks are TCP connection attempts.
@@ -281,7 +283,8 @@ A denied TCP connect must produce the bounded probe **timeout**, not merely an
 immediate connection refusal; UDP send denial remains `EPERM`.
 
 Each report contains exactly T19.1–T19.13 with `PASS`, `FAIL` or
-`COVERED_BY_HOSTED_ROOT_CI`, evidence, policy/daemon/probe/template hashes and
+`COVERED_BY_HOSTED_ROOT_CI` (or `STAND_IN` for the stand-in wallet), evidence,
+policy/daemon/probe/template hashes and
 hosted commit/run identifiers. T19.1 also records the mount view, complete
 inventory, UID/GID/groups and read-only key observations. T19.5 proves only
 connection and listener identity. T19.6 (fixture generation/restart), T19.10
@@ -452,7 +455,7 @@ rc=0
 wait "$harness_pid" || rc=$?
 harness_pid=
 cat "$window/report.json"
-test "$rc" -eq 0
+test "$rc" -eq 2  # successful STAND_IN observation; matrix remains open
 kill -TERM "$standin_pid"
 wait "$standin_pid"
 standin_pid=
@@ -468,7 +471,8 @@ exit
 
 On stations1 omit the stand-in start/stop and its directory-absence assertion;
 use `host=stations1`, `--wallet-kind REAL`, and the operator-approved real
-listener UID. All connection-only guards remain identical. Keep the protected
+listener UID, and require `test "$rc" -eq 0` instead of the stand-in exit 2.
+All connection-only guards remain identical. Keep the protected
 report, restoration-ready artifact, pinned historical evidence, original policy
 snapshot and command exit codes in the station install record. Do not remove
 production state, homes, keys, accounts or NFT manually to turn a failed cleanup
@@ -476,11 +480,13 @@ into a passing report. SIGINT/SIGTERM and uncertain create replies trigger a
 fresh cleanup deadline; loss of the daemon or an ownership mismatch remains a
 reported failure requiring normal receipt-backed recovery.
 
-Exit 0 closes only this scoped observational matrix item: every observable item
+Exit 0 closes the matrix item only for a REAL wallet on exactly stations1:
+every observable item
 must pass, every hosted-only item/control must have authenticated coverage at
 exact `aed02d69`, and retirement **and** temporary-policy removal/restoration/
 production-refusal evidence must pass. A stand-in observation remains a stand-in
-observation. No installed host mode was run by the non-root producer.
+observation and exits 2 rather than closing the matrix. No installed host mode
+was run by the non-root producer.
 
 | Qualification tool | Exact entry | Output |
 | --- | --- | --- |
@@ -490,3 +496,13 @@ observation. No installed host mode was run by the non-root producer.
 | rt-stations stand-in | `ABS slotd-t19-wallet-standin --host rt-stations` | Owned connect-only listener; never a real-wallet verdict |
 | Local contract tests | `go test ./cmd/swarma-slotd-demo/internal/slotd -run '^TestT19'` | Admission, table, report, strict properties, peer/no-byte handshake, ownership and restoration controls |
 | Expectation control plant | Apply `testdata/t19-mutants/m16-realhost-weaken-family.patch` in isolated scratch; run `go test ./cmd/swarma-slotd-demo/internal/slotd -run '^TestT19SharedExpectationContract$'` | Must exit nonzero naming that exact test; accepting AF_NETLINK is rejected |
+
+
+Revision controls: `m17-stand-in-closes.patch` must fail
+`TestT19StandInCannotCloseMatrix`; `m18-consumer-local-divergence.patch` plants
+the reviewer's one-sided EIO override and must fail
+`TestT19RootAndRealHostReadSameTable`. The latter feeds the root suite's actual
+T19.2 consumer and the host evaluator identical probe reports, checks all named
+Linux errno outcomes plus missing/custom outcomes, and checks both decisions
+against the pathname contract. Its claim is this common pathname behavior;
+fixture wallet frames and host peer identification remain intentionally separate.
