@@ -137,6 +137,8 @@ type t19Rental struct {
 	Attempted bool
 	Issued    uint64
 	Boot      string
+	RunID     string
+	Admission *t19ExistingAdmission
 }
 
 func (r *t19Rental) query(ctx context.Context, op string) (response, error) {
@@ -150,8 +152,12 @@ func (r *t19Rental) create(ctx context.Context, payload string) error {
 	if err != nil {
 		return err
 	}
-	if old.State != absent {
-		return errors.New("qualification slot already exists, including tombstones; refusing adoption")
+	if r.Admission != nil {
+		if err = r.Admission.check(ctx, old); err != nil {
+			return err
+		}
+	} else if old.State != absent {
+		return errors.New("qualification slot already exists; no rewindow preflight")
 	}
 	boot, clock, err := bootClock()
 	if err != nil {
@@ -161,7 +167,14 @@ func (r *t19Rental) create(ctx context.Context, payload string) error {
 	if _, err = rand.Read(nonce); err != nil {
 		return err
 	}
-	bootstrap := []byte("t19-observational-" + hex.EncodeToString(nonce))
+	r.RunID = hex.EncodeToString(nonce)
+	if !t19RunIDValid(r.RunID) {
+		return errors.New("invalid generated run identity")
+	}
+	bootstrap := []byte(t19BootstrapPrefix + r.RunID)
+	if old.State == destroyed && digest(bootstrap) == old.BootstrapSHA256 {
+		return errors.New("generated run identity repeats the preceding rental")
+	}
 	deadline := time.Now().UTC().Add(30 * time.Minute).Truncate(time.Second).Format(time.RFC3339)
 	r.Binding = response{Slot: r.Slot, NotAfter: deadline, PayloadSHA256: payload, BootstrapSHA256: digest(bootstrap)}
 	r.Issued, r.Boot, r.Attempted = clock, boot, true
@@ -537,6 +550,17 @@ func t19Observe(ctx context.Context, p policy, spec t19Spec, slot string, rental
 	if err := rental.create(ctx, p.payloadDigest()); err != nil {
 		return nil, err
 	}
+	var err error
+	spec, err = t19SpecForRun(spec, rental.RunID)
+	if err != nil {
+		return nil, err
+	}
+	if err = t19RunArtifactsAbsent(spec); err != nil {
+		return nil, err
+	}
+	if err = t19RequireRunID(spec, p.Adopted.UID, rental.RunID); err != nil {
+		return nil, err
+	}
 	s, err := rental.query(ctx, "start")
 	if err != nil {
 		return nil, err
@@ -611,7 +635,8 @@ func t19Observe(ctx context.Context, p policy, spec t19Spec, slot string, rental
 	if err = verifyNFT(ctx, p, &record); err != nil {
 		f.NFTError = err.Error()
 	}
-	f.JournalFound = t19JournalContains(ctx, record.Identity.Unit, spec.JournalLine)
+	invocation, invocationErr := runFixedTool(ctx, toolInvocation{Path: systemctlPath, Args: []string{"--system", "--no-pager", "show", "--property=InvocationID", "--value", "--", record.Identity.Unit}})
+	f.JournalFound = invocationErr == nil && t19JournalContains(ctx, record.Identity.Unit, spec.JournalLine, strings.TrimSpace(string(invocation)))
 	for _, target := range spec.IP {
 		if target.Echo {
 			f.HostEcho = ipVerdict(target)
@@ -636,7 +661,7 @@ func runT19RealHost(args []string) int {
 	fs := flag.NewFlagSet("slotd-t19-realhost", flag.ContinueOnError)
 	host := fs.String("host", "", "exact operator-admitted hostname")
 	policyPath := fs.String("policy", "/etc/swarma-slotd-demo/policy.json", "protected qualification policy")
-	slot := fs.String("slot", "", "fresh slot number (including no tombstone)")
+	slot := fs.String("slot", "", "declared adopted slot: absent or exact destroyed tombstone after residue preflight")
 	out := fs.String("out", "", "exclusive absolute output path")
 	ciDir := fs.String("ci-dir", "", "protected directory holding root-run.json, root-jobs.json, root-job.log")
 	pin := fs.String("daemon-sha256", "", "independently approved installed daemon SHA256")
@@ -828,13 +853,15 @@ func t19RunObserved(ctx context.Context, p policy, policyPath, pin, slot, echo, 
 		return problem(err)
 	}
 	rental := &t19Rental{Slot: slot, Call: t19InstalledWire(self, p.Socket, slot, uid, gid)}
-	// Refuse foreign slots before creating even the owned auxiliary plants.
+	// Refuse foreign/live bindings before creating even the owned auxiliary
+	// plants, then repeat the same read-only gate immediately before create.
 	old, err := rental.query(ctx, "status")
 	if err != nil {
 		return problem(err)
 	}
-	if old.State != absent {
-		return problem(errors.New("qualification slot already exists"))
+	rental.Admission = t19ExistingGate(p, slot, old, func() (durableRecord, error) { return t19ReadRecord(p, slot) }, func(c context.Context, r durableRecord) error { return t19RewindowPreflight(c, p, r) })
+	if err = rental.Admission.check(ctx, old); err != nil {
+		return problem(err)
 	}
 	cleanupPlants, err := t19StartPlants(slot, echo)
 	defer func() {
@@ -901,6 +928,7 @@ func t19RunObserved(ctx context.Context, p policy, policyPath, pin, slot, echo, 
 		report.Cleanup = t19Item{ID: "cleanup", Verdict: v, Evidence: []t19Evidence{{Claim: "own binding stop/destroy/status and independent residue readback; adopted account retained", Observed: state, Problems: issues}}}
 	}()
 	items, err := t19Observe(ctx, p, spec, slot, rental, window)
+	report.RunID = rental.RunID
 	if err != nil {
 		return problem(err)
 	}
@@ -966,19 +994,23 @@ func t19PolicySpec(p policy, slot, echo string) (t19Spec, error) {
 	return spec, nil
 }
 
-func t19JournalContains(ctx context.Context, unit, line string) bool {
+func t19JournalContains(ctx context.Context, unit, line, invocation string) bool {
+	args, err := t19JournalArgs(unit, line, invocation)
+	if err != nil {
+		return false
+	}
 	if _, err := readProtected("/usr/bin/journalctl", 0, 64*1024*1024); err != nil {
 		return false
 	}
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "/usr/bin/journalctl", "--no-pager", "-o", "cat", "-u", unit, "--since", "@"+strconv.FormatInt(time.Now().Add(-30*time.Minute).Unix(), 10), "--grep", line)
+	cmd := exec.CommandContext(ctx, "/usr/bin/journalctl", args...)
 	cmd.Env = []string{}
 	cmd.Dir = "/"
 	cmd.WaitDelay = 2 * time.Second
 	var stdout, stderr boundedOutput
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	err := cmd.Run()
+	err = cmd.Run()
 	return err == nil && !stdout.truncated && !stderr.truncated && bytes.Contains(stdout.bytes, []byte(line))
 }

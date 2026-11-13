@@ -463,6 +463,7 @@ func TestT19HostedEvidenceRefusals(t *testing.T) {
 func t19ValidReport(t *testing.T) t19RealHostReport {
 	t.Helper()
 	r := t19NewReport("rt-stations", "100")
+	r.RunID = strings.Repeat("d", 64)
 	r.WalletKind = "STAND_IN"
 	r.Items = t19RealHostVerdicts(t19ValidFacts(t))
 	r.PolicySHA256 = strings.Repeat("a", 64)

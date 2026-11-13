@@ -50,6 +50,7 @@ type t19CIEvidence struct {
 	Error     string `json:"error,omitempty"`
 }
 type t19RealHostReport struct {
+	RunID                  string        `json:"run_id,omitempty"`
 	PropertyTemplateSHA256 string        `json:"property_template_sha256"`
 	WalletKind             string        `json:"wallet_kind"`
 	Restoration            t19Item       `json:"restoration"`
@@ -365,6 +366,9 @@ func t19ValidateReport(r t19RealHostReport) error {
 	}
 	if r.WalletKind == "REAL" && r.Items[4].Verdict == t19StandIn {
 		return errors.New("real-wallet report contains stand-in evidence")
+	}
+	if !t19RunIDValid(r.RunID) && len(r.Errors) == 0 {
+		return errors.New("report lacks a fresh run identity")
 	}
 	return t19ValidateVerdict(r.Cleanup, r.Hosted, false)
 }

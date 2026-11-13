@@ -70,6 +70,14 @@ func runT19ObservedProbe(args []string) int {
 	if json.Unmarshal([]byte(args[0]), &spec) != nil || !filepath.IsAbs(spec.Report) || t19ConnectionOnlySpec(spec) != nil {
 		return 92
 	}
+	runID, err := t19ReadRunID(spec, uint32(os.Geteuid()))
+	if err != nil {
+		return 92
+	}
+	spec, err = t19SpecForRun(spec, runID)
+	if err != nil {
+		return 92
+	}
 	peer, err := t19ConnectPeer(t19WalletSock)
 	type result struct {
 		Peer  t19PeerIdentity `json:"peer"`
@@ -86,5 +94,9 @@ func runT19ObservedProbe(args []string) int {
 	if err = os.WriteFile(spec.Report+".peer", b, 0600); err != nil {
 		return 93
 	}
-	return runT19Probe(args)
+	probeSpec, err := json.Marshal(spec)
+	if err != nil {
+		return 93
+	}
+	return runT19Probe([]string{string(probeSpec)})
 }

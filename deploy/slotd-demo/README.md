@@ -265,9 +265,34 @@ entirely root-owned 0755, symlink-free parent chain. The harness checks this rea
 run shape and the daemon independently checks adoption/key ancestry. The actual
 key path, caller, allocation interval, home root, limits and IP endpoint come
 from the approved production policy. This procedure never provisions or adopts
-foreign accounts or changes existing key metadata. An existing slot 100,
-including a destroyed tombstone, refuses; a subsequent window needs an approved
-fresh slot declaration. The literal v0 policy/record schema must be preserved
+foreign accounts or changes existing key metadata. Slot 100 may be absent, or
+may be the **destroyed tombstone of this exact same adopted slot/account/key
+path**. A re-window requires the protected record and wire status to agree,
+no unfinished intent, unchanged retained account receipts when present, and a
+fresh successful read-only production adoption preflight before auxiliary
+plants and again immediately before create. That preflight requires no home,
+loaded unit, cgroup, NFT table, UID processes, linger, cron/system-cron or at
+jobs, charged kernel keys, or unexpected UID-owned files in the whole mount
+view; only the declared key is admitted. Any read/scan error or limit refuses.
+The current key must retain the approved real-run metadata and protected
+ancestry. The durable identity binds the key path, not a historical key-content
+hash. Every live/non-destroyed, mismatched account/key/slot or residue-bearing
+record refuses without a mutating wire request. Never renumber this adopted
+account to get around its tombstone, move a record aside, or edit daemon state.
+The daemon already supports clean same-slot recreation and repeats its own
+preflight under its create lifecycle before saving a fresh binding.
+
+Each create uses a fresh 256-bit public run identity in its nonsecret bootstrap.
+The driver and observer derive `t19-realhost-RUN_ID.json`, its `.peer` sidecar
+and the stdout marker from those same bytes. Current-run artifact paths must be
+absent before start, and journal lookup also requires the current systemd
+InvocationID. The JSON report records `run_id`; installed status and the durable
+record must match this attempt's new bootstrap/payload/deadline binding. Prior
+window probe files, peer sidecars and journal entries cannot satisfy a new
+observation. Preserve prior window directories as evidence and use a new one
+for every re-window; report and restoration-ready outputs are exclusive.
+
+The literal v0 policy/record schema must be preserved
 across restoration; typed-v2 profile migration is not part of this harness.
 
 rt-stations has no agent-walletd or node. A separately started root stand-in
@@ -353,7 +378,8 @@ sha256sum /absolute/task-scratch/swarma-t19-realhost /absolute/task-scratch/root
 First drain the station through its existing manager. No other actor may create
 or modify slot 100, its adopted identity, policy, unit or owned NFT during this
 window. Confirm the existing production policy is literal v0 and declares the
-account above, the slot is absent, the key has the exact real run metadata, the
+account above, the slot is absent or its exact destroyed same-slot tombstone
+passes the re-window rules above, the key has the exact real run metadata, the
 home parent is protected and the approved TCP gateway is actually reachable.
 The package's normal prerequisite check remains required. Do not apply this
 procedure to live rentals. The harness refuses scope/schema mismatches.
@@ -375,10 +401,12 @@ set -euo pipefail
 umask 077
 host=rt-stations
 test "$(hostname)" = "$host"
-window=/var/lib/swarma-t19rh-window
+window="/var/lib/swarma-t19rh-window-$(date -u +%Y%m%dT%H%M%SZ)"
 test ! -e "$window"
 mkdir -m 0700 "$window"
 mkdir -m 0755 "$window/ci"
+# First staging only: omit this test/install pair if the current approved helper
+# was already staged and independently verified for this re-window.
 test ! -e /usr/libexec/swarma-t19-realhost
 install -o root -g root -m 0755 /absolute/verified/swarma-t19-realhost /usr/libexec/swarma-t19-realhost
 for name in root-run.json root-jobs.json root-job.log; do
