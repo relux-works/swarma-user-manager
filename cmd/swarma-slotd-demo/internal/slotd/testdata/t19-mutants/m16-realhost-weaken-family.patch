@@ -1,0 +1,19 @@
+--- a/cmd/swarma-slotd-demo/internal/slotd/t19_expectations_linux_test.go
++++ b/cmd/swarma-slotd-demo/internal/slotd/t19_expectations_linux_test.go
+@@ -17,9 +17,9 @@
+ func t19Expectations() t19ExpectationTable {
+-	return t19ExpectationTable{
+-		PathDenied: []string{"ENOENT", "EACCES"},
+-		Hidden:     "ENOENT", Abstract: "EPERM", Connected: "ok", TCPDenied: "timeout", UDPDenied: "EPERM",
+-		Families: map[string]string{"netlink": "EAFNOSUPPORT", "packet": "EAFNOSUPPORT", "unix": "ok", "inet": "ok", "inet6": "ok"},
+-		Tamper:   map[string]string{"prctl-no-new-privs-0": "EINVAL", "prctl-ambient-net-admin": "EPERM"},
+-		KeyRead:  "ok", KeyWrite: "EROFS", KeyChmod: "EROFS",
+-	}
++	return t19ExpectationTable{
++		PathDenied: []string{"ENOENT", "EACCES"},
++		Hidden:     "ENOENT", Abstract: "EPERM", Connected: "ok", TCPDenied: "timeout", UDPDenied: "EPERM",
++		Families: map[string]string{"netlink": "ok", "packet": "EAFNOSUPPORT", "unix": "ok", "inet": "ok", "inet6": "ok"},
++		Tamper:   map[string]string{"prctl-no-new-privs-0": "EINVAL", "prctl-ambient-net-admin": "EPERM"},
++		KeyRead:  "ok", KeyWrite: "EROFS", KeyChmod: "EROFS",
++	}
+ }

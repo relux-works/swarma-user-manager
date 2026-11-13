@@ -257,6 +257,26 @@ and a node-RPC stand-in, and refuse to run where `/run/swarma-wallet` already
 exists. The real agent-walletd frame and the real node RPC are covered only by
 the station qualification.
 
+## Observational real-host T19 evidence
+
+The [deployment runbook](../../deploy/slotd-demo/README.md#observational-t19-qualification-on-an-installed-host)
+contains the root-marker admission, reviewed temporary policy template, exact
+operator window sequence, strict installed-unit property comparison and
+production-policy restoration/refusal control. Build the harness as the same
+Go test executable that contains the unchanged reviewed probe. Its scalar
+expectation table is shared with `TestRootT19SlotConfinement`; independent value
+and consumer-wiring tests prevent a shared weakening from silently passing.
+
+Real hosts never run the ABI-5, edited-unit detector, deliberately bound status
+or alternate-ABI controls. Their pinned full hosted-root evidence remains
+separate from host observations. On stations1 wallet observation sends zero
+application bytes and identifies the listener using `SO_PEERCRED`; rt-stations
+wallet evidence is explicitly `STAND_IN`. A report cannot exit zero until the
+temporary policy is removed, original production bytes are read back and the
+same stopped probe binding is refused under the restored policy, followed by
+receipt-backed destruction and residue readback. Local non-root test success
+is not an installed-host qualification result.
+
 ## Adopted agent account
 
 The G2 host flow provisions the rented agent's account itself
@@ -404,8 +424,8 @@ change cannot retarget stored identities or authorize an old payload to start.
 Install the real policy outside the repository as root-owned 0640, and provision
 the configured home parent as root:root 0755. Slotd creates its private state and
 root:caller-group socket parent. Ancestors and tool executables must be root
-protected, without symlinks or write access for untrusted users. No host account
-adoption, provisioning installer or production station qualification is provided.
+protected, without symlinks or write access for untrusted users. Account adoption is limited to the explicit declaration and receipt gates above;
+production station qualification is not provided.
 Open deployment checks remain in [UNRESOLVED_QUESTIONS.md](UNRESOLVED_QUESTIONS.md).
 
 ## Tools and verification

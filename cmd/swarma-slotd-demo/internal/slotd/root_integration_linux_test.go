@@ -25,6 +25,22 @@ import (
 // The copied test executable is an inert, non-root fixture payload. This path
 // runs only as an explicit subprocess; it cannot select or enable root tests.
 func TestMain(m *testing.M) {
+	if len(os.Args) > 1 && os.Args[1] == "slotd-t19-ci-check" {
+		os.Exit(runT19CICheck(os.Args[2:]))
+	}
+	if len(os.Args) > 1 && os.Args[1] == "slotd-t19-wallet-standin" {
+		os.Exit(runT19StandIn(os.Args[2:]))
+	}
+	if len(os.Args) > 1 && os.Args[1] == "slotd-t19-observer" {
+		os.Exit(runT19ObservedProbe(os.Args[2:]))
+	}
+	if len(os.Args) > 1 && os.Args[1] == "slotd-t19-realhost" {
+		os.Exit(runT19RealHost(os.Args[2:]))
+	}
+	if len(os.Args) > 1 && os.Args[1] == "slotd-t19-wire" {
+		os.Exit(runT19Wire(os.Args[2:]))
+	}
+
 	if len(os.Args) > 1 && os.Args[1] == "--slot-launch" {
 		os.Exit(testSlotLaunch(os.Args[2:]))
 	}

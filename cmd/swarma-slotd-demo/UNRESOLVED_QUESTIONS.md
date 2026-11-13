@@ -32,8 +32,9 @@ remain absent. No deployment qualification follows from compile or vet success.
    host's systemd, cgroup-v2/BPF, nftables, NSS and filesystem behavior. A runner
    result alone does not qualify a deployment.
 3. The operator must provision the protected real policy, payload and home parent
-   outside the repository. No production installer, account adoption or recovery
-   operation that fabricates a missing creation receipt is provided. An
+   outside the repository. Demo adoption is limited to the declared account and
+   its receipt gates; no production installer or recovery operation that
+   fabricates a missing creation receipt is provided. An
    ambiguous partial create needs explicit reconciliation outside the wire API.
 
 The service remains demo-only and carries only the v1 r4 protocol guarantees.
@@ -56,8 +57,12 @@ egress contract are not enforced here and need an owner decision:
 1. The model proxy is reachable only if the operator lists it in `egress`. The
    per-booking bootstrap `model_endpoint` may be a hostname, so slotd does not
    derive or cross-check an egress rule from it.
-2. Unix-domain sockets are not filtered. The unit has no address-family or
-   `/run` path restriction, so the slot UID can connect to any socket whose file
-   mode admits it, not only the wallet socket; each service's own peer-credential
-   checks are the only remaining gate. Restricting that needs a declared
-   wallet-socket path in the root policy and new root fixtures.
+2. T19 now confines pathname and abstract Unix sockets and address families;
+   the implemented contract and reviewed hosted fixtures are in the
+   [daemon README](README.md#slot-confinement-t19). Source delivery does not
+   establish host adoption. The observational real-host harness still needs an
+   actual operator maintenance-window run on rt-stations and the separate
+   connection-only real-wallet observation on stations1. A stand-in result
+   cannot substitute for stations1 wallet evidence. The hook-only experiments
+   remain covered only by exact-tree hosted root CI. The producer cannot run
+   these station modes without the installed daemon and explicit root marker.

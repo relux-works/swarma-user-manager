@@ -725,6 +725,7 @@ func t19Journal(t *testing.T, unit, needle string) string {
 // T19.12/T19.13 from one real slot that slotd creates and starts with the
 // production properties (fence, Landlock launcher, readback, exec confirmation).
 func TestRootT19SlotConfinement(t *testing.T) {
+	expect := t19Expectations()
 	p, r, dir := rootFixture(t)
 	wallet, walletIno, operatorGID := t19Wallets(t)
 	t19Adopt(t, &p, &r, dir, wallet)
@@ -785,12 +786,12 @@ func TestRootT19SlotConfinement(t *testing.T) {
 		for _, path := range attempt {
 			got := first.Pathnames[path]
 			if path == t19WalletSock {
-				if got != "ok" {
+				if got != expect.Connected {
 					t.Errorf("wallet %s: %s", path, got)
 				}
 				continue
 			}
-			if got != "ENOENT" && got != "EACCES" {
+			if !slices.Contains(expect.PathDenied, got) {
 				t.Errorf("%s: %s, want ENOENT or EACCES", path, got)
 			}
 		}
@@ -802,7 +803,7 @@ func TestRootT19SlotConfinement(t *testing.T) {
 			host := unixVerdict("@" + name)
 			if host == "ok" {
 				live++
-				if got != "EPERM" {
+				if got != expect.Abstract {
 					t.Errorf("@%s: slot %s, want EPERM (host connects)", name, got)
 				}
 			} else if got == "ok" {
@@ -812,18 +813,18 @@ func TestRootT19SlotConfinement(t *testing.T) {
 		// A name the host itself cannot connect to (an autobound client
 		// socket, e.g. PID 1's @.../bus/systemd/bus-api-system, or a closed
 		// one) is no reachability target; the slot must still not connect.
-		if first.Abstract["@"+plants.Abstract] != "EPERM" || live < 1 {
+		if first.Abstract["@"+plants.Abstract] != expect.Abstract || live < 1 {
 			t.Fatalf("abstract control %s, live names %d", first.Abstract["@"+plants.Abstract], live)
 		}
 		t.Logf("%d of %d abstract names connectable from the host; all refused from the slot with EPERM", live, len(abstract))
 	})
 	t.Run("T19.4-plants", func(t *testing.T) {
 		for _, path := range plants.Paths {
-			if got := first.Pathnames[path]; got != "ENOENT" {
+			if got := first.Pathnames[path]; got != expect.Hidden {
 				t.Errorf("plant %s: %s, want ENOENT", path, got)
 			}
 		}
-		if got := first.Abstract["@"+plants.Abstract]; got != "EPERM" {
+		if got := first.Abstract["@"+plants.Abstract]; got != expect.Abstract {
 			t.Errorf("abstract plant: %s", got)
 		}
 	})
@@ -842,13 +843,13 @@ func TestRootT19SlotConfinement(t *testing.T) {
 	t.Run("T19.7-journald", func(t *testing.T) {
 		t19Journal(t, r.Identity.Unit, line)
 		for _, path := range []string{"/run/systemd/journal/socket", "/dev/log"} {
-			if got := first.Pathnames[path]; got != "ENOENT" {
+			if got := first.Pathnames[path]; got != expect.Hidden {
 				t.Errorf("%s: %s", path, got)
 			}
 		}
 	})
 	t.Run("T19.8-families", func(t *testing.T) {
-		want := map[string]string{"netlink": "EAFNOSUPPORT", "packet": "EAFNOSUPPORT", "unix": "ok", "inet": "ok", "inet6": "ok"}
+		want := expect.Families
 		for k, v := range want {
 			if first.Families[k] != v {
 				t.Errorf("%s: %s, want %s", k, first.Families[k], v)
@@ -856,14 +857,14 @@ func TestRootT19SlotConfinement(t *testing.T) {
 		}
 	})
 	t.Run("T19.9-tamper", func(t *testing.T) {
-		if first.Tamper["unshare-user-net"] == "ok" || first.Tamper["prctl-no-new-privs-0"] != "EINVAL" || first.Tamper["prctl-ambient-net-admin"] != "EPERM" {
+		if first.Tamper["unshare-user-net"] == "ok" || first.Tamper["prctl-no-new-privs-0"] != expect.Tamper["prctl-no-new-privs-0"] || first.Tamper["prctl-ambient-net-admin"] != expect.Tamper["prctl-ambient-net-admin"] {
 			t.Errorf("tamper verdicts %v", first.Tamper)
 		}
-		if got := first.AfterTamper["@"+plants.Abstract]; got != "EPERM" {
+		if got := first.AfterTamper["@"+plants.Abstract]; got != expect.Abstract {
 			t.Errorf("abstract after tamper: %s", got)
 		}
 		for _, path := range plants.Paths {
-			if got := first.AfterTamper[path]; got != "ENOENT" {
+			if got := first.AfterTamper[path]; got != expect.Hidden {
 				t.Errorf("%s after tamper: %s", path, got)
 			}
 		}
@@ -874,7 +875,7 @@ func TestRootT19SlotConfinement(t *testing.T) {
 		}
 	})
 	t.Run("T19.11-status-absent", func(t *testing.T) {
-		if got := first.Pathnames[t19StatusSock]; got != "ENOENT" {
+		if got := first.Pathnames[t19StatusSock]; got != expect.Hidden {
 			t.Errorf("status.sock: %s", got)
 		}
 		if slices.Contains(first.Groups, operatorGID) {
@@ -895,7 +896,7 @@ func TestRootT19SlotConfinement(t *testing.T) {
 		if first.UID != int(r.Identity.UID) || first.GID != int(r.Identity.UID) || !slices.Equal(groups, want) {
 			t.Errorf("uid %d gid %d groups %v, want %d/%d/%v", first.UID, first.GID, groups, r.Identity.UID, r.Identity.UID, want)
 		}
-		if first.KeyRead != "ok" || first.KeyWrite != "EROFS" || first.KeyChmod != "EROFS" {
+		if first.KeyRead != expect.KeyRead || first.KeyWrite != expect.KeyWrite || first.KeyChmod != expect.KeyChmod {
 			t.Errorf("key read %s write %s chmod %s, want ok/EROFS/EROFS", first.KeyRead, first.KeyWrite, first.KeyChmod)
 		}
 	})
@@ -906,9 +907,9 @@ func TestRootT19SlotConfinement(t *testing.T) {
 		// control proves each of these listeners answers within that deadline.
 		for _, target := range ipSet.all() {
 			key := target.Network + " " + target.Address
-			want := "timeout"
+			want := expect.TCPDenied
 			if strings.HasPrefix(target.Network, "udp") {
-				want = "EPERM"
+				want = expect.UDPDenied
 			}
 			if got := first.IP[key]; got != want {
 				t.Errorf("%s: %s, want %s", key, got, want)
@@ -939,7 +940,7 @@ func TestRootT19SlotConfinement(t *testing.T) {
 	})
 	t.Run("T19.13-egress-readback", func(t *testing.T) {
 		key := gateway.Network + " " + gateway.Address
-		if got := first.IP[key]; got != "ok" {
+		if got := first.IP[key]; got != expect.Connected {
 			t.Errorf("gateway %s: %s (host now: %s)", key, got, ipVerdict(t19Target{gateway.Network, gateway.Address, true}))
 		}
 		values, err := unitProperties(context.Background(), r.Identity)

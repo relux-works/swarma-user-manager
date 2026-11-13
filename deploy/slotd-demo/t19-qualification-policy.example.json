@@ -1,0 +1,37 @@
+{
+  "caller_user": "demo-manager",
+  "uid_base": 300000,
+  "home_root": "/var/lib/swarma-slot-homes",
+  "socket": "/run/swarma-slotd-demo/sock",
+  "payload": {
+    "path": "/usr/libexec/swarma-t19-realhost",
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "argv": [
+      "/usr/libexec/swarma-t19-realhost",
+      "slotd-t19-observer",
+      "{\"Report\":\"/var/lib/swarma-slot-homes/g2-agent/t19-realhost.json\",\"Inventory\":true,\"Pathnames\":[\"/dev/log\",\"/dev/shm/swarma-t19rh-100.sock\",\"/run/swarma-t19rh-100.sock\",\"/run/swarma-wallet/wallet.sock\",\"/run/swarma-wallet-status/status.sock\",\"/run/systemd/journal/socket\",\"/tmp/swarma-t19rh-100.sock\",\"/var/lib/swarma-t19rh-100.sock\"],\"Abstract\":[\"swarma-t19rh-100\"],\"Families\":true,\"Tamper\":true,\"Hold\":true,\"KeyFile\":\"/var/lib/g2-agent/agent.key\",\"JournalLine\":\"swarma-t19-realhost-100\",\"IP\":[{\"Network\":\"tcp4\",\"Address\":\"127.0.0.1:8336\",\"Echo\":false},{\"Network\":\"tcp6\",\"Address\":\"[::1]:8336\",\"Echo\":false},{\"Network\":\"tcp4\",\"Address\":\"127.0.0.53:53\",\"Echo\":false},{\"Network\":\"udp4\",\"Address\":\"127.0.0.53:53\",\"Echo\":false},{\"Network\":\"tcp4\",\"Address\":\"127.0.0.1:18336\",\"Echo\":true},{\"Network\":\"tcp4\",\"Address\":\"192.0.2.10:443\",\"Echo\":false}]}"
+    ]
+  },
+  "caps": {
+    "cpu_quota": "100%",
+    "memory_max": "256M",
+    "tasks_max": 64
+  },
+  "egress": [
+    {
+      "addr": "192.0.2.10",
+      "port": 443,
+      "proto": "tcp"
+    }
+  ],
+  "adopted_account": {
+    "slot": "100",
+    "name": "g2-agent",
+    "uid": 210001,
+    "socket_group": {
+      "name": "swarma-wallet-peer",
+      "gid": 210101
+    },
+    "key_file": "/var/lib/g2-agent/agent.key"
+  }
+}

@@ -437,6 +437,13 @@ The optional race build exceeded the 20-minute test target and tripped existing 
 
 ### Slot demo tools
 
+The [observational real-host T19 runbook](deploy/slotd-demo/README.md#observational-t19-qualification-on-an-installed-host)
+builds the shared probe/harness with `go test -c -o ABS ./cmd/swarma-slotd-demo/internal/slotd`.
+Its `slotd-t19-realhost` entry drives only the installed v1 r4 daemon and writes
+operator-protected JSON and restoration evidence. Exact flags, admission,
+stand-in/live-wallet scope and output paths are in that runbook; it does not
+execute the hosted root gate on a station.
+
 The demo's [typed station payload profile](cmd/swarma-slotd-demo/STATION-PAYLOAD.md)
 documents the fixed read-only `busctl` D-Bus argv checks, protected per-UID static
 staging and its pending source/runtime qualification. Its producer logs belong

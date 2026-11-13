@@ -229,3 +229,264 @@ Producers run syntax, vet and Linux compile-only checks without root. Root tests
 run only in the disposable GitHub-hosted Ubuntu workflow with the real root gate.
 Installer tests do not qualify a station, and publishing this draft package does
 not authorize its installation on a host.
+
+## Observational T19 qualification on an installed host
+
+This is a maintenance-window observation of the **installed** daemon, not the
+hosted root gate and not permission to install from a producer checkout. Infra
+reviews the rendered temporary policy and independently authenticates the
+installed daemon pin before the window. Only v1 r4 lifecycle requests drive
+slotd; the harness never constructs an engine or starts an edited slot unit.
+The [inert policy template](t19-qualification-policy.example.json) shows every
+field, probe mode and connection-only JSON spec. Do not deploy its zero digest,
+example paths or documentation IP. `--prepare` renders the actual policy from
+the protected production snapshot, changing only its literal payload binding.
+It inventories the actual host and includes all discovered pathname/abstract
+sockets, four exclusive owned socket plants, node RPC on both loopbacks and all
+host-owned addresses, resolver TCP/UDP, an owned loopback echo and one approved
+TCP egress endpoint. New sockets or interface addresses after preparation refuse
+the run rather than silently shrinking the attempt set; regenerate/review the
+policy. Oversized or incomplete inventories also refuse.
+
+The harness and probe are one Go test executable. `slotd-t19-observer` first
+connects to `/run/swarma-wallet/wallet.sock`, reads kernel `SO_PEERCRED`, closes
+without sending bytes, writes a small peer sidecar, then calls the existing
+**unchanged** `runT19Probe`. The spec forbids wallet frames, wallet RPC, wallet
+restart and wallet state-file reads. Agent-key read/write-open/chmod observations
+use only the policy-declared agent key through its read-only bind, not wallet
+files. On stations1 this connection and peer identification are the entire
+wallet check: no RPC, spend request or wallet filesystem access. The expected
+listener UID is an operator pin (`--wallet-peer-uid`), not the socket's group.
+
+For rt-stations the declared account is `g2-agent`, UID and primary GID 210001,
+with exactly the extra `swarma-wallet-peer` GID 210101, slot 100. Its agent key
+must already be a regular, single-link `g2-agent:g2-agent` 0600 file under an
+entirely root-owned 0755, symlink-free parent chain. The harness checks this real
+run shape and the daemon independently checks adoption/key ancestry. The actual
+key path, caller, allocation interval, home root, limits and IP endpoint come
+from the approved production policy. This procedure never provisions or adopts
+foreign accounts or changes existing key metadata. An existing slot 100,
+including a destroyed tombstone, refuses; a subsequent window needs an approved
+fresh slot declaration. The literal v0 policy/record schema must be preserved
+across restoration; typed-v2 profile migration is not part of this harness.
+
+rt-stations has no agent-walletd or node. A separately started root stand-in
+listens as root:swarma-wallet-peer 0660 and speaks **no** application protocol.
+The JSON marks the wallet evidence `STAND_IN`; it never represents a real-wallet
+PASS. That stand-in mode refuses every host except exactly `rt-stations`, and
+refuses any existing `/run/swarma-wallet` directory. On stations1 use the real
+wallet, `--wallet-kind REAL` and its reviewed listener UID; never start the
+stand-in there. No node RPC is sent: node checks are TCP connection attempts.
+A denied TCP connect must produce the bounded probe **timeout**, not merely an
+immediate connection refusal; UDP send denial remains `EPERM`.
+
+Each report contains exactly T19.1–T19.13 with `PASS`, `FAIL` or
+`COVERED_BY_HOSTED_ROOT_CI`, evidence, policy/daemon/probe/template hashes and
+hosted commit/run identifiers. T19.1 also records the mount view, complete
+inventory, UID/GID/groups and read-only key observations. T19.5 proves only
+connection and listener identity. T19.6 (fixture generation/restart), T19.10
+(ABI-5 injection), detector, deliberately bound status and alternate ABI
+controls are **not run on the station**. They are covered only by the pinned
+full hosted root run [43282197583](https://github.com/relux-works/swarma-user-manager/actions/runs/43282197583),
+root job 131406508394, attempt 1, at exact tree
+`aed02d69d8e360567faf6bb9133c6b242613b2ef`. The harness verifies the run/job
+metadata, every named passing test and the SHA256 of the complete audited root
+log (`4fd39ebf14d35b280811e9924a8fdc79fc1402933d1e5ed390a1b04d06fc73ac`).
+A portable-only, skipped-root, mutant, different-tree, truncated, expired or
+missing log is a failure. These are historical hosted results, not station
+experiments or a claim that a new harness commit ran hosted root tests.
+
+T19.13 reads the actual slot unit that the installed daemon started. Its closed
+[property template](../../cmd/swarma-slotd-demo/internal/slotd/testdata/t19-realhost/unit-properties.json)
+covers **every property requested by the literal production start vector**, plus
+identity, ownership, environment and state readback. Actual property values are
+diffed byte for byte, including list order/whitespace; missing, additional,
+duplicate or changed rows fail. The report retains expected and actual values.
+Only row ordering is canonicalized for the diff. CPU quota and runtime use the
+raw D-Bus `t MICROSECONDS` values so human duration formatting cannot weaken or
+break byte comparison. Empty EnvironmentFiles is
+proved separately with D-Bus's typed empty `a(sb)` array, not inferred from an
+omitted systemctl display row. The existing production verifier additionally
+checks the durable unit ownership/runtime receipt, exact ExecStart and exact
+NFT default-drop rules. The comparison does not claim to inventory every
+unrelated systemd default property.
+
+Admission is never derived from CI environment variables. The operator must
+create `/etc/swarma/t19-realhost.allow`, root-owned 0644, single-link, without
+ACLs or symlink/unprotected ancestors, containing **exactly the hostname and
+one LF**, and pass that exact hostname with `--host`. Root is required for
+protected inventory/readback; each wire request is a bounded subprocess dropped
+to the existing policy caller UID/GID. The marker is exclusively locked for the
+window. No change is made to `rootTestAllowed()` or its hosted-runner predicate.
+
+### Build and acquire historical evidence (producer/install bench)
+
+Use the isolated Go 1.26.10 source environment described in the daemon README.
+Run from the reviewed source checkout; all output paths below are task-owned
+absolute paths. No root fixture opt-in or forged CI environment is used:
+
+```sh
+GOTOOLCHAIN=local /absolute/go1.26.10/bin/go test -c \
+  -o /absolute/task-scratch/swarma-t19-realhost \
+  ./cmd/swarma-slotd-demo/internal/slotd
+# Read-only GitHub access; download locally, then transfer these exact files.
+gh api repos/relux-works/swarma-user-manager/actions/runs/43282197583 \
+  > /absolute/task-scratch/root-run.json
+gh api repos/relux-works/swarma-user-manager/actions/runs/43282197583/jobs \
+  > /absolute/task-scratch/root-jobs.json
+gh api --allow-escape-sequences \
+  repos/relux-works/swarma-user-manager/actions/jobs/131406508394/logs \
+  > /absolute/task-scratch/root-job.log
+sha256sum /absolute/task-scratch/swarma-t19-realhost /absolute/task-scratch/root-job.log
+/absolute/task-scratch/swarma-t19-realhost slotd-t19-ci-check /absolute/task-scratch
+```
+
+### Operator sequence on rt-stations
+
+First drain the station through its existing manager. No other actor may create
+or modify slot 100, its adopted identity, policy, unit or owned NFT during this
+window. Confirm the existing production policy is literal v0 and declares the
+account above, the slot is absent, the key has the exact real run metadata, the
+home parent is protected and the approved TCP gateway is actually reachable.
+The package's normal prerequisite check remains required. Do not apply this
+procedure to live rentals. The harness refuses scope/schema mismatches.
+
+Stage the independently verified probe and the three downloaded evidence files
+under `/absolute/verified/` on the host. The following is an **operator-run root
+shell**, not something the producer executes. Supply the authenticated installed
+daemon digest, not a digest trusted merely because it was computed locally.
+`--prepare` creates a new file; the operator reviews it before the next block.
+
+```sh
+sudo bash
+set -euo pipefail
+umask 077
+host=rt-stations
+test "$(hostname)" = "$host"
+window=/var/lib/swarma-t19rh-window
+test ! -e "$window"
+mkdir -m 0700 "$window"
+mkdir -m 0755 "$window/ci"
+test ! -e /usr/libexec/swarma-t19-realhost
+install -o root -g root -m 0755 /absolute/verified/swarma-t19-realhost /usr/libexec/swarma-t19-realhost
+for name in root-run.json root-jobs.json root-job.log; do
+  install -o root -g root -m 0644 "/absolute/verified/$name" "$window/ci/$name"
+done
+install -d -o root -g root -m 0755 /etc/swarma
+test ! -e /etc/swarma/t19-realhost.allow
+printf '%s\n' "$host" > /etc/swarma/t19-realhost.allow
+chmod 0644 /etc/swarma/t19-realhost.allow
+install -o root -g root -m 0640 /etc/swarma-slotd-demo/policy.json "$window/production.json"
+production_pin="$(sha256sum "$window/production.json" | cut -d ' ' -f 1)"
+daemon_pin=INDEPENDENTLY_AUTHENTICATED_64_LOWERCASE_HEX
+# Keep the same adopted account/key, limits, egress and identity. Only the
+# payload changes; host inventory and hashes are rendered into its JSON spec.
+/usr/libexec/swarma-t19-realhost slotd-t19-realhost --prepare \
+  --host "$host" --slot 100 --policy "$window/production.json" \
+  --probe /usr/libexec/swarma-t19-realhost --out "$window/qualification.json"
+cat "$window/qualification.json"
+# Stop here for the operator's exact policy review before continuing.
+```
+
+Continue in that root shell after policy review. The trap restores production
+on failure as well. It never removes daemon state or a tombstone. The stand-in
+is a recorded child PID; no process is stopped by a name/pattern.
+
+```sh
+standin_pid=
+harness_pid=
+restore_policy() {
+  systemctl stop swarma-slotd-demo.service
+  install -o root -g root -m 0640 "$window/production.json" /etc/swarma-slotd-demo/policy.json
+  rm -f -- "$window/qualification.json"
+  systemctl start swarma-slotd-demo.service
+}
+window_exit() {
+  restore_policy
+  if [ -n "$harness_pid" ] && kill -0 "$harness_pid" 2>/dev/null; then
+    kill -TERM "$harness_pid"
+    wait "$harness_pid" || true
+  fi
+  if [ -n "$standin_pid" ] && kill -0 "$standin_pid" 2>/dev/null; then
+    kill -TERM "$standin_pid"
+    wait "$standin_pid" || true
+  fi
+}
+trap window_exit EXIT
+# This helper refuses an existing wallet directory; never use it on stations1.
+/usr/libexec/swarma-t19-realhost slotd-t19-wallet-standin --host "$host" \
+  > "$window/standin.log" 2>&1 &
+standin_pid=$!
+# The socket appears only after exclusive bind and 0660 ownership are applied.
+for attempt in $(seq 1 50); do
+  if [ -S /run/swarma-wallet/wallet.sock ]; then break; fi
+  kill -0 "$standin_pid"
+  sleep 0.1
+done
+test -S /run/swarma-wallet/wallet.sock
+stat -c '%u:%g %a %n' /run/swarma-wallet/wallet.sock > "$window/standin-metadata.log"
+test "$(stat -c '%u:%g:%a' /run/swarma-wallet/wallet.sock)" = 0:210101:660
+# Prepare included wallet.sock even before the stand-in existed.
+systemctl stop swarma-slotd-demo.service
+install -o root -g root -m 0640 "$window/qualification.json" /etc/swarma-slotd-demo/policy.json
+systemctl start swarma-slotd-demo.service
+/usr/libexec/swarma-t19-realhost slotd-t19-realhost \
+  --host "$host" --slot 100 --wallet-kind STAND_IN --wallet-peer-uid 0 \
+  --daemon-sha256 "$daemon_pin" --ci-dir "$window/ci" \
+  --production-backup "$window/production.json" --production-sha256 "$production_pin" \
+  --temporary-policy "$window/qualification.json" --ready "$window/restore-ready.json" \
+  --out "$window/report.json" > "$window/harness.log" 2>&1 &
+harness_pid=$!
+# Bounded observation stage. Ready means the same owned slot is STOPPED.
+for attempt in $(seq 1 840); do
+  if [ -s "$window/restore-ready.json" ]; then break; fi
+  kill -0 "$harness_pid"
+  sleep 1
+done
+test -s "$window/restore-ready.json"
+cat "$window/restore-ready.json"
+restore_policy
+# Harness verifies removed temporary file + original production bytes + new
+# daemon PID + invalid_state on the SAME stopped probe binding, then destroys.
+rc=0
+wait "$harness_pid" || rc=$?
+harness_pid=
+cat "$window/report.json"
+test "$rc" -eq 0
+kill -TERM "$standin_pid"
+wait "$standin_pid"
+standin_pid=
+test ! -e /run/swarma-wallet
+# Evidence independent of the JSON's restored-policy readback.
+sha256sum /etc/swarma-slotd-demo/policy.json > "$window/production-after.sha256"
+test "$(cut -d ' ' -f 1 "$window/production-after.sha256")" = "$production_pin"
+test ! -e "$window/qualification.json"
+rm -- /etc/swarma/t19-realhost.allow
+trap - EXIT
+exit
+```
+
+On stations1 omit the stand-in start/stop and its directory-absence assertion;
+use `host=stations1`, `--wallet-kind REAL`, and the operator-approved real
+listener UID. All connection-only guards remain identical. Keep the protected
+report, restoration-ready artifact, pinned historical evidence, original policy
+snapshot and command exit codes in the station install record. Do not remove
+production state, homes, keys, accounts or NFT manually to turn a failed cleanup
+into a passing report. SIGINT/SIGTERM and uncertain create replies trigger a
+fresh cleanup deadline; loss of the daemon or an ownership mismatch remains a
+reported failure requiring normal receipt-backed recovery.
+
+Exit 0 closes only this scoped observational matrix item: every observable item
+must pass, every hosted-only item/control must have authenticated coverage at
+exact `aed02d69`, and retirement **and** temporary-policy removal/restoration/
+production-refusal evidence must pass. A stand-in observation remains a stand-in
+observation. No installed host mode was run by the non-root producer.
+
+| Qualification tool | Exact entry | Output |
+| --- | --- | --- |
+| Shared probe/harness build | `go test -c -o ABS ./cmd/swarma-slotd-demo/internal/slotd` | Inert test executable; hosted root gate unchanged |
+| Read-only renderer | `ABS slotd-t19-realhost --prepare --host HOST --slot N --policy ORIGINAL --probe ABS --out NEW_JSON` | Exclusive temporary policy for operator review |
+| Observational run | `ABS slotd-t19-realhost` with the explicit window flags above | Exclusive JSON report and stopped-slot restoration-ready artifact |
+| rt-stations stand-in | `ABS slotd-t19-wallet-standin --host rt-stations` | Owned connect-only listener; never a real-wallet verdict |
+| Local contract tests | `go test ./cmd/swarma-slotd-demo/internal/slotd -run '^TestT19'` | Admission, table, report, strict properties, peer/no-byte handshake, ownership and restoration controls |
+| Expectation control plant | Apply `testdata/t19-mutants/m16-realhost-weaken-family.patch` in isolated scratch; run `go test ./cmd/swarma-slotd-demo/internal/slotd -run '^TestT19SharedExpectationContract$'` | Must exit nonzero naming that exact test; accepting AF_NETLINK is rejected |
