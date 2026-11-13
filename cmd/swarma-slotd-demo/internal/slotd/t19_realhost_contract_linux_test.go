@@ -199,8 +199,8 @@ func TestT19ObservationalVerdicts(t *testing.T) {
 	}
 }
 
-// Proves the strict property projection rejects extra, missing, duplicate and
-// byte-different values (including equivalent-looking word orders).
+// Proves the closed property projection rejects extra, missing, duplicate and
+// byte-different scalar values, while accepting systemd's reordered deny set.
 func TestT19StrictPropertyTemplate(t *testing.T) {
 	p := t19ContractPolicy(t)
 	id, err := p.identity("100")
@@ -216,11 +216,17 @@ func TestT19StrictPropertyTemplate(t *testing.T) {
 	if _, err = t19CompareProperties(raw, expected); err != nil {
 		t.Fatal(err)
 	}
+	reordered := bytes.Replace(raw, []byte("IPAddressDeny=0.0.0.0/0 ::/0\n"), []byte("IPAddressDeny=::/0 0.0.0.0/0\n"), 1)
+	if bytes.Equal(reordered, raw) {
+		t.Fatal("deny-set control did not change the template")
+	}
+	if _, err = t19CompareProperties(reordered, expected); err != nil {
+		t.Fatalf("systemd 259.9 deny-set order refused: %v", err)
+	}
 	for name, changed := range map[string][]byte{
 		"extra":      append(slices.Clone(raw), []byte("NewProperty=yes\n")...),
 		"missing":    bytes.Replace(raw, []byte("PrivateIPC=yes\n"), nil, 1),
 		"duplicate":  append(slices.Clone(raw), []byte("PrivateIPC=yes\n")...),
-		"word order": bytes.Replace(raw, []byte("AF_INET AF_INET6 AF_UNIX"), []byte("AF_UNIX AF_INET AF_INET6"), 1),
 		"whitespace": bytes.Replace(raw, []byte("PrivateIPC=yes"), []byte("PrivateIPC=yes "), 1),
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -247,6 +253,50 @@ func TestT19StrictPropertyTemplate(t *testing.T) {
 				t.Fatalf("production property has no closed template row: %s", k)
 			}
 		}
+	}
+}
+
+// Every row compared with sameWords by the production verifier accepts an equal
+// reordered list, but refuses missing, extra and duplicate words. Scalar rows
+// retain byte comparison; the raw observed order remains available as evidence.
+func TestT19PropertySetSemantics(t *testing.T) {
+	for key, words := range map[string][]string{
+		"BindPaths":               {"/home/slot:/home/slot:rbind", "/journal:/journal:rbind"},
+		"TemporaryFileSystem":     {"/run:ro", "/var:ro"},
+		"BindReadOnlyPaths":       {"/etc/passwd:/etc/passwd:rbind", "/etc/group:/etc/group:rbind"},
+		"RestrictAddressFamilies": {"AF_UNIX", "AF_INET", "AF_INET6"},
+		"IPAddressDeny":           {"0.0.0.0/0", "::/0"},
+		"IPAddressAllow":          {"192.0.2.1/32", "2001:db8::1/128"},
+	} {
+		t.Run(key, func(t *testing.T) {
+			expected := map[string]string{key: strings.Join(words, " ")}
+			reversed := slices.Clone(words)
+			slices.Reverse(reversed)
+			for _, tc := range []struct {
+				name, actual string
+				accept       bool
+			}{
+				{"unchanged", expected[key], true},
+				{"reordered", strings.Join(reversed, " "), true},
+				{"word whitespace", strings.Join(reversed, "  "), true},
+				{"missing", strings.Join(words[:len(words)-1], " "), false},
+				{"extra", expected[key] + " unexpected", false},
+				{"duplicate", expected[key] + " " + words[0], false},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					got, err := t19CompareProperties([]byte(key+"="+tc.actual+"\n"), expected)
+					if (err == nil) != tc.accept {
+						t.Fatalf("accept=%t, want %t: %v", err == nil, tc.accept, err)
+					}
+					if err != nil && !strings.Contains(err.Error(), key) {
+						t.Fatalf("refused for an unrelated reason: %v", err)
+					}
+					if got[key] != tc.actual {
+						t.Fatalf("observed evidence changed: %q", got[key])
+					}
+				})
+			}
+		})
 	}
 }
 

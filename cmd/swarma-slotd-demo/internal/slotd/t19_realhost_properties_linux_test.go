@@ -54,8 +54,9 @@ func t19PropertyBytes(v map[string]string) []byte {
 	return []byte(b.String())
 }
 
-// The projection is closed. Values are compared byte-for-byte, including list
-// order and whitespace; no sameWords or duration normalization can widen it.
+// The projection is closed. The production verifier's set-valued rows use its
+// own sameWords comparison (including duplicate counts); scalar values retain
+// byte comparison. The returned evidence preserves the actual rendered values.
 // systemd omits empty EnvironmentFiles even with --all; a separate query below
 // proves the typed empty D-Bus array, so absence can never stand for empty.
 func t19CompareProperties(raw []byte, expected map[string]string) (map[string]string, error) {
@@ -77,6 +78,13 @@ func t19CompareProperties(raw []byte, expected map[string]string) (map[string]st
 		v, ok := got[k]
 		if !ok {
 			return got, errors.New("missing property: " + k)
+		}
+		switch k {
+		case "BindPaths", "TemporaryFileSystem", "BindReadOnlyPaths", "RestrictAddressFamilies", "IPAddressDeny", "IPAddressAllow":
+			if !sameWords(v, strings.Fields(want)) {
+				return got, fmt.Errorf("property set mismatch: %s: got %q want %q", k, v, want)
+			}
+			continue
 		}
 		if v != want {
 			return got, fmt.Errorf("property byte mismatch: %s: got %q want %q", k, v, want)

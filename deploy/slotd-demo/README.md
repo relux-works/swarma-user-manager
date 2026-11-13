@@ -302,10 +302,13 @@ experiments or a claim that a new harness commit ran hosted root tests.
 T19.13 reads the actual slot unit that the installed daemon started. Its closed
 [property template](../../cmd/swarma-slotd-demo/internal/slotd/testdata/t19-realhost/unit-properties.json)
 covers **every property requested by the literal production start vector**, plus
-identity, ownership, environment and state readback. Actual property values are
-diffed byte for byte, including list order/whitespace; missing, additional,
-duplicate or changed rows fail. The report retains expected and actual values.
-Only row ordering is canonicalized for the diff. CPU quota and runtime use the
+identity, ownership, environment and state readback. `BindPaths`,
+`TemporaryFileSystem`, `BindReadOnlyPaths`, `RestrictAddressFamilies`,
+`IPAddressDeny` and `IPAddressAllow` use the production verifier's `sameWords`
+comparison: word order and separating whitespace do not matter, but missing,
+additional or duplicate words fail. All other values are diffed byte for byte.
+Missing, additional or duplicate rows fail. The report retains expected and
+actual values, including the observed word order. CPU quota and runtime use the
 raw D-Bus `t MICROSECONDS` values so human duration formatting cannot weaken or
 break byte comparison. Empty EnvironmentFiles is
 proved separately with D-Bus's typed empty `a(sb)` array, not inferred from an
@@ -359,6 +362,11 @@ under `/absolute/verified/` on the host. The following is an **operator-run root
 shell**, not something the producer executes. Supply the authenticated installed
 daemon digest, not a digest trusted merely because it was computed locally.
 `--prepare` creates a new file; the operator reviews it before the next block.
+Run the prepare and run blocks in **one uninterrupted SSH/root shell session**,
+including the policy-review interval. With `Linger=no`, the owner's systemd user
+manager can restart between SSH sessions and change its abstract bus name.
+The harness then correctly refuses the changed inventory; a prepared spec must
+not be reused after reconnecting. Keep the same shell open through both blocks.
 
 ```sh
 sudo bash
