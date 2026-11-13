@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net"
 	"os"
 	"reflect"
@@ -224,10 +225,11 @@ func TestT19StrictPropertyTemplate(t *testing.T) {
 		t.Fatalf("systemd 259.9 deny-set order refused: %v", err)
 	}
 	for name, changed := range map[string][]byte{
-		"extra":      append(slices.Clone(raw), []byte("NewProperty=yes\n")...),
-		"missing":    bytes.Replace(raw, []byte("PrivateIPC=yes\n"), nil, 1),
-		"duplicate":  append(slices.Clone(raw), []byte("PrivateIPC=yes\n")...),
-		"whitespace": bytes.Replace(raw, []byte("PrivateIPC=yes"), []byte("PrivateIPC=yes "), 1),
+		"extra":                    append(slices.Clone(raw), []byte("NewProperty=yes\n")...),
+		"missing":                  bytes.Replace(raw, []byte("PrivateIPC=yes\n"), nil, 1),
+		"duplicate":                append(slices.Clone(raw), []byte("PrivateIPC=yes\n")...),
+		"whitespace":               bytes.Replace(raw, []byte("PrivateIPC=yes"), []byte("PrivateIPC=yes "), 1),
+		"BindPaths trailing space": bytes.Replace(raw, []byte("BindPaths="+expected["BindPaths"]+"\n"), []byte("BindPaths="+expected["BindPaths"]+" \n"), 1),
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, err := t19CompareProperties(changed, expected); err == nil {
@@ -256,12 +258,64 @@ func TestT19StrictPropertyTemplate(t *testing.T) {
 	}
 }
 
-// Every row compared with sameWords by the production verifier accepts an equal
-// reordered list, but refuses missing, extra and duplicate words. Scalar rows
+// The admitted v0 full template must agree with production: exact BindPaths
+// passes, while a trailing space or tab fails in both consumers. Only duration
+// display is adapted from typed D-Bus bytes for production's existing parser.
+func TestReviewPR87V0BindPathsParity(t *testing.T) {
+	p := t19ContractPolicy(t)
+	if p.Version != 0 {
+		t.Fatal("parity fixture must exercise the admitted v0 branch")
+	}
+	id, err := p.identity("100")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := durableRecord{Identity: id, UnitToken: strings.Repeat("a", 32), UnitRuntimeUS: 123456789}
+	expected, err := t19ExpectedProperties(p, r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name, suffix string
+		accept       bool
+	}{
+		{"exact", "", true},
+		{"trailing space", " ", false},
+		{"trailing tab", "\t", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			actual := maps.Clone(expected)
+			actual["BindPaths"] += tc.suffix
+			production := maps.Clone(actual)
+			for _, key := range []string{"CPUQuotaPerSecUSec", "RuntimeMaxUSec"} {
+				production[key] = strings.TrimPrefix(production[key], "t ") + "us"
+			}
+			prodErr := verifyUnitProperties(production, p, &r)
+			_, hostErr := t19CompareProperties(t19PropertyBytes(actual), expected)
+			if tc.accept {
+				if prodErr != nil || hostErr != nil {
+					t.Fatalf("exact v0 control refused: production=%v harness=%v", prodErr, hostErr)
+				}
+				return
+			}
+			if prodErr == nil || prodErr.Error() != "installed unit property mismatch: BindPaths" {
+				t.Fatalf("production did not refuse the BindPaths byte change: %v", prodErr)
+			}
+			if hostErr == nil {
+				t.Fatal("harness admitted production-v0 byte-exact BindPaths change")
+			}
+			if !strings.HasPrefix(hostErr.Error(), "property byte mismatch: BindPaths:") {
+				t.Fatalf("harness refused for an unrelated reason: %v", hostErr)
+			}
+		})
+	}
+}
+
+// Each admitted v0 row compared with sameWords by production accepts an equal
+// reordered list, but refuses missing, extra and duplicate words. Other rows
 // retain byte comparison; the raw observed order remains available as evidence.
 func TestT19PropertySetSemantics(t *testing.T) {
 	for key, words := range map[string][]string{
-		"BindPaths":               {"/home/slot:/home/slot:rbind", "/journal:/journal:rbind"},
 		"TemporaryFileSystem":     {"/run:ro", "/var:ro"},
 		"BindReadOnlyPaths":       {"/etc/passwd:/etc/passwd:rbind", "/etc/group:/etc/group:rbind"},
 		"RestrictAddressFamilies": {"AF_UNIX", "AF_INET", "AF_INET6"},
