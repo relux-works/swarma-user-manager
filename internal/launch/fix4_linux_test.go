@@ -81,10 +81,11 @@ func TestProcNativeNonleader(t *testing.T) {
 	release := make(chan struct{})
 	exited := make(chan struct{})
 	go func() {
-		runtime.LockOSThread()
-		defer runtime.UnlockOSThread()
-		tid <- unix.Gettid()
-		<-release
+		e := withNonleaderThread(func() error { tid <- unix.Gettid(); <-release; return nil })
+		if e != nil {
+			tid <- 0
+			t.Error(e)
+		}
 		close(exited)
 	}()
 	id := <-tid
@@ -152,20 +153,16 @@ func TestThreadSelfCredentials(t *testing.T) {
 		}
 		done := make(chan error)
 		go func() {
-			runtime.LockOSThread() // terminated with this goroutine; never reuses an NNP thread.
-			if unix.Gettid() == os.Getpid() {
-				done <- fmt.Errorf("nonleader fixture failed")
-				return
-			}
-			if e := unix.Prctl(unix.PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0); e != nil {
-				done <- e
-				return
-			}
-			status, e := threadStatus()
-			if e == nil && !strings.Contains(string(status), "NoNewPrivs:\t1") {
-				e = fmt.Errorf("exec thread credentials read from leader")
-			}
-			done <- e
+			done <- withNonleaderThread(func() error {
+				if e := unix.Prctl(unix.PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0); e != nil {
+					return e
+				}
+				status, e := threadStatus()
+				if e == nil && !strings.Contains(string(status), "NoNewPrivs:\t1") {
+					e = fmt.Errorf("exec thread credentials read from leader")
+				}
+				return e
+			})
 		}()
 		if e := <-done; e != nil {
 			t.Fatal(e)
@@ -295,4 +292,27 @@ func guardSource(path string) ([]byte, error) {
 		}
 	}
 	return os.ReadFile(path)
+}
+
+// Only disposable test goroutines call this helper. Keep a scheduler-selected
+// leader untouched and occupied while a second locked worker runs the witness.
+// The selected nonleader stays locked and is retired with its goroutine, so a
+// thread carrying NNP never returns to the pool.
+func withNonleaderThread(fn func() error) error {
+	runtime.LockOSThread()
+	if unix.Gettid() != os.Getpid() {
+		return fn()
+	}
+	done := make(chan error)
+	go func() {
+		runtime.LockOSThread()
+		if unix.Gettid() == os.Getpid() {
+			done <- fmt.Errorf("nonleader fixture failed")
+			return
+		}
+		done <- fn()
+	}()
+	e := <-done
+	runtime.UnlockOSThread() // leader was never altered and does not execute fn.
+	return e
 }
