@@ -6,6 +6,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"time"
 
 	"github.com/relux-works/swarma-user-manager/internal/manager"
@@ -306,7 +307,7 @@ func (l Launcher) Run(ctx context.Context, raw []byte, in manager.Invocation) ma
 	}
 	// D5a: zero processes over the real, effective and saved UID; a failed or
 	// partial scan keeps the launch closed.
-	absence, e := ProveAbsence(ctx, d.Scanner, uint32(account.UID))
+	absence, e := ProveAbsence(ctx, limitScanner(d.Scanner, gate.Stop.MaxProcesses), uint32(account.UID))
 	if e != nil || !absence.Proved {
 		return refused(id, fail("uid_not_clean"))
 	}
@@ -358,6 +359,9 @@ func (l Launcher) Run(ctx context.Context, raw []byte, in manager.Invocation) ma
 		return refused(id, e)
 	}
 	// From here on the receipt is durable evidence of an attempted start.
+	// Never unlock on this path: NNP and execveat are thread-local. On refusal
+	// the launcher exits; Go terminates a locked test goroutine's OS thread.
+	runtime.LockOSThread()
 	if e := d.Drop(uint32(account.UID), uint32(account.GID)); e != nil {
 		return refused(id, fail("privilege_drop_failed"))
 	}

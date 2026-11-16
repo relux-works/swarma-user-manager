@@ -3,6 +3,8 @@
 package launch
 
 import (
+	"context"
+	"github.com/relux-works/swarma-user-manager/internal/manager"
 	"os"
 	"testing"
 )
@@ -149,5 +151,137 @@ func TestExecStopRefusesRetiringGeneration(t *testing.T) {
 	wantCode(t, f.stop(f.stopRequest("stop-1", nil)), "generation_not_active")
 	if len(f.effects().Stops) != 0 {
 		t.Fatal("stop admitted on a retiring generation")
+	}
+}
+
+// Claim: a completed stop replays its recorded result/current state after
+// retirement, without signalling; a fresh stop remains forbidden there.
+func TestExecStopTerminalReplayAfterRetirement(t *testing.T) {
+	f := newFixture(t)
+	f.launched()
+	first := f.stop(f.stopRequest("stop-1", nil))
+	if !first.OK {
+		t.Fatal(errCode(first))
+	}
+	f.appendJournal(fixtureGen, "retiring")
+	signals := len(f.proc.signals)
+	r := f.stop(f.stopRequest("stop-1", nil))
+	if !r.OK || r.State != "retiring" || r.Result["stopped_at"] != first.Result["stopped_at"] || len(f.proc.signals) != signals {
+		t.Fatal("terminal replay fenced or signalled", errCode(r), r.State)
+	}
+	wantCode(t, f.stop(f.stopRequest("stop-new", nil)), "generation_not_active")
+	wantCode(t, f.stop(f.stopRequest("stop-1", map[string]any{"grace_seconds": int64(2)})), "request_id_conflict")
+}
+
+// Claim: new stop requires an active caller generation, while an already
+// admitted narrowing stop continues and terminal replay survives caller lapse.
+func TestExecStopCallerGeneration(t *testing.T) {
+	for _, mode := range []string{"valid", "retiring", "removed", "stale", "continuation", "replay"} {
+		t.Run(mode, func(t *testing.T) {
+			f := newFixture(t)
+			f.launched()
+			if mode == "continuation" {
+				f.proc.tasks[1] = stationTask(1)
+				f.proc.immortal[1] = true
+				wantCode(t, f.stop(f.stopRequest("stop-1", nil)), "processes_remain")
+				delete(f.proc.tasks, 1)
+			}
+			if mode == "replay" {
+				if r := f.stop(f.stopRequest("stop-1", nil)); !r.OK {
+					t.Fatal(errCode(r))
+				}
+			}
+			if mode != "valid" {
+				f.appendIdentity(f.caller.UID, f.caller.Generation, "retiring")
+				if mode == "removed" || mode == "stale" {
+					f.appendIdentity(f.caller.UID, f.caller.Generation, "removed")
+				}
+				if mode == "stale" {
+					g := "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+					f.appendIdentity(f.caller.UID, g, "creating")
+					f.appendIdentity(f.caller.UID, g, "active")
+				}
+			}
+			r := f.stop(f.stopRequest("stop-1", nil))
+			if mode == "valid" || mode == "continuation" || mode == "replay" {
+				if !r.OK {
+					t.Fatal("authorized narrowing control refused", errCode(r))
+				}
+			} else {
+				wantCode(t, r, "generation_not_active")
+				if len(f.effects().Stops) != 0 || len(f.proc.signals) != 0 {
+					t.Fatal("inactive caller admitted stop")
+				}
+			}
+		})
+	}
+}
+
+type callbackScanner struct {
+	Scanner
+	once func()
+}
+
+func (s *callbackScanner) Scan(ctx context.Context) ([]Task, error) {
+	if s.once != nil {
+		f := s.once
+		s.once = nil
+		f()
+	}
+	return s.Scanner.Scan(ctx)
+}
+
+// Claim: the reloaded snapshot re-resolves the target launch by generation
+// and receipt, leaving unrelated launches intact and refusing missing/changed
+// targets. The injected snapshot models storage replacement while unlocked.
+func TestExecStopReloadLaunchIndex(t *testing.T) {
+	for _, mode := range []string{"unchanged", "reordered", "missing", "changed-receipt"} {
+		t.Run(mode, func(t *testing.T) {
+			f := newFixture(t)
+			f.launched()
+			scanner := &callbackScanner{Scanner: f.proc}
+			scanner.once = func() {
+				state := f.effects()
+				switch mode {
+				case "reordered":
+					other := state.Launches[0]
+					other.Generation = "22222222222222222222222222222222"
+					other.RequestID = "launch-other"
+					other.ExecutionID = "EX-other"
+					state.Launches = append([]LaunchEffect{other}, state.Launches...)
+				case "missing":
+					state.Launches = []LaunchEffect{}
+				case "changed-receipt":
+					state.Launches[0].ExecutionID = "EX-changed"
+				}
+				b, e := effectBytes(state)
+				if e != nil {
+					t.Fatal(e)
+				}
+				if e := manager.WriteProtected(f.store.dir, "effects.json", b, f.owner); e != nil {
+					t.Fatal(e)
+				}
+			}
+			d := StopDeps{Policy: f.policy, Authority: f.authority, Journal: f.journal, Store: f.store, Scanner: scanner, Signaller: f.proc, Stamp: func() string { return "2026-11-16T00:00:00Z" }}
+			r := HandleStop(t.Context(), f.stopRequest("stop-1", nil), f.invocation(f.caller), d)
+			if mode == "missing" || mode == "changed-receipt" {
+				wantCode(t, r, "state_contradictory")
+				if f.effects().Stops[0].Phase != PhaseAdmitted {
+					t.Fatal("contradictory reload confirmed stop")
+				}
+			} else {
+				if !r.OK {
+					t.Fatal("reloaded valid stop refused", errCode(r))
+				}
+				state := f.effects()
+				i, _ := state.Launch(fixtureGen)
+				if state.Launches[i].Outcome != OutcomeStopped {
+					t.Fatal("target launch not resolved")
+				}
+				if mode == "reordered" && state.Launches[0].Phase != PhaseAdmitted {
+					t.Fatal("unrelated launch marked stopped")
+				}
+			}
+		})
 	}
 }

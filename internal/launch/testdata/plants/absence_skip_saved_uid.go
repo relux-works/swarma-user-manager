@@ -9,6 +9,7 @@ import "context"
 // effective, saved, filesystem.
 type Task struct {
 	PID       int
+	TID       int // thread ID; PID remains the thread-group signal target.
 	StartTime int64
 	UIDs      [4]uint32
 }
@@ -52,4 +53,32 @@ func ProveAbsence(ctx context.Context, s Scanner, uid uint32) (Absence, error) {
 	}
 	out.Proved = len(out.Present) == 0
 	return out, nil
+}
+
+// boundedScanner enforces the installed complete-inventory budget for seams;
+// native scanners additionally enforce it while enumerating, before allocation.
+type boundedScanner struct {
+	Scanner
+	max int
+}
+
+func (s boundedScanner) Scan(ctx context.Context) ([]Task, error) {
+	tasks, e := s.Scanner.Scan(ctx)
+	if e != nil {
+		return nil, e
+	}
+	if len(tasks) > s.max {
+		return nil, fail("state_unavailable")
+	}
+	return tasks, nil
+}
+func limitScanner(s Scanner, max int64) Scanner {
+	if native, ok := s.(*ProcScanner); ok {
+		clone := *native
+		if int(max) < clone.max {
+			clone.max = int(max)
+		}
+		return &clone
+	}
+	return boundedScanner{Scanner: s, max: int(max)}
 }

@@ -32,7 +32,10 @@ the design's "M0 launch policy pinned to that exact UID and generation" seen
 from the receiver side. It pins the dispatcher principal, UID, generation,
 one `execution_id`/`epoch`, the approved executor id, the plan SHA-256, the
 exec-profile id plus body digest, a same-boot CLOCK_BOOTTIME validity limit
-and the stop budgets (`poll_ms`, `final_ms`, `max_processes`). Without it
+and the stop budgets (`poll_ms`, `final_ms`, `max_processes`). The last is an
+inventory-work budget, not an OS process ceiling: it bounds complete process and
+thread inventories, including the final stop scan and pre-launch cleanliness.
+Overflow refuses rather than truncating the inventory. Without it
 every launch and stop refuses `operation_unsupported`. The gate is installed
 once through `launch.ProvisionGate` (installer path; never replaced) and
 invalidated through `launch.InvalidateStart` (close-before-publish Rv, under
@@ -129,14 +132,57 @@ its stop obligation and is resolved only by `exec.stop`.
 
 ## Stop order (helper §4.7)
 
-Terminal replay without signalling; otherwise the requested `execution_id`
+Terminal replay without signalling precedes active-generation/live-execution
+fences and returns the current generation state, including `retiring`. New stop
+admission requires the caller's active generation; already admitted narrowing
+work may continue after that generation lapses. Otherwise the requested `execution_id`
 must be the generation's latest receipt; admitted effect persisted; lock
 released; TERM every holder, original grace, KILL survivors and newcomers,
 zero holders through `quiet_ms`, inside `final_ms`; lock reacquired; latest
 receipt unchanged; final complete scan; terminal result
 `{execution_id,stopped_at,receipt:{signalled,killed,remaining:0}}`.
 `processes_remain` and unreadable scans leave the effect pending under the
-same ID and exact arguments. Stop deletes no home, receipt or evidence.
+same ID and exact arguments. The post-wait snapshot re-resolves both stop and
+launch identities, including the receipt's epoch, before updating either effect.
+Stop deletes no home, receipt or evidence.
+
+## Native boundary and runtime assumptions
+
+The helper and launcher use the same production backend constructor, protected
+qualification environment and core evidence store. Qualification runs before
+start admission; neither a nil environment nor a missing record can qualify.
+
+From before privilege drop through committed-start persistence and `execveat`,
+the launcher goroutine is locked to one OS thread and never unlocks on that
+path. Standard-library `Setgroups`, `Setresgid` and `Setresuid` provide Go's
+process-wide credential semantics. No-new-privileges is set on the locked thread.
+Immediately before the syscall, `/proc/thread-self/status` must show all four
+UID/GID slots at the dropped identity, empty supplementary groups, empty
+permitted/effective capabilities and `NoNewPrivs: 1`. The separately opted-in
+native witness records those fields after eight real execs; a skipped witness
+is not native qualification.
+
+The scrub pins both opened enumeration directories with `Fstatfs` to procfs,
+rejects close failures other than `EBADF`, then inventories again after reserving
+FD3. Only 0–3 and exact CLOEXEC epoll/eventfd kinds may remain, apart from the
+inventory descriptor itself. This is a local snapshot; each later trusted open
+must still use CLOEXEC. The calling dispatcher must supply blocking standard
+descriptors: a runtime poller allocated on FD3 refuses. The stdio-only fixture
+covers zero inherited extra descriptors beside occupied-FD3 negatives.
+
+The in-process scrub deliberately closes Go's retained cgroup CPU-file handle.
+The reviewed Go 1.26 runtime uses read-only positional reads at offset zero and
+tolerates read/parse errors (`internal/runtime/cgroup/cgroup_linux.go`); subsequent
+reads may address a reused descriptor. This dependency is accepted for this
+slice, not an exemption for CPU files, and must be reassessed with the deployed
+toolchain. A CLOEXEC poller created inside the process is indistinguishable by
+provenance; only its exact kernel kind/flag is allowed, and it cannot survive
+exec. Procfs task visibility, namespaces and the actual root transition still
+require native deployment qualification.
+
+Approved executors for this slice must be ELF binaries. A `#!` script through a
+CLOEXEC retained descriptor can fail with `ENOENT` after committed start, leaving
+the debit spent. No script support or pre-admission ELF validator is claimed.
 
 ## Tests and tools
 
@@ -159,7 +205,7 @@ inheritance. Go can create its own descriptors before the helper runs: the
 initial snapshot admits only exact CLOEXEC epoll/eventfd kinds and read-only
 CPU-limit files (`cpu.max` on cgroup v2, quota/period files on cgroup v1) whose
 kernel filesystem type also matches. A regular file with the same name is
-rejected. No descriptor-count allowance is used. Controls pass descriptors 3..8 and 128
+rejected. No descriptor-count allowance is used. Controls pass only stdio, descriptors 3..8 and 128
 inherited descriptors through the actual scrub. Refusal cases explicitly install
 a close-on-exec internal epoll handle at FD3, independent of runtime allocation
 order, and check that refusal retains it while scrubbing other inherited handles.

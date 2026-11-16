@@ -21,7 +21,7 @@ var (
 	errChanged = errors.New("process incarnation changed")
 )
 
-// ProcScanner enumerates a pinned real procfs root. Every live PID entry must
+// ProcScanner enumerates a pinned real procfs root. Every live thread entry must
 // be readable; a vanished PID is skipped. The private read seam exists only
 // for bounded fault plants in tests; production never configures it.
 type ProcScanner struct {
@@ -30,7 +30,7 @@ type ProcScanner struct {
 	read func(dir *os.File, name string) ([]byte, error)
 }
 
-// OpenProcScanner pins /proc and bounds one scan to max PID entries.
+// OpenProcScanner pins /proc and bounds one complete scan to max process/thread entries.
 func OpenProcScanner(max int) (*ProcScanner, error) {
 	if max < 1 {
 		return nil, fail("qualification_required")
@@ -73,18 +73,77 @@ func listPIDs(root *os.File, max int) ([]string, error) {
 		return nil, e
 	}
 	d := os.NewFile(uintptr(fd), "proc-list")
-	names, e := d.Readdirnames(max + 1)
-	ce := d.Close()
-	if e != nil && !errors.Is(e, io.EOF) {
+	defer d.Close()
+	out := []string{}
+	for {
+		names, e := d.Readdirnames(64)
+		if e != nil && !errors.Is(e, io.EOF) {
+			return nil, e
+		}
+		for _, name := range names {
+			n, e := strconv.Atoi(name)
+			if e != nil || n <= 0 {
+				continue
+			}
+			out = append(out, name)
+			if len(out) > max {
+				return nil, fail("state_unavailable")
+			}
+		}
+		if errors.Is(e, io.EOF) {
+			break
+		}
+	}
+	if e := d.Close(); e != nil {
 		return nil, e
 	}
-	if ce != nil {
-		return nil, ce
+	return out, nil
+}
+
+// threadRoot pins the process and its task directory without following links.
+func (p *ProcScanner) threadRoot(name string) (*os.File, error) {
+	fd, e := unix.Openat(int(p.root.Fd()), name, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+	if e != nil {
+		return nil, e
 	}
-	if len(names) > max {
-		return nil, fail("state_unavailable")
+	defer unix.Close(fd)
+	tasks, e := unix.Openat(fd, "task", unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+	if e != nil {
+		return nil, e
 	}
-	return names, nil
+	return os.NewFile(uintptr(tasks), "tasks"), nil
+}
+func (p *ProcScanner) readTask(root *os.File, name string, pid int) (Task, error) {
+	tid, e := strconv.Atoi(name)
+	if e != nil || tid <= 0 {
+		return Task{}, fail("state_unavailable")
+	}
+	fd, e := unix.Openat(int(root.Fd()), name, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+	if e != nil {
+		if vanished(e) {
+			return Task{}, errGone
+		}
+		return Task{}, e
+	}
+	dir := os.NewFile(uintptr(fd), name)
+	defer dir.Close()
+	status, e := p.read(dir, "status")
+	if e != nil {
+		if vanished(e) {
+			return Task{}, errGone
+		}
+		return Task{}, e
+	}
+	stat, e := p.read(dir, "stat")
+	if e != nil {
+		if vanished(e) {
+			return Task{}, errGone
+		}
+		return Task{}, e
+	}
+	t, e := parseTask(pid, status, stat)
+	t.TID = tid
+	return t, e
 }
 
 // task reads one PID directory. errGone marks a PID that vanished during the
@@ -128,20 +187,45 @@ func (p *ProcScanner) Scan(ctx context.Context) ([]Task, error) {
 	}
 	out := []Task{}
 	for _, name := range names {
-		if _, e := strconv.Atoi(name); e != nil {
-			continue
-		}
-		if e := ctx.Err(); e != nil {
-			return nil, fail("state_unavailable")
-		}
-		t, e := p.task(name)
-		if errors.Is(e, errGone) {
+		pid, _ := strconv.Atoi(name)
+		tasks, e := p.threadRoot(name)
+		if vanished(e) {
 			continue
 		}
 		if e != nil {
 			return nil, fail("state_unavailable")
 		}
-		out = append(out, t)
+		tids, e := listPIDs(tasks, p.max-len(out))
+		if e != nil {
+			tasks.Close()
+			if vanished(e) {
+				continue
+			}
+			return nil, fail("state_unavailable")
+		}
+		// A live process with an empty/unreadable task inventory is not absence.
+		if len(tids) == 0 {
+			tasks.Close()
+			return nil, fail("state_unavailable")
+		}
+		for _, tid := range tids {
+			if ctx.Err() != nil {
+				tasks.Close()
+				return nil, fail("state_unavailable")
+			}
+			t, e := p.readTask(tasks, tid, pid)
+			if errors.Is(e, errGone) {
+				continue
+			}
+			if e != nil {
+				tasks.Close()
+				return nil, fail("state_unavailable")
+			}
+			out = append(out, t)
+		}
+		if tasks.Close() != nil {
+			return nil, fail("state_unavailable")
+		}
 	}
 	return out, nil
 }
@@ -209,7 +293,20 @@ func (s ProcSignaller) Signal(t Task, sig unix.Signal) (err error) {
 		return e
 	}
 	defer func() { err = errors.Join(err, unix.Close(fd)) }()
-	now, e := s.Scanner.task(strconv.Itoa(t.PID))
+	var now Task
+	if t.TID == 0 {
+		now, e = s.Scanner.task(strconv.Itoa(t.PID))
+	} else {
+		var root *os.File
+		root, e = s.Scanner.threadRoot(strconv.Itoa(t.PID))
+		if vanished(e) {
+			return errGone
+		}
+		if e == nil {
+			now, e = s.Scanner.readTask(root, strconv.Itoa(t.TID), t.PID)
+			root.Close()
+		}
+	}
 	if e != nil {
 		return e
 	}
@@ -269,13 +366,13 @@ func DropPrivileges(uid, gid uint32) error {
 	if uid == 0 || gid == 0 {
 		return fail("privilege_drop_failed")
 	}
-	if e := unix.Setgroups([]int{}); e != nil {
+	if e := syscall.Setgroups([]int{}); e != nil {
 		return fail("privilege_drop_failed")
 	}
-	if e := unix.Setresgid(int(gid), int(gid), int(gid)); e != nil {
+	if e := syscall.Setresgid(int(gid), int(gid), int(gid)); e != nil {
 		return fail("privilege_drop_failed")
 	}
-	if e := unix.Setresuid(int(uid), int(uid), int(uid)); e != nil {
+	if e := syscall.Setresuid(int(uid), int(uid), int(uid)); e != nil {
 		return fail("privilege_drop_failed")
 	}
 	if e := VerifyIdentity(uid, gid); e != nil {
@@ -303,7 +400,7 @@ func VerifyIdentity(uid, gid uint32) error {
 	if e := unix.Setuid(0); e == nil {
 		return fail("privilege_drop_failed")
 	}
-	status, e := os.ReadFile("/proc/self/status")
+	status, e := threadStatus()
 	if e != nil {
 		return fail("privilege_drop_failed")
 	}
@@ -325,6 +422,61 @@ func VerifyIdentity(uid, gid uint32) error {
 	return nil
 }
 
+// threadStatus reads the calling (exec) thread, never the thread-group leader.
+func threadStatus() ([]byte, error) { return os.ReadFile("/proc/thread-self/status") }
+
+// VerifyExecIdentity rechecks all four ID slots, empty groups, capabilities and
+// NNP on the calling thread immediately before execveat.
+func VerifyExecIdentity(uid, gid uint32) error {
+	if uid == 0 || gid == 0 {
+		return fail("privilege_drop_failed")
+	}
+	status, e := threadStatus()
+	if e != nil {
+		return fail("privilege_drop_failed")
+	}
+	return verifyExecStatus(status, uid, gid)
+}
+func verifyExecStatus(status []byte, uid, gid uint32) error {
+	fields := map[string][]string{}
+	for _, line := range strings.Split(string(status), "\n") {
+		v := strings.Fields(line)
+		if len(v) == 0 {
+			continue
+		}
+		if _, found := fields[v[0]]; found {
+			return fail("privilege_drop_failed")
+		}
+		fields[v[0]] = v[1:]
+	}
+	for key, id := range map[string]uint32{"Uid:": uid, "Gid:": gid} {
+		v := fields[key]
+		if len(v) != 4 {
+			return fail("privilege_drop_failed")
+		}
+		for _, value := range v {
+			if value != strconv.FormatUint(uint64(id), 10) {
+				return fail("privilege_drop_failed")
+			}
+		}
+	}
+	groups, found := fields["Groups:"]
+	if !found || len(groups) != 0 {
+		return fail("privilege_drop_failed")
+	}
+	for _, key := range []string{"CapPrm:", "CapEff:"} {
+		v := fields[key]
+		if len(v) != 1 || len(v[0]) != 16 || strings.Trim(v[0], "0") != "" {
+			return fail("privilege_drop_failed")
+		}
+	}
+	nnp := fields["NoNewPrivs:"]
+	if len(nnp) != 1 || nnp[0] != "1" {
+		return fail("privilege_drop_failed")
+	}
+	return nil
+}
+
 // ExecVerified replaces this process with the retained verified executable
 // through execveat(fd, "", argv, envp, AT_EMPTY_PATH). It returns only on
 // failure.
@@ -340,6 +492,9 @@ func ExecVerified(fd int, argv, env []string) error {
 	empty, e := syscall.BytePtrFromString("")
 	if e != nil {
 		return fail("backend_failed")
+	}
+	if e := VerifyExecIdentity(uint32(os.Getuid()), uint32(os.Getgid())); e != nil {
+		return e
 	}
 	_, _, errno := unix.Syscall6(unix.SYS_EXECVEAT, uintptr(fd), uintptr(unsafe.Pointer(empty)), uintptr(unsafe.Pointer(&argvp[0])), uintptr(unsafe.Pointer(&envp[0])), uintptr(unix.AT_EMPTY_PATH), 0)
 	_ = errno

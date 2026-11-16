@@ -31,15 +31,47 @@ const (
 // runtime poller created for a nonblocking inherited stdin): the plan would
 // otherwise clobber an internal handle, so the launch is refused instead.
 func ScrubDescriptors() (Placeholder, error) {
-	fd, e := unix.Open("/proc/self/fd", unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0)
+	return scrubDescriptors("/proc/self/fd", unix.Fstatfs, unix.Close, nil)
+}
+
+// The private syscall seams permit bounded faults in disposable subprocesses.
+// Both walks authenticate the opened enumeration descriptor, not a pathname.
+func fdDirectory(path string, statfs func(int, *unix.Statfs_t) error) (*os.File, error) {
+	fd, e := unix.Open(path, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0)
 	if e != nil {
-		return Placeholder{}, fail("request_invalid")
+		return nil, fail("request_invalid")
 	}
 	d := os.NewFile(uintptr(fd), "fd")
+	var fs unix.Statfs_t
+	if e := statfs(fd, &fs); e != nil || fs.Type != unix.PROC_SUPER_MAGIC {
+		d.Close()
+		return nil, fail("request_invalid")
+	}
+	return d, nil
+}
+func closedOK(e error) bool { return e == nil || errors.Is(e, unix.EBADF) }
+func pollerFD(dir int, name string, n int) bool {
+	buf := make([]byte, 256)
+	l, e := unix.Readlinkat(dir, name, buf)
+	if e != nil || l >= len(buf) {
+		return false
+	}
+	target := string(buf[:l])
+	// CLOEXEC is the inheritance boundary. Only these exact kernel kinds may
+	// remain; an in-process CLOEXEC poller cannot be attributed by provenance.
+	if target != runtimeEpoll && target != runtimeEventfd {
+		return false
+	}
+	flags, e := unix.FcntlInt(uintptr(n), unix.F_GETFD, 0)
+	return e == nil && flags&unix.FD_CLOEXEC != 0
+}
+func scrubDescriptors(path string, statfs func(int, *unix.Statfs_t) error, closeFD func(int) error, beforeAudit func()) (Placeholder, error) {
+	d, e := fdDirectory(path, statfs)
+	if e != nil {
+		return Placeholder{}, e
+	}
 	own := int(d.Fd())
-	// Drain every batch: a single bounded read silently leaves inherited FDs
-	// open once the table exceeds that read's limit. Keep memory bounded, not
-	// the number of descriptors scrubbed.
+	// Drain every batch; memory, not descriptor count, is bounded.
 	for {
 		names, e := d.Readdirnames(64)
 		if e != nil && !errors.Is(e, io.EOF) {
@@ -51,28 +83,25 @@ func ScrubDescriptors() (Placeholder, error) {
 			if e != nil || n <= 2 || n == own {
 				continue
 			}
-			buf := make([]byte, 256)
-			l, e := unix.Readlinkat(fd, name, buf)
-			target := ""
-			if e == nil && l < len(buf) {
-				target = string(buf[:l])
+			if pollerFD(own, name, n) {
+				continue
 			}
-			if target == runtimeEpoll || target == runtimeEventfd {
-				if flags, e := unix.FcntlInt(uintptr(n), unix.F_GETFD, 0); e == nil && flags&unix.FD_CLOEXEC != 0 {
-					continue
-				}
+			if e := closeFD(n); !closedOK(e) {
+				d.Close()
+				return Placeholder{}, fail("request_invalid")
 			}
-			_ = unix.Close(n)
 		}
 		if errors.Is(e, io.EOF) {
 			break
 		}
 	}
-	if d.Close() != nil {
+	if !closedOK(d.Close()) {
 		return Placeholder{}, fail("request_invalid")
 	}
 	var st unix.Stat_t
 	if e := unix.Fstat(3, &st); e == nil {
+		return Placeholder{}, fail("request_invalid")
+	} else if !errors.Is(e, unix.EBADF) {
 		return Placeholder{}, fail("request_invalid")
 	}
 	hold, e := unix.Open("/dev/null", unix.O_RDONLY|unix.O_CLOEXEC, 0)
@@ -86,7 +115,51 @@ func ScrubDescriptors() (Placeholder, error) {
 	if e := unix.Fstat(3, &st); e != nil {
 		return Placeholder{}, fail("request_invalid")
 	}
+	if beforeAudit != nil {
+		beforeAudit()
+	}
+	if e := auditDescriptors(path, statfs); e != nil {
+		return Placeholder{}, e
+	}
 	return Placeholder{Dev: st.Dev, Ino: st.Ino}, nil
+}
+
+// auditDescriptors takes a fresh, procfs-pinned inventory after reservation.
+// Only stdio, our FD3 and CLOEXEC pollers (plus this walk's own FD) may exist.
+func auditDescriptors(path string, statfs func(int, *unix.Statfs_t) error) error {
+	d, err := fdDirectory(path, statfs)
+	if err != nil {
+		return err
+	}
+	own := int(d.Fd())
+	for {
+		names, err := d.Readdirnames(64)
+		if err != nil && !errors.Is(err, io.EOF) {
+			d.Close()
+			return fail("request_invalid")
+		}
+		for _, name := range names {
+			n, err := strconv.Atoi(name)
+			if err != nil {
+				d.Close()
+				return fail("request_invalid")
+			}
+			if n <= 3 || n == own {
+				continue
+			}
+			if !pollerFD(own, name, n) {
+				d.Close()
+				return fail("request_invalid")
+			}
+		}
+		if errors.Is(err, io.EOF) {
+			break
+		}
+	}
+	if !closedOK(d.Close()) {
+		return fail("request_invalid")
+	}
+	return nil
 }
 
 // StagePlan materializes the decoded plan as a sealed memfd and returns a

@@ -4,7 +4,9 @@ package linuxbackend
 
 import (
 	"context"
+	"encoding/json"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -113,7 +115,7 @@ func TestProductionBackendQualification(t *testing.T) {
 // its Qualified method (rather than a no-authority New or a permissive callback).
 func TestProductionEntriesUseQualifiedBackend(t *testing.T) {
 	for _, entry := range []string{"swarma-user-launcher", "swarma-user-manager"} {
-		s, e := os.ReadFile("../../cmd/" + entry + "/main.go")
+		s, e := constructorSource("../../cmd/" + entry + "/main.go")
 		if e != nil {
 			t.Fatal(e)
 		}
@@ -125,4 +127,26 @@ func TestProductionEntriesUseQualifiedBackend(t *testing.T) {
 			t.Fatal("launcher lost production qualifier")
 		}
 	}
+}
+
+// Match source assertions to the compiled Go overlay during bounded plants.
+func constructorSource(path string) ([]byte, error) {
+	if overlay := os.Getenv("SWARMA_GUARD_OVERLAY"); overlay != "" {
+		data, e := os.ReadFile(overlay)
+		if e != nil {
+			return nil, e
+		}
+		var m struct{ Replace map[string]string }
+		if e := json.Unmarshal(data, &m); e != nil {
+			return nil, e
+		}
+		abs, e := filepath.Abs(path)
+		if e != nil {
+			return nil, e
+		}
+		if mapped, ok := m.Replace[abs]; ok {
+			path = mapped
+		}
+	}
+	return os.ReadFile(path)
 }

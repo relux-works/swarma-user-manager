@@ -83,18 +83,6 @@ func HandleStop(ctx context.Context, raw []byte, in manager.Invocation, d StopDe
 		return refused(id, e)
 	}
 	row, ok := view.Generation(r.Args.Generation)
-	latest := false
-	for _, v := range view.Rows {
-		if v.UID == row.UID && v.Generation == row.Generation {
-			latest = true
-		}
-	}
-	if !ok || !latest || row.State != "active" {
-		return refused(id, fail("generation_not_active"))
-	}
-	if row.UID != gate.UID || account.UID != row.UID {
-		return refused(id, fail("state_contradictory"))
-	}
 	effects, e := d.Store.Load()
 	if e != nil {
 		return refused(id, e)
@@ -109,6 +97,23 @@ func HandleStop(ctx context.Context, raw []byte, in manager.Invocation, d StopDe
 			// Terminal replay: recorded result plus current state, no signalling.
 			return manager.Response{ID: r.ID, OK: true, Result: stopResult(s), State: row.State}
 		}
+	}
+	// R-OUTCOME replay precedes live fences. Only a newly admitted stop requires
+	// the caller's generation still active; an admitted narrowing stop continues.
+	if !found && view.Active(caller.UID, caller.Generation) != nil {
+		return refused(id, fail("generation_not_active"))
+	}
+	latest := false
+	for _, v := range view.Rows {
+		if v.UID == row.UID && v.Generation == row.Generation {
+			latest = true
+		}
+	}
+	if !ok || !latest || row.State != "active" {
+		return refused(id, fail("generation_not_active"))
+	}
+	if row.UID != gate.UID || account.UID != row.UID {
+		return refused(id, fail("state_contradictory"))
 	}
 	receipt, present, e := d.Store.LatestReceipt(r.Args.Generation)
 	if e != nil {
@@ -137,7 +142,7 @@ func HandleStop(ctx context.Context, raw []byte, in manager.Invocation, d StopDe
 	held = false
 	// Termination and waits run outside the shared lock.
 	timing := StopTiming{Grace: time.Duration(r.Args.GraceSeconds) * time.Second, Quiet: time.Duration(p.Limits.QuietMS) * time.Millisecond, Poll: time.Duration(gate.Stop.PollMS) * time.Millisecond, Final: time.Duration(gate.Stop.FinalMS) * time.Millisecond}
-	out, stopErr := StopAccount(ctx, d.Scanner, d.Signaller, uint32(account.UID), timing)
+	out, stopErr := StopAccount(ctx, limitScanner(d.Scanner, gate.Stop.MaxProcesses), d.Signaller, uint32(account.UID), timing)
 	unlock, e = d.Store.Lock(ctx, lockWait)
 	if e != nil {
 		return refused(id, e)
@@ -149,6 +154,11 @@ func HandleStop(ctx context.Context, raw []byte, in manager.Invocation, d StopDe
 	}
 	idx, found = effects.Stop(caller.Principal, r.ID)
 	if !found || effects.Stops[idx].Phase != PhaseAdmitted || effects.Stops[idx].Args != r.Args {
+		return refused(id, fail("state_contradictory"))
+	}
+	// Reload invalidates positional indices, including the launch index.
+	li, lfound = effects.Launch(r.Args.Generation)
+	if !lfound || effects.Launches[li].ExecutionID != receipt.ExecutionID || effects.Launches[li].Epoch != receipt.Epoch {
 		return refused(id, fail("state_contradictory"))
 	}
 	s := &effects.Stops[idx]
@@ -171,7 +181,7 @@ func HandleStop(ctx context.Context, raw []byte, in manager.Invocation, d StopDe
 		_ = d.Store.Save(effects)
 		return refused(id, fail("state_conflict"))
 	}
-	absence, e := ProveAbsence(ctx, d.Scanner, uint32(account.UID))
+	absence, e := ProveAbsence(ctx, limitScanner(d.Scanner, gate.Stop.MaxProcesses), uint32(account.UID))
 	if e != nil {
 		_ = d.Store.Save(effects)
 		return refused(id, fail("state_unavailable"))

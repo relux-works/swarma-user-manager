@@ -177,7 +177,7 @@ func TestFDChild(t *testing.T) {
 		return
 	}
 	inherited, err := strconv.Atoi(os.Getenv("LAUNCH_FD_INHERITED"))
-	if err != nil || inherited < 1 || inherited > 128 {
+	if err != nil || inherited < 0 || inherited > 128 {
 		t.Fatal("invalid inherited descriptor count")
 	}
 	if mode == "bootstrap" {
@@ -220,7 +220,84 @@ func TestFDChild(t *testing.T) {
 			t.Fatal("internal FD3 precondition failed", flags, err, target, linkErr)
 		}
 	}
-	p, err := ScrubDescriptors()
+	var p Placeholder
+	fault := os.Getenv("LAUNCH_FD_FAULT")
+	if fault == "" {
+		p, err = ScrubDescriptors()
+	} else {
+		path := "/proc/self/fd"
+		if fault == "masked" {
+			path = t.TempDir()
+			// A masked directory must refuse even with FD3 free and a leak above it.
+			fd, e := unix.Open("/dev/null", unix.O_RDONLY, 0)
+			if e != nil {
+				t.Fatal(e)
+			}
+			if e := unix.Dup3(fd, 63, 0); e != nil {
+				t.Fatal(e)
+			}
+			if fd != 3 {
+				unix.Close(fd)
+			}
+			if e := unix.Close(3); e != nil && e != unix.EBADF {
+				t.Fatal(e)
+			}
+			if _, e := unix.FcntlInt(63, unix.F_GETFD, 0); e != nil {
+				t.Fatal("masked-directory leak plant failed", e)
+			}
+		}
+		calls := 0
+		statfs := func(fd int, st *unix.Statfs_t) error {
+			calls++
+			if fault == "statfs-error" {
+				return unix.EIO
+			}
+			if fault == "audit-pin" && calls == 2 {
+				st.Type = 0
+				return nil
+			}
+			return unix.Fstatfs(fd, st)
+		}
+		fired := false
+		closeFD := func(fd int) error {
+			if !fired && fd == 3 && fault == "close-error" {
+				fired = true
+				if e := unix.Close(fd); e != nil {
+					t.Fatal(e)
+				}
+				return unix.EIO
+			}
+			e := unix.Close(fd)
+			if !fired && fd == 3 && fault == "close-ebadf" {
+				fired = true
+				return unix.EBADF
+			}
+			return e
+		}
+		hook := func() {
+			if strings.HasPrefix(fault, "late-") {
+				var fd int
+				var e error
+				switch fault {
+				case "late-poller":
+					fd, e = unix.EpollCreate1(unix.EPOLL_CLOEXEC)
+				case "late-poller-inherited":
+					fd, e = unix.EpollCreate1(0)
+				case "late-cloexec":
+					fd, e = unix.Open("/dev/null", unix.O_RDONLY|unix.O_CLOEXEC, 0)
+				default:
+					fd, e = unix.Open("/dev/null", unix.O_RDONLY, 0)
+				}
+				if e != nil || fd <= 3 {
+					t.Fatal("late descriptor plant failed", fd, e)
+				}
+			}
+		}
+		p, err = scrubDescriptors(path, statfs, closeFD, hook)
+		if (fault == "close-error" || fault == "close-ebadf") && !fired {
+			t.Fatal("close fault did not fire")
+		}
+	}
 	if err != nil {
 		if code(err) != "request_invalid" {
 			t.Fatalf("unexpected scrub refusal: %v targets=%s", err, snapshotFDs(t))
@@ -236,6 +313,9 @@ func TestFDChild(t *testing.T) {
 		}
 		fmt.Println("refused", code(err))
 		os.Exit(0)
+	}
+	if fault != "" && fault != "close-ebadf" && fault != "late-poller" {
+		t.Fatalf("scrub fault %s not refused", fault)
 	}
 	if os.Getenv("LAUNCH_FD_OCCUPIED") == "1" {
 		t.Fatalf("occupied descriptor 3 not refused: targets=%s", snapshotFDs(t))
@@ -260,12 +340,18 @@ func fdChild(t *testing.T, occupied bool, stdin *os.File, extra ...*os.File) str
 		occupiedFlag = "1"
 	}
 	var st unix.Stat_t
-	if err := unix.Fstat(int(extra[0].Fd()), &st); err != nil {
-		t.Fatal("inherited identity", err)
+	if len(extra) > 0 {
+		if err := unix.Fstat(int(extra[0].Fd()), &st); err != nil {
+			t.Fatal("inherited identity", err)
+		}
 	}
-	target, err := os.Readlink("/proc/self/fd/" + strconv.Itoa(int(extra[0].Fd())))
-	if err != nil {
-		t.Fatal("inherited target", err)
+	target := ""
+	var err error
+	if len(extra) > 0 {
+		target, err = os.Readlink("/proc/self/fd/" + strconv.Itoa(int(extra[0].Fd())))
+		if err != nil {
+			t.Fatal("inherited target", err)
+		}
 	}
 	cmd.Env = append(os.Environ(), "LAUNCH_FD_CHILD=bootstrap",
 		"LAUNCH_FD_INHERITED="+strconv.Itoa(len(extra)),
@@ -313,6 +399,7 @@ func TestScrubDescriptorsInheritedAndOccupied(t *testing.T) {
 		occupied  bool
 	}{
 		{"valid", 2, false},
+		{"stdio-only", 0, false},
 		{"extra-inherited", 6, false},
 		{"many-inherited", 128, false},
 		{"occupied", 1, true},
@@ -426,5 +513,32 @@ func TestVerifyIdentity(t *testing.T) {
 	}
 	if e := VerifyIdentity(uid+1, gid); e == nil || code(e) != "privilege_drop_failed" {
 		t.Fatal("foreign UID accepted")
+	}
+}
+
+// Claim: masked procfs, statfs failure, close EIO and post-walk nonpoller or
+// non-CLOEXEC poller leaks refuse; EBADF and a CLOEXEC poller remain valid.
+func TestScrubFaults(t *testing.T) {
+	null, e := os.Open("/dev/null")
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer null.Close()
+	for _, mode := range []string{"valid", "masked", "statfs-error", "audit-pin", "close-error", "close-ebadf", "late-file", "late-cloexec", "late-poller-inherited", "late-poller"} {
+		t.Run(mode, func(t *testing.T) {
+			fault := mode
+			if mode == "valid" {
+				fault = ""
+			}
+			t.Setenv("LAUNCH_FD_FAULT", fault)
+			got := fdChild(t, false, null, null, null)
+			want := "refused request_invalid"
+			if mode == "valid" || mode == "close-ebadf" || mode == "late-poller" {
+				want = "ok /dev/null 0,1,2,3 true"
+			}
+			if got != want {
+				t.Fatalf("scrub fault %s: got %q want %q", mode, got, want)
+			}
+		})
 	}
 }
