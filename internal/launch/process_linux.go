@@ -104,12 +104,16 @@ func listPIDs(root *os.File, max int) ([]string, error) {
 func (p *ProcScanner) threadRoot(name string) (*os.File, error) {
 	fd, e := unix.Openat(int(p.root.Fd()), name, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
 	if e != nil {
+		if vanished(e) {
+			return nil, errGone
+		}
 		return nil, e
 	}
 	defer unix.Close(fd)
 	tasks, e := unix.Openat(fd, "task", unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
 	if e != nil {
-		return nil, e
+		// The PID was pinned; missing task access is unknown, not process absence.
+		return nil, fail("state_unavailable")
 	}
 	return os.NewFile(uintptr(tasks), "tasks"), nil
 }
@@ -189,7 +193,7 @@ func (p *ProcScanner) Scan(ctx context.Context) ([]Task, error) {
 	for _, name := range names {
 		pid, _ := strconv.Atoi(name)
 		tasks, e := p.threadRoot(name)
-		if vanished(e) {
+		if errors.Is(e, errGone) {
 			continue
 		}
 		if e != nil {
@@ -198,9 +202,6 @@ func (p *ProcScanner) Scan(ctx context.Context) ([]Task, error) {
 		tids, e := listPIDs(tasks, p.max-len(out))
 		if e != nil {
 			tasks.Close()
-			if vanished(e) {
-				continue
-			}
 			return nil, fail("state_unavailable")
 		}
 		// A live process with an empty/unreadable task inventory is not absence.
@@ -299,7 +300,7 @@ func (s ProcSignaller) Signal(t Task, sig unix.Signal) (err error) {
 	} else {
 		var root *os.File
 		root, e = s.Scanner.threadRoot(strconv.Itoa(t.PID))
-		if vanished(e) {
+		if errors.Is(e, errGone) {
 			return errGone
 		}
 		if e == nil {

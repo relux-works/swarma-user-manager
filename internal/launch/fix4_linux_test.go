@@ -18,9 +18,10 @@ import (
 )
 
 // Claim: every nonleader is scanned, including a saved-only UID holder;
-// unreadable live threads fail closed while vanished threads are skipped.
+// unreadable/missing task inventories fail closed while vanished threads and
+// absent process entries are skipped.
 func TestProcThreadInventory(t *testing.T) {
-	for _, mode := range []string{"valid", "saved-nonleader", "unreadable-nonleader", "vanished-nonleader", "bound"} {
+	for _, mode := range []string{"valid", "saved-nonleader", "unreadable-nonleader", "vanished-nonleader", "missing-task-directory", "empty-task-directory", "vanished-process", "bound"} {
 		t.Run(mode, func(t *testing.T) {
 			root := t.TempDir()
 			for _, tid := range []string{"10", "11"} {
@@ -34,6 +35,22 @@ func TestProcThreadInventory(t *testing.T) {
 				}
 				write(t, filepath.Join(d, "status"), []byte("Uid:\t"+uid+"\n"), 0600)
 				write(t, filepath.Join(d, "stat"), []byte(tid+" (worker) S "+strings.Repeat("0 ", 18)+"123 0\n"), 0600)
+			}
+			if mode == "missing-task-directory" || mode == "vanished-process" {
+				target := filepath.Join(root, "10/task")
+				if mode == "vanished-process" {
+					target = filepath.Join(root, "10")
+				}
+				if e := os.RemoveAll(target); e != nil {
+					t.Fatal(e)
+				}
+			}
+			if mode == "empty-task-directory" {
+				for _, tid := range []string{"10", "11"} {
+					if e := os.RemoveAll(filepath.Join(root, "10/task", tid)); e != nil {
+						t.Fatal(e)
+					}
+				}
 			}
 			d, e := os.Open(root)
 			if e != nil {
@@ -57,7 +74,7 @@ func TestProcThreadInventory(t *testing.T) {
 			}
 			a, e := ProveAbsence(t.Context(), p, 30000)
 			switch mode {
-			case "unreadable-nonleader", "bound":
+			case "unreadable-nonleader", "missing-task-directory", "empty-task-directory", "bound":
 				if code(e) != "state_unavailable" || a.Proved {
 					t.Fatal("incomplete thread inventory proved absence", a, e)
 				}
