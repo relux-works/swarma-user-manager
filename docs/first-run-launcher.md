@@ -144,17 +144,23 @@ same ID and exact arguments. Stop deletes no home, receipt or evidence.
 |---|---|---|---|
 | Go | Launch package unit and fixture tests (closed intake, gate, ledgers, R-OBS, D5a, stop loop, launcher pipeline, exec.stop) | `go test -p 1 ./internal/launch -count=1` | Named verdicts; owned temporary roots; no root or host mutation |
 | Go | Race variant | `go test -race -p 1 ./internal/launch -count=1` | Named verdicts |
+| Go | Descriptor plants (red runs) | `go test ./internal/launch -run '^TestDescriptorPlantsTurnRed$' -count=1 -v` | Green controls and three named failures in temporary source overlays |
 | Go | Saved-UID D5a plant (red run) | `go test -p 1 ./internal/launch -run '^TestAbsenceSavedUIDPlantTurnsRed$' -count=1 -v` | Control pass and plant failure logs |
 | Go | Two-account admission through the actual protected journal reader (test-only owner/anchor seam; never a production build tag) | `go test -tags=genjournal_testseam ./internal/launch -run '^TestLauncherProtectedJournalTwoAccounts$' -count=1 -v` | Valid caller/worker pair and exact refusal cases; no root or sudo |
 | Go | Launcher entry refusals | `go test -p 1 ./cmd/swarma-user-launcher -count=1` | Named verdicts; owned subprocesses |
 | Go | Build the launcher | `go build -o .temp/swarma-user-launcher ./cmd/swarma-user-launcher` | Binary in `.temp/` |
 
-The descriptor subprocess fixture explicitly closes unrelated inherited handles
-before the child Go runtime initializes. It still passes two deliberate leaked
-descriptors to the positive scrub control and tests the real occupied-FD3
-refusal with nonblocking stdin. Its observer ignores the already-closed
-`/proc/self/fd` enumeration handle rather than counting a stale directory entry.
-This is test isolation, not a relaxation of product scrubbing.
+The descriptor subprocess fixture re-execs with only the declared inherited
+handles and caller-owned 0–2; an unrelated descriptor is deliberately injected
+outside that set to verify isolation. Controls pass descriptors 3..8 and 128
+inherited descriptors through the actual scrub. Refusal cases explicitly install
+a close-on-exec internal epoll handle at FD3, independent of runtime allocation
+order, and check that refusal retains it while scrubbing other inherited handles.
+The observer ignores vanished enumeration entries and internal close-on-exec
+runtime poller objects above FD3. The product drains the descriptor directory in
+64-entry batches until EOF, so its read size does not cap the scrub. Source
+plants leave FD8 open, stop after one batch, or clobber occupied FD3; each must
+fail its named assertion beside a passing valid control.
 
 ## Known gates and open mappings
 

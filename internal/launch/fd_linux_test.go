@@ -10,37 +10,77 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"syscall"
 	"testing"
 
 	"golang.org/x/sys/unix"
 )
 
-// Test-only subprocess body: scrub, then report descriptor 3 and the table.
-func TestFDChild(t *testing.T) {
-	if os.Getenv("LAUNCH_FD_CHILD") != "1" {
-		return
+// Test-only bootstrap: re-exec with only 0..2 and the declared inherited FDs.
+// Mark unrelated descriptors CLOEXEC only in this disposable process; changing
+// the parent's descriptor flags would interfere with other tests/runtime work.
+func fdChildBootstrap(t *testing.T, inherited int) {
+	t.Helper()
+	entries, err := os.ReadDir("/proc/self/fd")
+	if err != nil {
+		t.Fatal(err)
 	}
-	p, e := ScrubDescriptors()
-	if e != nil {
-		fmt.Println("refused", code(e))
-		os.Exit(0)
+	for _, entry := range entries {
+		n, err := strconv.Atoi(entry.Name())
+		if err != nil {
+			t.Fatal("unexpected descriptor name", err)
+		}
+		if n <= 2 {
+			continue
+		}
+		flags := unix.FD_CLOEXEC
+		if n < 3+inherited {
+			flags = 0
+		}
+		if _, err := unix.FcntlInt(uintptr(n), unix.F_SETFD, flags); err != nil && err != unix.EBADF {
+			t.Fatal("bootstrap descriptor flags", err)
+		}
 	}
-	target, _ := os.Readlink("/proc/self/fd/3")
-	entries, _ := os.ReadDir("/proc/self/fd")
+	env := os.Environ()
+	for i := range env {
+		if strings.HasPrefix(env[i], "LAUNCH_FD_CHILD=") {
+			env[i] = "LAUNCH_FD_CHILD=1"
+		}
+	}
+	if err := unix.Exec(os.Args[0], os.Args, env); err != nil {
+		t.Fatal("bootstrap exec", err)
+	}
+}
+
+func liveFDNames(t *testing.T) string {
+	t.Helper()
+	entries, err := os.ReadDir("/proc/self/fd")
+	if err != nil {
+		t.Fatal("descriptor enumeration failed", err)
+	}
 	names := []int{}
 	for _, entry := range entries {
-		n, e := strconv.Atoi(entry.Name())
-		if e != nil {
-			continue
+		n, err := strconv.Atoi(entry.Name())
+		if err != nil {
+			t.Fatal("unexpected descriptor name", err)
 		}
 		link, err := os.Readlink("/proc/self/fd/" + entry.Name())
 		// ReadDir closes its enumeration FD before returning the entries.
-		if os.IsNotExist(err) || strings.HasSuffix(link, "/fd") {
+		if os.IsNotExist(err) {
 			continue
 		}
 		if err != nil {
 			t.Fatal("descriptor observation failed", err)
+		}
+		// Runtime poller objects may be created after exec; they are internal,
+		// CLOEXEC, and allowed to survive the scrub. Always observe FD3 itself.
+		if n > 3 && (link == runtimeEpoll || link == runtimeEventfd) {
+			flags, err := unix.FcntlInt(uintptr(n), unix.F_GETFD, 0)
+			if err != nil {
+				t.Fatal("runtime descriptor observation failed", err)
+			}
+			if flags&unix.FD_CLOEXEC != 0 {
+				continue
+			}
 		}
 		names = append(names, n)
 	}
@@ -49,77 +89,157 @@ func TestFDChild(t *testing.T) {
 	for _, n := range names {
 		out = append(out, strconv.Itoa(n))
 	}
-	fmt.Println("ok", target, strings.Join(out, ","), p.Ino != 0)
+	return strings.Join(out, ",")
+}
+
+// Test-only subprocess body: verify the initial table, scrub, then report FD3.
+func TestFDChild(t *testing.T) {
+	mode := os.Getenv("LAUNCH_FD_CHILD")
+	if mode == "" {
+		return
+	}
+	inherited, err := strconv.Atoi(os.Getenv("LAUNCH_FD_INHERITED"))
+	if err != nil || inherited < 1 || inherited > 128 {
+		t.Fatal("invalid inherited descriptor count")
+	}
+	if mode == "bootstrap" {
+		fdChildBootstrap(t, inherited)
+	}
+	if mode != "1" {
+		t.Fatal("unexpected helper mode", mode)
+	}
+	// Initialize the runtime poller while the declared inherited file still
+	// owns FD3. It must not race the scrub to claim the newly freed slot.
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal("initialize runtime poller", err)
+	}
+	if err := r.Close(); err != nil {
+		t.Fatal("close poller fixture read end", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal("close poller fixture write end", err)
+	}
+	wantNames := []string{"0", "1", "2"}
+	for n := 3; n < 3+inherited; n++ {
+		wantNames = append(wantNames, strconv.Itoa(n))
+	}
+	want := strings.Join(wantNames, ",")
+	if got := liveFDNames(t); got != want {
+		t.Fatalf("uncontrolled initial descriptor table: got %.1024s want %.1024s", got, want)
+	}
+	if os.Getenv("LAUNCH_FD_OCCUPIED") == "1" {
+		// Explicitly install the kind of internal handle the scrub must retain;
+		// runtime poller allocation from nonblocking stdin is not deterministic.
+		fd, err := unix.EpollCreate1(unix.EPOLL_CLOEXEC)
+		if err != nil {
+			t.Fatal("create internal handle", err)
+		}
+		if fd != 3 {
+			if err := unix.Dup3(fd, 3, unix.O_CLOEXEC); err != nil {
+				t.Fatal("occupy descriptor 3", err)
+			}
+			if err := unix.Close(fd); err != nil {
+				t.Fatal("close duplicate internal handle", err)
+			}
+		}
+		flags, err := unix.FcntlInt(3, unix.F_GETFD, 0)
+		target, linkErr := os.Readlink("/proc/self/fd/3")
+		if err != nil || flags&unix.FD_CLOEXEC == 0 || linkErr != nil || target != runtimeEpoll {
+			t.Fatal("internal FD3 precondition failed", flags, err, target, linkErr)
+		}
+	}
+	p, err := ScrubDescriptors()
+	if err != nil {
+		if os.Getenv("LAUNCH_FD_OCCUPIED") == "1" {
+			target, linkErr := os.Readlink("/proc/self/fd/3")
+			if linkErr != nil || target != runtimeEpoll {
+				t.Fatal("refusal clobbered internal FD3", target, linkErr)
+			}
+			if got := liveFDNames(t); got != "0,1,2,3" {
+				t.Fatal("refusal left inherited descriptors", got)
+			}
+		}
+		fmt.Println("refused", code(err))
+		os.Exit(0)
+	}
+	target, err := os.Readlink("/proc/self/fd/3")
+	if err != nil {
+		t.Fatal("placeholder observation failed", err)
+	}
+	fmt.Println("ok", target, liveFDNames(t), p.Ino != 0)
 	os.Exit(0)
 }
 
-func fdChild(t *testing.T, stdin *os.File, extra ...*os.File) string {
+func fdChild(t *testing.T, occupied bool, stdin *os.File, extra ...*os.File) string {
 	t.Helper()
 	cmd := exec.Command(os.Args[0], "-test.run=^TestFDChild$")
-	cmd.Env = append(os.Environ(), "LAUNCH_FD_CHILD=1")
+	occupiedFlag := "0"
+	if occupied {
+		occupiedFlag = "1"
+	}
+	cmd.Env = append(os.Environ(), "LAUNCH_FD_CHILD=bootstrap",
+		"LAUNCH_FD_INHERITED="+strconv.Itoa(len(extra)),
+		"LAUNCH_FD_OCCUPIED="+occupiedFlag)
 	cmd.Stdin = stdin
-	// ForkExec only closes descriptors explicitly mapped to nil (or CLOEXEC).
-	// Close unrelated inherited descriptors before the child runtime starts,
-	// so its poller has a deterministic slot in the occupied-FD3 case. Keep
-	// the deliberately passed leak(s) for the scrub control.
-	entries, err := os.ReadDir("/proc/self/fd")
-	if err != nil {
-		t.Fatal(err)
-	}
-	maxFD := 2 + len(extra)
-	for _, entry := range entries {
-		fd, err := strconv.Atoi(entry.Name())
-		if err != nil {
-			t.Fatal("unexpected descriptor name", err)
-		}
-		if fd > maxFD {
-			maxFD = fd
-		}
-	}
-	cmd.ExtraFiles = make([]*os.File, maxFD-2)
+	// Inject an unrelated inherited FD beyond the declared set (at least 63).
+	// The bootstrap must remove it before the actual helper starts, even when
+	// the runner already leaks descriptors outside ExtraFiles.
+	ambientFD := max(63, 3+len(extra))
+	cmd.ExtraFiles = make([]*os.File, ambientFD-2)
 	copy(cmd.ExtraFiles, extra)
+	cmd.ExtraFiles[ambientFD-3] = stdin
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &out
-	if e := cmd.Run(); e != nil {
-		t.Fatalf("child: %v %s", e, out.String())
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("child: %v %s", err, out.String())
 	}
 	return strings.TrimSpace(out.String())
 }
 
-// Claim: the scrub closes an inherited descriptor above 2 and reserves 3 with
-// the placeholder, so only 0–2 and the reservation remain (control); when an
-// internal handle already occupies 3 (the runtime poller created for a
-// nonblocking inherited stdin) the scrub refuses instead of clobbering it.
+// Claim: untrusted inherited descriptors (3..8 and multiple batches) are
+// scrubbed and FD3 reserved beside a valid control; an internal FD3 refuses
+// request_invalid without clobbering that handle, regardless of inherited count.
+// The helper's initial table is asserted after a sanitizing re-exec; no runtime
+// allocation order or runner-inherited descriptor is part of the expectation.
 func TestScrubDescriptorsInheritedAndOccupied(t *testing.T) {
-	leak, e := os.CreateTemp(t.TempDir(), "leak")
-	if e != nil {
-		t.Fatal(e)
+	leak, err := os.CreateTemp(t.TempDir(), "leak")
+	if err != nil {
+		t.Fatal(err)
 	}
 	defer leak.Close()
-	null, e := os.Open("/dev/null")
-	if e != nil {
-		t.Fatal(e)
+	null, err := os.Open("/dev/null")
+	if err != nil {
+		t.Fatal(err)
 	}
 	defer null.Close()
-	got := fdChild(t, null, leak, leak)
-	if got != "ok /dev/null 0,1,2,3 true" {
-		t.Fatalf("scrub control: %q", got)
-	}
-	var p [2]int
-	if e := syscall.Pipe2(p[:], syscall.O_CLOEXEC); e != nil {
-		t.Fatal(e)
-	}
-	if e := syscall.SetNonblock(p[0], true); e != nil {
-		t.Fatal(e)
-	}
-	r := os.NewFile(uintptr(p[0]), "nonblocking-stdin")
-	w := os.NewFile(uintptr(p[1]), "nonblocking-stdin-w")
-	defer r.Close()
-	defer w.Close()
-	got = fdChild(t, r)
-	if got != "refused request_invalid" {
-		t.Fatalf("occupied descriptor 3 not refused: %q", got)
+	for _, tc := range []struct {
+		name      string
+		inherited int
+		occupied  bool
+	}{
+		{"valid", 2, false},
+		{"extra-inherited", 6, false},
+		{"many-inherited", 128, false},
+		{"occupied", 1, true},
+		{"occupied-extra-inherited", 6, true},
+		{"occupied-many-inherited", 128, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			extra := make([]*os.File, tc.inherited)
+			for i := range extra {
+				extra[i] = leak
+			}
+			got := fdChild(t, tc.occupied, null, extra...)
+			if tc.occupied {
+				if got != "refused request_invalid" {
+					t.Fatalf("occupied descriptor 3 not refused: %q", got)
+				}
+			} else if got != "ok /dev/null 0,1,2,3 true" {
+				t.Fatalf("scrub control: %q", got)
+			}
+		})
 	}
 }
 

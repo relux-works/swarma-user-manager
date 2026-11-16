@@ -36,29 +36,37 @@ func ScrubDescriptors() (Placeholder, error) {
 		return Placeholder{}, fail("request_invalid")
 	}
 	d := os.NewFile(uintptr(fd), "fd")
-	names, e := d.Readdirnames(65537)
-	if e != nil && !errors.Is(e, io.EOF) {
-		d.Close()
-		return Placeholder{}, fail("request_invalid")
-	}
 	own := int(d.Fd())
-	for _, name := range names {
-		n, e := strconv.Atoi(name)
-		if e != nil || n <= 2 || n == own {
-			continue
+	// Drain every batch: a single bounded read silently leaves inherited FDs
+	// open once the table exceeds that read's limit. Keep memory bounded, not
+	// the number of descriptors scrubbed.
+	for {
+		names, e := d.Readdirnames(64)
+		if e != nil && !errors.Is(e, io.EOF) {
+			d.Close()
+			return Placeholder{}, fail("request_invalid")
 		}
-		buf := make([]byte, 256)
-		l, e := unix.Readlinkat(fd, name, buf)
-		target := ""
-		if e == nil && l < len(buf) {
-			target = string(buf[:l])
-		}
-		if target == runtimeEpoll || target == runtimeEventfd {
-			if flags, e := unix.FcntlInt(uintptr(n), unix.F_GETFD, 0); e == nil && flags&unix.FD_CLOEXEC != 0 {
+		for _, name := range names {
+			n, e := strconv.Atoi(name)
+			if e != nil || n <= 2 || n == own {
 				continue
 			}
+			buf := make([]byte, 256)
+			l, e := unix.Readlinkat(fd, name, buf)
+			target := ""
+			if e == nil && l < len(buf) {
+				target = string(buf[:l])
+			}
+			if target == runtimeEpoll || target == runtimeEventfd {
+				if flags, e := unix.FcntlInt(uintptr(n), unix.F_GETFD, 0); e == nil && flags&unix.FD_CLOEXEC != 0 {
+					continue
+				}
+			}
+			_ = unix.Close(n)
 		}
-		_ = unix.Close(n)
+		if errors.Is(e, io.EOF) {
+			break
+		}
 	}
 	if d.Close() != nil {
 		return Placeholder{}, fail("request_invalid")
