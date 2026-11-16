@@ -58,6 +58,14 @@ receiver-owned fencing for policy removal versus physical start. Its protected
 control interface, native release/time mechanism and independent stop remain
 joint publication and qualification gates; M0 start stays closed.
 
+The [first-run launcher and exec.stop receiver](docs/first-run-launcher.md)
+implement that selection for one pre-created station UID: closed launch-op/1
+intake, an operator-installed start gate behind the unchanged `no_launcher`
+fence, the root receipt before verified privilege drop, committed-start A
+one-start accounting, account-wide stop and the D5a absence proof over the
+real, effective and saved UID. Root qualification, installation and the
+integrated no-launcher replacement remain open gates.
+
 ## Principles
 
 - [A3 package-update requalification](spec/upgrade-requalification.md) specifies the sole signed-apt-chain automatic re-pin exception. Its evidence recorder, chain verifier and state reconciler are implemented for review; time/deployment integration, automatic pinning, containment/notification and root qualification remain pending; station admission stays closed until that slice is landed and qualified. It does not implement A1p's separate administrator command.
@@ -286,6 +294,8 @@ describes protected deployment inputs and the stopped-admission pin/restart flow
 | Systemd guard regressions | Retained reviewer namespace drift cases, successful full-capture binding and local checks without socket connections | `go test -race -p 1 ./internal/linuxbackend -run 'Systemd' -count=1`; `go test -p 1 ./internal/linuxos -run '^TestSystemdNamespace' -count=1` | Named verdicts; owned temporary roots/sockets; test-only overlays; no live qualification |
 | Qualification ownership regressions | Real filesystem publication, foreign replacement and issuer collision preservation | `go test -race -p 1 ./internal/linuxos ./internal/qualification -run '^TestReviewQualification' -count=1` | Named verdicts; isolated temporary fixtures; issuer test uses a test-only Go overlay for unprivileged directory ownership |
 | Station core build | Build the bounded one-request entrypoint | `go build -o .temp/swarma-user-manager ./cmd/swarma-user-manager` | Binary in `.temp/`; closed result JSON on stdout |
+| First-run launcher build | Build the root one-shot launcher | `go build -o .temp/swarma-user-launcher ./cmd/swarma-user-launcher` | Binary in `.temp/`; closed refusal JSON on stdout, nothing on success |
+| Launch/stop tests | Closed intake, start gate, ledgers, R-OBS mapping, D5a absence proof with its saved-UID plant, stop loop, launcher pipeline and exec.stop | `go test -p 1 ./internal/launch ./cmd/swarma-user-launcher -count=1`; add `-race` for race checks | Named verdicts; owned temporary roots and subprocesses; see [the launcher note](docs/first-run-launcher.md) |
 | NSS collector build (Linux, Go with cgo and C compiler) | Build the status-aware read-only NSS ABI helper | `go build -o .temp/swarma-nss-probe ./cmd/swarma-nss-probe` | Helper binary in `.temp/`; bounded sanitized JSON; systemd ABI mode is diagnostic only, never completeness authority; no password hashes |
 | Account-directory tests | Exact NSS lines, full agreement, module closure/range drift, direct NSS statuses | `go test -p 1 ./internal/linuxos -run '^(TestDirectory|TestSystemd|TestUserDB)' -count=1`; `go test -p 1 ./internal/nssprobe -count=1` | Named verdicts; test-owned Go temporary fixtures |
 | Systemd closure/unit tests | Private userdb roots, exact socket set, manifest/provenance drift, real-module masked-error regression, fail-closed systemd admission and static boot-unit contract | `go test -p 1 ./internal/linuxos -run '^TestSystemd' -count=1`; `go test -p 1 ./internal/nssprobe -run '^TestProbe' -count=1` | Test-owned temporary roots; no unit installation or host mutation |

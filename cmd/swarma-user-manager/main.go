@@ -7,6 +7,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/relux-works/swarma-user-manager/internal/launch"
 	"github.com/relux-works/swarma-user-manager/internal/linuxbackend"
 	"github.com/relux-works/swarma-user-manager/internal/manager"
 )
@@ -101,6 +102,12 @@ func run() int {
 	if qualificationErr != nil {
 		_ = json.NewEncoder(os.Stdout).Encode(manager.PublicRefusal(raw, "qualification_required"))
 		return 1
+	}
+	if launch.IsStop(raw) {
+		// exec.stop is the first-run receiver path (helper §4.7); it passes the
+		// same invocation, policy and qualification gates as every station
+		// operation and is admitted only by the explicit installed gate.
+		return runStop(raw, in, p)
 	}
 	operator := manager.FileOperatorVerifier{Root: p.Root}
 	source := manager.LocalV0Source{Policies: manager.FilePolicyReader{}, Backend: backend, Operators: operator}
