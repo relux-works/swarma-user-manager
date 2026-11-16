@@ -144,7 +144,8 @@ same ID and exact arguments. Stop deletes no home, receipt or evidence.
 |---|---|---|---|
 | Go | Launch package unit and fixture tests (closed intake, gate, ledgers, R-OBS, D5a, stop loop, launcher pipeline, exec.stop) | `go test -p 1 ./internal/launch -count=1` | Named verdicts; owned temporary roots; no root or host mutation |
 | Go | Race variant | `go test -race -p 1 ./internal/launch -count=1` | Named verdicts |
-| Go | Descriptor plants (red runs) | `go test ./internal/launch -run '^TestDescriptorPlantsTurnRed$' -count=1 -v` | Green controls and three named failures in temporary source overlays |
+| Go | Descriptor plants (red runs) | `go test ./internal/launch -run '^TestDescriptorPlantsTurnRed$' -count=1 -v` | Green controls and four named failures in temporary source overlays |
+| `systemd-run` / Go | Reproduce runtime CPU-controller descriptors in an owned transient scope | `systemd-run --user --scope --quiet --unit=swarma-fd-repro -p CPUWeight=100 env GODEBUG=containermaxprocs=1 GOMAXPROCS=2 go test ./internal/launch -run '^(TestScrubDescriptorsInheritedAndOccupied\|TestRuntimeFDClassification\|TestDescriptorPlantsTurnRed)$' -count=1 -v` | Named verdicts with runtime `cpu.max` present; preserve logs under `.temp/` |
 | Go | Saved-UID D5a plant (red run) | `go test -p 1 ./internal/launch -run '^TestAbsenceSavedUIDPlantTurnsRed$' -count=1 -v` | Control pass and plant failure logs |
 | Go | Two-account admission through the actual protected journal reader (test-only owner/anchor seam; never a production build tag) | `go test -tags=genjournal_testseam ./internal/launch -run '^TestLauncherProtectedJournalTwoAccounts$' -count=1 -v` | Valid caller/worker pair and exact refusal cases; no root or sudo |
 | Go | Launcher entry refusals | `go test -p 1 ./cmd/swarma-user-launcher -count=1` | Named verdicts; owned subprocesses |
@@ -152,14 +153,22 @@ same ID and exact arguments. Stop deletes no home, receipt or evidence.
 
 The descriptor subprocess fixture re-execs with only the declared inherited
 handles and caller-owned 0–2; an unrelated descriptor is deliberately injected
-outside that set to verify isolation. Controls pass descriptors 3..8 and 128
+outside that set to verify isolation. It checks each declared handle's target,
+device/inode identity and cleared CLOEXEC flag, and rejects missing or extra
+inheritance. Go can create its own descriptors before the helper runs: the
+initial snapshot admits only exact CLOEXEC epoll/eventfd kinds and read-only
+CPU-limit files (`cpu.max` on cgroup v2, quota/period files on cgroup v1) whose
+kernel filesystem type also matches. A regular file with the same name is
+rejected. No descriptor-count allowance is used. Controls pass descriptors 3..8 and 128
 inherited descriptors through the actual scrub. Refusal cases explicitly install
 a close-on-exec internal epoll handle at FD3, independent of runtime allocation
 order, and check that refusal retains it while scrubbing other inherited handles.
-The observer ignores vanished enumeration entries and internal close-on-exec
-runtime poller objects above FD3. The product drains the descriptor directory in
+The post-scrub observer ignores vanished enumeration entries and internal
+close-on-exec runtime poller objects above FD3; CPU-limit files must be scrubbed.
+Failure diagnostics include descriptor targets and flags. The product drains the descriptor directory in
 64-entry batches until EOF, so its read size does not cap the scrub. Source
-plants leave FD8 open, stop after one batch, or clobber occupied FD3; each must
+plants leave FD8 open, stop after one batch, clobber occupied FD3, or retain
+undeclared ambient FD63 through the bootstrap; each must
 fail its named assertion beside a passing valid control.
 
 ## Known gates and open mappings

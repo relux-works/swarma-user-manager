@@ -16,14 +16,10 @@ import (
 // Claim: these bounded source plants turn the named descriptor assertions red
 // while retaining the neighboring valid control. Skipping FD8 probes the 3..8
 // case; stopping after one batch probes count independence; clobbering FD3
-// probes refusal. A compile/setup failure does not count as a killed plant.
+// probes refusal; retaining ambient FD63 probes the initial-table checker.
+// A compile/setup failure does not count as a killed plant.
 func TestDescriptorPlantsTurnRed(t *testing.T) {
 	dir, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	sourcePath := filepath.Join(dir, "fd_linux.go")
-	source, err := os.ReadFile(sourcePath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,17 +43,24 @@ func TestDescriptorPlantsTurnRed(t *testing.T) {
 		t.Fatal("descriptor control did not pass", err)
 	}
 	for _, plant := range []struct {
-		name, before, after, test, assertion string
+		name, file, before, after, test, assertion string
 	}{
-		{"leave-inherited-fd8", "n <= 2 || n == own", "n <= 2 || n == 8 || n == own",
+		{"leave-inherited-fd8", "fd_linux.go", "n <= 2 || n == own", "n <= 2 || n == 8 || n == own",
 			"extra-inherited", "scrub control:"},
-		{"first-batch-only", "if errors.Is(e, io.EOF) {", "if true {",
+		{"first-batch-only", "fd_linux.go", "if errors.Is(e, io.EOF) {", "if true {",
 			"many-inherited", "scrub control:"},
-		{"clobber-occupied-fd3", "if e := unix.Fstat(3, &st); e == nil {\n\t\treturn Placeholder{}, fail(\"request_invalid\")\n\t}",
+		{"clobber-occupied-fd3", "fd_linux.go", "if e := unix.Fstat(3, &st); e == nil {\n\t\treturn Placeholder{}, fail(\"request_invalid\")\n\t}",
 			"if e := unix.Fstat(3, &st); e == nil {\n\t\t_ = unix.Close(3)\n\t}",
 			"occupied-extra-inherited", "occupied descriptor 3 not refused:"},
+		{"leave-ambient-fd63", "fd_linux_test.go", "if n < 3+inherited {", "if n < 3+inherited || (n == 63 && inherited == 6) {",
+			"extra-inherited", "unexpected FD63; targets="},
 	} {
 		t.Run(plant.name, func(t *testing.T) {
+			sourcePath := filepath.Join(dir, plant.file)
+			source, err := os.ReadFile(sourcePath)
+			if err != nil {
+				t.Fatal(err)
+			}
 			if strings.Count(string(source), plant.before) != 1 {
 				t.Fatal("plant predicate is not unique")
 			}

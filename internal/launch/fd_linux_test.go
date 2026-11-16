@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -51,13 +52,29 @@ func fdChildBootstrap(t *testing.T, inherited int) {
 	}
 }
 
-func liveFDNames(t *testing.T) string {
+type fdObservation struct {
+	n      int
+	target string
+	flags  int
+}
+
+type fdTable []fdObservation
+
+func (fds fdTable) String() string {
+	out := []string{}
+	for _, fd := range fds {
+		out = append(out, fmt.Sprintf("%d=%q(flags=%#x)", fd.n, fd.target, fd.flags))
+	}
+	return strings.Join(out, ", ")
+}
+
+func snapshotFDs(t *testing.T) fdTable {
 	t.Helper()
 	entries, err := os.ReadDir("/proc/self/fd")
 	if err != nil {
 		t.Fatal("descriptor enumeration failed", err)
 	}
-	names := []int{}
+	fds := fdTable{}
 	for _, entry := range entries {
 		n, err := strconv.Atoi(entry.Name())
 		if err != nil {
@@ -71,23 +88,84 @@ func liveFDNames(t *testing.T) string {
 		if err != nil {
 			t.Fatal("descriptor observation failed", err)
 		}
-		// Runtime poller objects may be created after exec; they are internal,
-		// CLOEXEC, and allowed to survive the scrub. Always observe FD3 itself.
-		if n > 3 && (link == runtimeEpoll || link == runtimeEventfd) {
-			flags, err := unix.FcntlInt(uintptr(n), unix.F_GETFD, 0)
-			if err != nil {
-				t.Fatal("runtime descriptor observation failed", err)
-			}
-			if flags&unix.FD_CLOEXEC != 0 {
-				continue
-			}
+		flags, err := unix.FcntlInt(uintptr(n), unix.F_GETFD, 0)
+		if err != nil {
+			t.Fatalf("descriptor %d target=%q flags unavailable: %v", n, link, err)
 		}
-		names = append(names, n)
+		fds = append(fds, fdObservation{n, link, flags})
 	}
-	sort.Ints(names)
+	sort.Slice(fds, func(i, j int) bool { return fds[i].n < fds[j].n })
+	return fds
+}
+
+func runtimePollerFD(fd fdObservation) bool {
+	return fd.n > 3 && fd.flags&unix.FD_CLOEXEC != 0 &&
+		(fd.target == runtimeEpoll || fd.target == runtimeEventfd)
+}
+
+// Go opens CPU-controller files before main, including when GOMAXPROCS is set.
+// CLOEXEC proves these extra handles did not survive the bootstrap exec. Match
+// the kernel filesystem and exact read-only file kind, never an FD count or an
+// arbitrary CLOEXEC file. Unlike pollers, these files must not survive scrub.
+func runtimeCPUFD(t *testing.T, fd fdObservation) bool {
+	t.Helper()
+	if fd.flags&unix.FD_CLOEXEC == 0 {
+		return false
+	}
+	var fsType int64
+	switch filepath.Base(fd.target) {
+	case "cpu.max":
+		fsType = unix.CGROUP2_SUPER_MAGIC
+	case "cpu.cfs_quota_us", "cpu.cfs_period_us":
+		fsType = unix.CGROUP_SUPER_MAGIC
+	default:
+		return false
+	}
+	var st unix.Statfs_t
+	flags, err := unix.FcntlInt(uintptr(fd.n), unix.F_GETFL, 0)
+	fsErr := unix.Fstatfs(fd.n, &st)
+	if err != nil || fsErr != nil {
+		t.Fatalf("CPU descriptor classification failed: flags=%v statfs=%v targets=%s", err, fsErr, snapshotFDs(t))
+	}
+	return int64(st.Type) == fsType && flags&unix.O_ACCMODE == unix.O_RDONLY
+}
+
+func assertInitialFDs(t *testing.T, inherited int) {
+	t.Helper()
+	fds := snapshotFDs(t)
+	seen := make([]bool, 3+inherited)
+	for _, fd := range fds {
+		if fd.n < len(seen) {
+			seen[fd.n] = true
+			if fd.n > 2 {
+				var st unix.Stat_t
+				if err := unix.Fstat(fd.n, &st); err != nil || fd.flags != 0 ||
+					fd.target != os.Getenv("LAUNCH_FD_TARGET") ||
+					fmt.Sprintf("%d:%d", st.Dev, st.Ino) != os.Getenv("LAUNCH_FD_IDENTITY") {
+					t.Fatalf("declared FD%d has wrong identity or flags: targets=%s", fd.n, fds)
+				}
+			}
+			continue
+		}
+		if !runtimePollerFD(fd) && !runtimeCPUFD(t, fd) {
+			t.Fatalf("uncontrolled initial descriptor table: unexpected FD%d; targets=%s", fd.n, fds)
+		}
+	}
+	for n, present := range seen {
+		if !present {
+			t.Fatalf("uncontrolled initial descriptor table: missing FD%d; targets=%s", n, fds)
+		}
+	}
+}
+
+func liveFDNames(t *testing.T) string {
+	t.Helper()
 	out := []string{}
-	for _, n := range names {
-		out = append(out, strconv.Itoa(n))
+	for _, fd := range snapshotFDs(t) {
+		// Always observe FD3, and do not hide CPU files after the scrub.
+		if !runtimePollerFD(fd) {
+			out = append(out, strconv.Itoa(fd.n))
+		}
 	}
 	return strings.Join(out, ",")
 }
@@ -120,14 +198,7 @@ func TestFDChild(t *testing.T) {
 	if err := w.Close(); err != nil {
 		t.Fatal("close poller fixture write end", err)
 	}
-	wantNames := []string{"0", "1", "2"}
-	for n := 3; n < 3+inherited; n++ {
-		wantNames = append(wantNames, strconv.Itoa(n))
-	}
-	want := strings.Join(wantNames, ",")
-	if got := liveFDNames(t); got != want {
-		t.Fatalf("uncontrolled initial descriptor table: got %.1024s want %.1024s", got, want)
-	}
+	assertInitialFDs(t, inherited)
 	if os.Getenv("LAUNCH_FD_OCCUPIED") == "1" {
 		// Explicitly install the kind of internal handle the scrub must retain;
 		// runtime poller allocation from nonblocking stdin is not deterministic.
@@ -151,23 +222,33 @@ func TestFDChild(t *testing.T) {
 	}
 	p, err := ScrubDescriptors()
 	if err != nil {
+		if code(err) != "request_invalid" {
+			t.Fatalf("unexpected scrub refusal: %v targets=%s", err, snapshotFDs(t))
+		}
 		if os.Getenv("LAUNCH_FD_OCCUPIED") == "1" {
 			target, linkErr := os.Readlink("/proc/self/fd/3")
 			if linkErr != nil || target != runtimeEpoll {
-				t.Fatal("refusal clobbered internal FD3", target, linkErr)
+				t.Fatal("refusal clobbered internal FD3", target, linkErr, "targets=", snapshotFDs(t))
 			}
 			if got := liveFDNames(t); got != "0,1,2,3" {
-				t.Fatal("refusal left inherited descriptors", got)
+				t.Fatal("refusal left inherited descriptors", got, "targets=", snapshotFDs(t))
 			}
 		}
 		fmt.Println("refused", code(err))
 		os.Exit(0)
 	}
+	if os.Getenv("LAUNCH_FD_OCCUPIED") == "1" {
+		t.Fatalf("occupied descriptor 3 not refused: targets=%s", snapshotFDs(t))
+	}
 	target, err := os.Readlink("/proc/self/fd/3")
 	if err != nil {
-		t.Fatal("placeholder observation failed", err)
+		t.Fatal("placeholder observation failed", err, "targets=", snapshotFDs(t))
 	}
-	fmt.Println("ok", target, liveFDNames(t), p.Ino != 0)
+	names := liveFDNames(t)
+	if target != "/dev/null" || names != "0,1,2,3" || p.Ino == 0 {
+		t.Fatalf("scrub control: target=%q names=%s placeholder=%v targets=%s", target, names, p, snapshotFDs(t))
+	}
+	fmt.Println("ok", target, names, p.Ino != 0)
 	os.Exit(0)
 }
 
@@ -178,8 +259,18 @@ func fdChild(t *testing.T, occupied bool, stdin *os.File, extra ...*os.File) str
 	if occupied {
 		occupiedFlag = "1"
 	}
+	var st unix.Stat_t
+	if err := unix.Fstat(int(extra[0].Fd()), &st); err != nil {
+		t.Fatal("inherited identity", err)
+	}
+	target, err := os.Readlink("/proc/self/fd/" + strconv.Itoa(int(extra[0].Fd())))
+	if err != nil {
+		t.Fatal("inherited target", err)
+	}
 	cmd.Env = append(os.Environ(), "LAUNCH_FD_CHILD=bootstrap",
 		"LAUNCH_FD_INHERITED="+strconv.Itoa(len(extra)),
+		"LAUNCH_FD_TARGET="+target,
+		"LAUNCH_FD_IDENTITY="+fmt.Sprintf("%d:%d", st.Dev, st.Ino),
 		"LAUNCH_FD_OCCUPIED="+occupiedFlag)
 	cmd.Stdin = stdin
 	// Inject an unrelated inherited FD beyond the declared set (at least 63).
@@ -203,6 +294,8 @@ func fdChild(t *testing.T, occupied bool, stdin *os.File, extra ...*os.File) str
 // request_invalid without clobbering that handle, regardless of inherited count.
 // The helper's initial table is asserted after a sanitizing re-exec; no runtime
 // allocation order or runner-inherited descriptor is part of the expectation.
+// The initial snapshot separately identifies CLOEXEC runtime CPU-limit files;
+// their presence cannot excuse missing/replaced inheritance or a scrub leak.
 func TestScrubDescriptorsInheritedAndOccupied(t *testing.T) {
 	leak, err := os.CreateTemp(t.TempDir(), "leak")
 	if err != nil {
@@ -240,6 +333,46 @@ func TestScrubDescriptorsInheritedAndOccupied(t *testing.T) {
 				t.Fatalf("scrub control: %q", got)
 			}
 		})
+	}
+}
+
+// Claim: only exact CLOEXEC poller kinds above FD3 may be omitted. An inherited
+// poller (CLOEXEC cleared), occupied FD3, pidfd, or a regular file named cpu.max
+// cannot qualify. Real runtime CPU files are exercised by TestFDChild on CPU
+// cgroups; filename matching alone is deliberately insufficient.
+func TestRuntimeFDClassification(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		fd   fdObservation
+		want bool
+	}{
+		{"epoll", fdObservation{4, runtimeEpoll, unix.FD_CLOEXEC}, true},
+		{"eventfd", fdObservation{5, runtimeEventfd, unix.FD_CLOEXEC}, true},
+		{"inherited-epoll", fdObservation{4, runtimeEpoll, 0}, false},
+		{"inherited-eventfd", fdObservation{5, runtimeEventfd, 0}, false},
+		{"occupied-fd3", fdObservation{3, runtimeEpoll, unix.FD_CLOEXEC}, false},
+		{"pidfd", fdObservation{4, "anon_inode:[pidfd]", unix.FD_CLOEXEC}, false},
+		{"other-cloexec", fdObservation{4, "/dev/null", unix.FD_CLOEXEC}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := runtimePollerFD(tc.fd); got != tc.want {
+				t.Fatalf("poller classification=%v want=%v targets=%s", got, tc.want, fdTable{tc.fd})
+			}
+		})
+	}
+	// Use the exact filename and read-only access to isolate the filesystem check.
+	path := filepath.Join(t.TempDir(), "cpu.max")
+	if err := os.WriteFile(path, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	fd := fdObservation{int(f.Fd()), path, unix.FD_CLOEXEC}
+	if runtimeCPUFD(t, fd) {
+		t.Fatalf("ordinary file classified as runtime CPU file: targets=%s", fdTable{fd})
 	}
 }
 
