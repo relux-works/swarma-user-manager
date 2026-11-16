@@ -42,7 +42,7 @@ func TestProcThreadInventory(t *testing.T) {
 			defer d.Close()
 			p := &ProcScanner{root: d, max: 10, read: readEntry}
 			if mode == "bound" {
-				p.max = 1
+				p = limitScanner(p, 1).(*ProcScanner)
 			}
 			p.read = func(d *os.File, name string) ([]byte, error) {
 				if d.Name() == "11" && name == "status" {
