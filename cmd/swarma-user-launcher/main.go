@@ -78,7 +78,14 @@ func run() int {
 	defer scanner.Close()
 	deps := launch.Production(p, manager.FileAuthority{Root: p.Root}, store, scanner)
 	deps.Scrub = func() (launch.Placeholder, error) { return placeholder, nil }
-	deps.Qualify = linuxbackend.New(p).Qualified
+	evidence, e := manager.OpenStore(p.Root + "/lib/user-manager/journal")
+	if e != nil {
+		return refuse(raw, "effect_evidence_unavailable")
+	}
+	defer evidence.Close()
+	backend := linuxbackend.NewProduction(p, evidence)
+	defer backend.Close()
+	deps.Qualify = backend.Qualified
 	l := launch.Launcher{Deps: deps}
 	r := l.Run(context.Background(), raw, in)
 	// A returned response is always a refusal: a successful start replaced

@@ -62,6 +62,12 @@ var _ manager.Backend = (*Backend)(nil)
 // New constructs the production adapter with no invented host authority. Until a
 // concrete qualified Environment is published, Qualified refuses before admission.
 func New(p manager.Policy) *Backend { return NewWithEnvironment(p, nil, nil) }
+
+// NewProduction is the common helper/launcher constructor. Qualification uses
+// the protected deployment environment; New intentionally has no authority.
+func NewProduction(p manager.Policy, evidence EvidenceStore) *Backend {
+	return NewWithEnvironment(p, NewProductionEnvironment(p), evidence)
+}
 func NewWithEnvironment(p manager.Policy, h Environment, evidence EvidenceStore) *Backend {
 	b := &Backend{policy: p, host: h, evidence: evidence, open: openAnchor, reservations: map[string]manager.RestoreInput{}, stages: map[string]*stage{}, tool: linuxos.RunAccountTool}
 	b.mailAbsent = func(ctx context.Context, name, home string) error {

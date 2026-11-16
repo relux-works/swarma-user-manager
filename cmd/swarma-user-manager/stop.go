@@ -11,6 +11,8 @@ import (
 	"github.com/relux-works/swarma-user-manager/tools/genjournal"
 )
 
+func integratedStop(p manager.Policy, raw []byte) bool { return !p.NoLauncher && launch.IsStop(raw) }
+
 // runStop wires the production exec.stop receiver: the shared protected store,
 // the native generation journal, the pinned /proc scanner and the pidfd
 // signaller. It is reached only after the entry's policy and qualification

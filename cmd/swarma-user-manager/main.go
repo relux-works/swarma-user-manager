@@ -7,7 +7,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/relux-works/swarma-user-manager/internal/launch"
 	"github.com/relux-works/swarma-user-manager/internal/linuxbackend"
 	"github.com/relux-works/swarma-user-manager/internal/manager"
 )
@@ -94,7 +93,7 @@ func run() int {
 		_ = json.NewEncoder(os.Stdout).Encode(manager.PublicRefusal(raw, "qualification_required"))
 		return 1
 	}
-	backend := linuxbackend.NewWithEnvironment(p, linuxbackend.NewProductionEnvironment(p), store)
+	backend := linuxbackend.NewProduction(p, store)
 	defer backend.Close()
 	qualificationCtx, stopQualification := context.WithTimeout(context.Background(), time.Duration(p.Limits.StepMS)*time.Millisecond)
 	qualificationErr := backend.Qualified(qualificationCtx, p)
@@ -103,7 +102,7 @@ func run() int {
 		_ = json.NewEncoder(os.Stdout).Encode(manager.PublicRefusal(raw, "qualification_required"))
 		return 1
 	}
-	if launch.IsStop(raw) {
+	if integratedStop(p, raw) {
 		// exec.stop is the first-run receiver path (helper §4.7); it passes the
 		// same invocation, policy and qualification gates as every station
 		// operation and is admitted only by the explicit installed gate.
