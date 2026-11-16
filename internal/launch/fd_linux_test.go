@@ -34,9 +34,13 @@ func TestFDChild(t *testing.T) {
 		if e != nil {
 			continue
 		}
-		link, _ := os.Readlink("/proc/self/fd/" + entry.Name())
-		if strings.HasSuffix(link, "/fd") {
+		link, err := os.Readlink("/proc/self/fd/" + entry.Name())
+		// ReadDir closes its enumeration FD before returning the entries.
+		if os.IsNotExist(err) || strings.HasSuffix(link, "/fd") {
 			continue
+		}
+		if err != nil {
+			t.Fatal("descriptor observation failed", err)
 		}
 		names = append(names, n)
 	}
@@ -54,7 +58,26 @@ func fdChild(t *testing.T, stdin *os.File, extra ...*os.File) string {
 	cmd := exec.Command(os.Args[0], "-test.run=^TestFDChild$")
 	cmd.Env = append(os.Environ(), "LAUNCH_FD_CHILD=1")
 	cmd.Stdin = stdin
-	cmd.ExtraFiles = extra
+	// ForkExec only closes descriptors explicitly mapped to nil (or CLOEXEC).
+	// Close unrelated inherited descriptors before the child runtime starts,
+	// so its poller has a deterministic slot in the occupied-FD3 case. Keep
+	// the deliberately passed leak(s) for the scrub control.
+	entries, err := os.ReadDir("/proc/self/fd")
+	if err != nil {
+		t.Fatal(err)
+	}
+	maxFD := 2 + len(extra)
+	for _, entry := range entries {
+		fd, err := strconv.Atoi(entry.Name())
+		if err != nil {
+			t.Fatal("unexpected descriptor name", err)
+		}
+		if fd > maxFD {
+			maxFD = fd
+		}
+	}
+	cmd.ExtraFiles = make([]*os.File, maxFD-2)
+	copy(cmd.ExtraFiles, extra)
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &out
@@ -79,7 +102,7 @@ func TestScrubDescriptorsInheritedAndOccupied(t *testing.T) {
 		t.Fatal(e)
 	}
 	defer null.Close()
-	got := fdChild(t, null, leak)
+	got := fdChild(t, null, leak, leak)
 	if got != "ok /dev/null 0,1,2,3 true" {
 		t.Fatalf("scrub control: %q", got)
 	}

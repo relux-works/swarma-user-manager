@@ -59,12 +59,14 @@ control interface, native release/time mechanism and independent stop remain
 joint publication and qualification gates; M0 start stays closed.
 
 The [first-run launcher and exec.stop receiver](docs/first-run-launcher.md)
-implement that selection for one pre-created station UID: closed launch-op/1
-intake, an operator-installed start gate behind the unchanged `no_launcher`
-fence, the root receipt before verified privilege drop, committed-start A
-one-start accounting, account-wide stop and the D5a absence proof over the
-real, effective and saved UID. Root qualification, installation and the
-integrated no-launcher replacement remain open gates.
+implement that selection for one pre-created worker and a managed dispatcher:
+closed launch-op/1 intake, an operator-installed start gate, a separately
+qualified integrated deployment profile, the root receipt before verified
+privilege drop, committed-start A one-start accounting, account-wide stop and
+D5a absence over real, effective, saved and filesystem UID. The default
+`no_launcher:true` profile and its service scan are unchanged; a gate or flag
+alone cannot enable launch. Root qualification, installation, containment and
+independent original-deadline stop remain external gates.
 
 ## Principles
 

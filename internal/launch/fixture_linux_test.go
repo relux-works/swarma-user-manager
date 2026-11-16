@@ -210,9 +210,9 @@ func newFixture(t *testing.T) *fixture {
 	}{{"lib", 0755}, {"lib/user-manager", 0755}, {"lib/user-manager/journal", 0700}, {"lib/user-manager/launch", 0700}, {"lib/user-manager/receipts", 0755}, {"etc", 0700}, {"etc/exec-profiles", 0700}, {"workers", 0755}, {"workers/worker-dev", 0700}, {"libexec", 0755}} {
 		mkdir(t, filepath.Join(root, d.p), d.m)
 	}
-	caller := manager.Caller{UID: 200, Principal: "dispatcher", Generation: strings.Repeat("a", 32), Role: "dispatcher"}
+	caller := manager.Caller{UID: 30009, Principal: "dispatcher", Generation: strings.Repeat("a", 32), Role: "dispatcher"}
 	operator := manager.Caller{UID: 202, Principal: "operator", Generation: strings.Repeat("f", 32), Role: "operator"}
-	p := manager.Policy{Format: "station-policy/2", Root: root, UIDMin: 30000, UIDMax: 30010, GIDMin: 30000, GIDMax: 30010, Quota: 10, Class: "trusted", Skeleton: "approved-release", SkeletonDigest: strings.Repeat("e", 64), Callers: []manager.Caller{caller, operator}, Limits: manager.Limits{EntropyDraws: 32, AllocationProbes: 20, LockMS: 300, OperationMS: 60000, StepMS: 10000, GraceMS: 10, QuietMS: 20, DeleteEntries: 10, DeleteDepth: 10, DeleteWork: 100, RecordBytes: 8192, RecordCount: 10000}, NoLauncher: true, Qualified: true, QualificationDigest: strings.Repeat("c", 64), FenceEpoch: 1, BackendDigest: strings.Repeat("d", 64), Operators: []manager.OperatorScope{{Principal: "operator", Owners: []string{"dispatcher"}}}}
+	p := manager.Policy{Format: "station-policy/2", Root: root, UIDMin: 30000, UIDMax: 30010, GIDMin: 30000, GIDMax: 30010, Quota: 10, Class: "trusted", Skeleton: "approved-release", SkeletonDigest: strings.Repeat("e", 64), Callers: []manager.Caller{caller, operator}, Limits: manager.Limits{EntropyDraws: 32, AllocationProbes: 20, LockMS: 300, OperationMS: 60000, StepMS: 10000, GraceMS: 10, QuietMS: 20, DeleteEntries: 10, DeleteDepth: 10, DeleteWork: 100, RecordBytes: 8192, RecordCount: 10000}, NoLauncher: false, Qualified: true, QualificationDigest: strings.Repeat("c", 64), FenceEpoch: 1, BackendDigest: strings.Repeat("d", 64), Operators: []manager.OperatorScope{{Principal: "operator", Owners: []string{"dispatcher"}}}}
 	for _, purpose := range []string{"host_qualification", "cleanup_admission", "managed_content", "persistence_denial", "process_fence", "activation_guard"} {
 		p.Sources = append(p.Sources, manager.SourceSelection{Purpose: purpose, Source: "local-v0", Version: strings.Repeat("e", 64)})
 	}
@@ -223,6 +223,8 @@ func newFixture(t *testing.T) *fixture {
 	f := &fixture{t: t, root: root, anchor: anchor, owner: owner, policy: p, caller: caller, operator: operator, authority: &fakeAuthority{map[int64]manager.Caller{caller.UID: caller, operator.UID: operator}}, journal: &memJournal{}, clock: &fakeClock{boot: fixtureBoot, ms: fixtureClockMS}, proc: newFakeProc(), seams: &seams{fd3: -1}, account: account, plan: []byte(`{"format":"m0-executor-entry/1","demo":true}`)}
 	// Journal: the pre-created generation is creating then active.
 	f.floor = genjournal.Floor{Hash: genjournal.ZeroHash}
+	f.appendIdentity(caller.UID, caller.Generation, "creating")
+	f.appendIdentity(caller.UID, caller.Generation, "active")
 	f.appendJournal(fixtureGen, "creating")
 	f.appendJournal(fixtureGen, "active")
 	f.writeCoreEffects(account)
@@ -257,7 +259,12 @@ func newFixture(t *testing.T) *fixture {
 // the station core does (floor = verified tail after each append).
 func (f *fixture) appendJournal(generation, state string) {
 	f.t.Helper()
-	v, e := f.journal.Append(context.Background(), f.floor, fixtureUID, generation, state, "2026-11-01T00:00:00Z", nil)
+	f.appendIdentity(fixtureUID, generation, state)
+}
+
+func (f *fixture) appendIdentity(uid int64, generation, state string) {
+	f.t.Helper()
+	v, e := f.journal.Append(context.Background(), f.floor, uid, generation, state, "2026-11-01T00:00:00Z", nil)
 	if e != nil {
 		f.t.Fatal("journal", state, e)
 	}
@@ -293,7 +300,8 @@ func (f *fixture) installGate(g Gate) {
 func (f *fixture) deps() Deps {
 	s := f.seams
 	return Deps{Policy: f.policy, Authority: f.authority, Journal: f.journal, Store: f.store, Scanner: f.proc, Clock: f.clock,
-		Scrub: func() (Placeholder, error) { return Placeholder{}, nil },
+		Qualify: func(context.Context, manager.Policy) error { return nil },
+		Scrub:   func() (Placeholder, error) { return Placeholder{}, nil },
 		Place: func(fd int, _ Placeholder) error {
 			if s.fd3 >= 0 {
 				_ = unix.Close(s.fd3)

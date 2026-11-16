@@ -55,7 +55,7 @@ func (s Protocol) Issue(ctx context.Context, p manager.Policy, bootMode bool) (R
 // samples the kernel. Neither deployment inputs nor callers supply CapEff.
 func (s Protocol) issue(ctx context.Context, p manager.Policy, bootMode bool, readCaps func() (string, error)) (Record, error) {
 	fail := func(stage, check string) (Record, error) { return Record{}, refuse(ctx, stage, check) }
-	if s.Deployment == nil || s.Storage == nil || s.Boot == nil || s.Now == nil || manager.ValidatePolicy(p) != nil || !p.NoLauncher {
+	if s.Deployment == nil || s.Storage == nil || s.Boot == nil || s.Now == nil || manager.ValidatePolicy(p) != nil {
 		return fail("policy", "protocol_configuration")
 	}
 	if bootMode {
@@ -208,7 +208,7 @@ func (g *RecordGuard) Release() {
 // Pin calls the external unit reader only during unlocked preparation. The
 // returned guard retains deployment exclusion and performs local checks only.
 func (s Protocol) Pin(ctx context.Context, p manager.Policy) (*RecordGuard, error) {
-	if !p.Qualified || !p.NoLauncher || s.Deployment == nil || s.Storage == nil || s.Unit == nil || s.Boot == nil {
+	if !p.Qualified || s.Deployment == nil || s.Storage == nil || s.Unit == nil || s.Boot == nil {
 		return nil, ErrRequired
 	}
 	g, e := s.Deployment.Acquire(ctx, false)

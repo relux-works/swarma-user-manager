@@ -482,8 +482,10 @@ unit invocation ID before clearing the environment, applies umask 0077, changes
 to `/`, and denies non-UNIX socket creation with a seccomp filter inherited by
 children. No caller path, environment search path or request chooses capabilities.
 
-Initial mode accepts only a protected candidate policy with `qualified:false`,
-a 64-zero qualification digest and `no_launcher:true`. It never edits policy.
+Initial mode accepts only a protected candidate policy with `qualified:false`
+and a 64-zero qualification digest. The default remains `no_launcher:true`;
+`no_launcher:false` additionally requires the complete closed integrated profile
+below, never a flag-only opt-in. It never edits policy.
 Boot mode requires an existing nonzero qualified pin, validates that this process
 is the qualification unit's root main PID in its exact kernel cgroup, and reruns
 every check. Neither mode repairs or bootstraps deployment files or journal state.
@@ -492,9 +494,12 @@ The pinned registrar CCJ-1 encoder defines all canonical bytes. The normalized
 policy digest changes only `qualified` to false and `qualification_digest` to
 64 zeros, in the `station-qualification-policy/1` domain. Every other policy
 member, including `no_launcher`, stays bound. `station-qualification-inputs/1`
-contains exactly the specified policy, binary, backend and skeleton digests,
-physical NSS lines, module closure facts and station ranges. The binary digest
-is checked against the running executable, rather than a different installed file.
+contains the specified policy, binary, backend and skeleton digests,
+physical NSS lines, module closure facts and station ranges. Integration also
+retains the manifest's complete `first_run` object; the default encoding omits
+it unchanged. The default binary digest is checked against the running helper.
+Integration pins both entry binaries and authenticates the executing inode as
+either one, sharing the helper digest as the stable binary input.
 
 `station-qualification/3` retains the inputs digest, current boot, audit issue time,
 complete reserved-name coverage, eleven closed check results and mandatory
@@ -541,11 +546,12 @@ locally and exposes the full record digest in prepared authority evidence.
 `<root>/etc/user-manager-deployment.json` is root:root 0600, single-link, protected
 and no-follow. It is a closed CCJ-1 object; unknown, missing, duplicate, null,
 noncanonical and oversized inputs refuse. All members below are mandatory except
-`systemd`, which is omitted for a files-only deployment and required for a
-`files systemd` deployment. An explicit null is not an omitted member.
+`systemd` and `first_run`. The former is omitted for a files-only deployment
+and required for a `files systemd` deployment. The latter is omitted for the
+default no-launcher profile and required for the integrated profile. An explicit
+null is not an omitted member.
 Its SHA-256 equals policy `backend_digest`, also carried by every local-v0 source
-version and inputs `backend_digest`. No extra inputs member or authority flag is
-introduced. Changes require initial qualification and a new pin. A3 may automate
+version and inputs `backend_digest`. No free-form authority flag is introduced. Changes require initial qualification and a new pin. A3 may automate
 only its explicitly eligible content/derived-digest changes after full evidence
 verification; all other manifest/configuration changes require operator review.
 
@@ -561,7 +567,8 @@ verification; all other manifest/configuration changes require operator review.
 | `systemd` | Optional closed reviewed capabilities `{library,providers,sources}` described below; mandatory when NSS selects systemd. |
 | `loader` | Closed object `{format,cache,default_directories,resolutions,configuration}` detailed below. |
 | `skeleton` | Protected absolute path to the closed skeleton document below. |
-| `no_launcher` | Closed object `{absent_entries,service_roots,configuration}` detailed below. |
+| `no_launcher` | Closed object `{absent_entries,service_roots,configuration}` detailed below; retained in both profiles. |
+| `first_run` | Optional closed integrated profile; see [first-run profile schema](first-run-launcher.md#integrated-deployment-profile). Binds both root:root 0755 entry artifacts and the exact stop/internal-observation selection. |
 | `inventory` | Closed complete host-scope profile detailed below. |
 
 `systemd.library` is the protected canonical absolute path to the actual
@@ -609,6 +616,11 @@ contain SHA-256 of exact protected file bytes.
 `no_launcher.service_roots` is a nonempty sorted unique array of clean absolute
 root paths, with no state or content digest. A root may be absent. Service-tree
 observations are live checks, not qualification inputs or deployment content pins.
+They are unchanged for the default profile. Integration runs the same scan and
+additionally refreshes it during bounded local guard checks, without a service
+path exception. Its existing `checks.no_launcher` slot is the combined selected
+profile predicate, including both binary pins and process-observer visibility;
+`exec.stop` qualification therefore no longer derives from launcher absence.
 
 `loader.format` remains `glibc-cache-closure/1`; the closed, not-yet-deployed
 `station-deployment/1` schema changes in place. `cache` pins `/etc/ld.so.cache`.

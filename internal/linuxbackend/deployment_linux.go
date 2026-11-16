@@ -18,18 +18,19 @@ import (
 // DeploymentManifest contains protected reviewed capabilities, never authority
 // verdicts or caller inputs. Its complete bytes are part of the backend pin.
 type DeploymentManifest struct {
-	Format          string            `json:"format"`
-	BackendVersion  string            `json:"backend_version"`
-	BackendFiles    []FilePin         `json:"backend_files"`
-	LockPath        string            `json:"lock_path"`
-	MaintenancePath string            `json:"maintenance_path"`
-	NSSHelper       string            `json:"nss_helper"`
-	NSSLibrary      string            `json:"nss_library"`
-	Systemd         *SystemdProfile   `json:"systemd,omitempty"`
-	Loader          LoaderProfile     `json:"loader"`
-	Skeleton        string            `json:"skeleton"`
-	NoLauncher      NoLauncherProfile `json:"no_launcher"`
-	Inventory       InventoryProfile  `json:"inventory"`
+	Format          string                  `json:"format"`
+	BackendVersion  string                  `json:"backend_version"`
+	BackendFiles    []FilePin               `json:"backend_files"`
+	LockPath        string                  `json:"lock_path"`
+	MaintenancePath string                  `json:"maintenance_path"`
+	NSSHelper       string                  `json:"nss_helper"`
+	NSSLibrary      string                  `json:"nss_library"`
+	Systemd         *SystemdProfile         `json:"systemd,omitempty"`
+	Loader          LoaderProfile           `json:"loader"`
+	Skeleton        string                  `json:"skeleton"`
+	NoLauncher      NoLauncherProfile       `json:"no_launcher"`
+	Inventory       InventoryProfile        `json:"inventory"`
+	FirstRun        *qualification.FirstRun `json:"first_run,omitempty"`
 }
 
 const deploymentVersion = "local-v0-linux-qualification/1"
@@ -200,7 +201,12 @@ func (m DeploymentManifest) validate(p manager.Policy) error {
 		return qualification.ErrRequired
 	}
 	n := m.NoLauncher
-	if !paths(n.AbsentEntries, true) || !paths(n.ServiceRoots, true) || !filePins(n.Configuration, true) {
+	// Schema validation is independent of the policy's boolean (older offline
+	// schema fixtures do not provide a complete policy). The production loader
+	// additionally enforces the exact policy/profile match below.
+	profilePolicy := p
+	profilePolicy.NoLauncher = m.FirstRun == nil
+	if !paths(n.AbsentEntries, profilePolicy.NoLauncher) || !paths(n.ServiceRoots, true) || !filePins(n.Configuration, true) || m.FirstRun.Validate(profilePolicy) != nil {
 		return qualification.ErrRequired
 	}
 	required := filepath.Join(p.Root, "libexec/swarma-user-launcher")
@@ -208,7 +214,7 @@ func (m DeploymentManifest) validate(p manager.Policy) error {
 	for _, v := range n.AbsentEntries {
 		found = found || v == required
 	}
-	if !found {
+	if found != profilePolicy.NoLauncher {
 		return qualification.ErrRequired
 	}
 	for _, required := range []string{"/etc/systemd/system", "/run/systemd/system", "/usr/lib/systemd/system"} {
@@ -262,13 +268,20 @@ func readPublic(ctx context.Context, path string) ([]byte, error) {
 	defer d.Close()
 	return linuxos.ReadProtected(ctx, d, filepath.Base(path), 8<<20, false)
 }
+func (m DeploymentManifest) validatePolicy(p manager.Policy) error {
+	if m.validate(p) != nil || m.FirstRun.Validate(p) != nil {
+		return qualification.ErrRequired
+	}
+	return nil
+}
+
 func loadDeployment(ctx context.Context, p manager.Policy) (DeploymentManifest, []byte, error) {
 	raw, e := readPrivate(ctx, filepath.Join(p.Root, "etc/user-manager-deployment.json"), p.Limits.RecordBytes)
 	if e != nil {
 		return DeploymentManifest{}, nil, e
 	}
 	var m DeploymentManifest
-	if qualification.DecodeClosed(raw, &m, p.Limits.RecordBytes) != nil || m.validate(p) != nil {
+	if qualification.DecodeClosed(raw, &m, p.Limits.RecordBytes) != nil || m.validatePolicy(p) != nil {
 		return m, nil, qualification.ErrRequired
 	}
 	return m, raw, nil

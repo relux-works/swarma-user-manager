@@ -16,7 +16,8 @@ import (
 // Deps are the launcher's trusted inputs and native seams. Production wires
 // the real primitives; tests replace only the process-level seams (scrub,
 // descriptor placement, session, self identity, drop, enter, exec, scanner,
-// clock) and keep the real protected files, lock and journal verification.
+// clock, qualification) and keep the protected files, lock and journal
+// verification. Tagged integration tests use the actual protected journal reader.
 type Deps struct {
 	Policy    manager.Policy
 	Authority manager.Authority
@@ -31,9 +32,11 @@ type Deps struct {
 	Drop      func(uid, gid uint32) error
 	Enter     func(home *os.File) error
 	Exec      func(fd int, argv, env []string) error
+	Qualify   func(context.Context, manager.Policy) error
 }
 
-// Production returns the real native seams for the root launcher binary.
+// Production returns native seams for the root launcher binary. The entry must
+// also wire Qualify to the integrated backend; a missing qualifier refuses.
 func Production(p manager.Policy, a manager.Authority, s *Store, scanner Scanner) Deps {
 	return Deps{Policy: p, Authority: a, Journal: manager.NativeJournal{Path: filepath.Join(p.Root, "lib/user-manager/generations")}, Store: s, Scanner: scanner, Clock: BootClock{}, Scrub: ScrubDescriptors, Place: PlaceFD3, Session: NewSession, Self: SelfIdentity, Drop: DropPrivileges, Enter: func(h *os.File) error { return unix.Fchdir(int(h.Fd())) }, Exec: ExecVerified}
 }
@@ -58,11 +61,13 @@ type approvedExecutors struct {
 // ExecProfile is the pinned R-EXEC profile body. This slice verifies its
 // identity and resolved body digest against the gate before every start and
 // records the pin; OS enforcement of the allowlist (the per-execution unit)
-// remains the separate R-CEILINGS/root qualification gate.
+// remains a separate R-CEILINGS/root qualification gate. Requested ceilings
+// are refused until enforceable; the supervised trusted profile declares none.
 type ExecProfile struct {
-	Format string   `json:"format"`
-	ID     string   `json:"id"`
-	Allow  []string `json:"allow"`
+	Format   string   `json:"format"`
+	ID       string   `json:"id"`
+	Allow    []string `json:"allow"`
+	Ceilings []string `json:"ceilings,omitempty"`
 }
 
 func (l Launcher) resolveExecutor(id string) (*os.File, string, error) {
@@ -108,7 +113,7 @@ func (l Launcher) pinnedProfile(g Gate) (ExecProfile, error) {
 		return ExecProfile{}, fail("qualification_required")
 	}
 	var p ExecProfile
-	if manager.Strict(b, &p) != nil || p.Format != profileFormat || p.ID != g.ProfileID || len(p.Allow) == 0 {
+	if manager.Strict(b, &p) != nil || p.Format != profileFormat || p.ID != g.ProfileID || len(p.Allow) == 0 || len(p.Ceilings) != 0 {
 		return ExecProfile{}, fail("qualification_required")
 	}
 	for i, path := range p.Allow {
@@ -148,8 +153,11 @@ func (l Launcher) Run(ctx context.Context, raw []byte, in manager.Invocation) ma
 	if e := manager.ValidatePolicy(p); e != nil {
 		return refused(id, e)
 	}
-	// The no_launcher fence flag is never flipped; the explicit gate enables.
-	if !p.NoLauncher || !p.Qualified || p.Class != "trusted" {
+	// A gate cannot replace deployment qualification or override no_launcher.
+	if p.NoLauncher {
+		return refused(id, fail("operation_unsupported"))
+	}
+	if !p.Qualified || p.Class != "trusted" {
 		return refused(id, fail("qualification_required"))
 	}
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(p.Limits.OperationMS)*time.Millisecond)
@@ -162,6 +170,9 @@ func (l Launcher) Run(ctx context.Context, raw []byte, in manager.Invocation) ma
 		return refused(id, fail("caller_role_not_permitted"))
 	}
 	if d.Store == nil || d.Journal == nil || d.Scanner == nil || d.Clock == nil || d.Place == nil || d.Session == nil || d.Self == nil || d.Drop == nil || d.Enter == nil || d.Exec == nil {
+		return refused(id, fail("qualification_required"))
+	}
+	if d.Qualify == nil || d.Qualify(ctx, p) != nil {
 		return refused(id, fail("qualification_required"))
 	}
 	boot, now, e := d.Clock.Now()
@@ -206,6 +217,14 @@ func (l Launcher) Run(ctx context.Context, raw []byte, in manager.Invocation) ma
 	if e := d.Journal.Checkpoint(ctx, floor, func(v genjournal.View) error { view = v; return nil }); e != nil {
 		return refused(id, e)
 	}
+	// Both managed identities must be current in the same protected view.
+	// The configured caller list remains the authority's, not a second roster.
+	if view.Active(caller.UID, caller.Generation) != nil {
+		return refused(id, fail("generation_not_active"))
+	}
+	if gate.UID == caller.UID || r.Generation == caller.Generation {
+		return refused(id, fail("target_not_owned"))
+	}
 	row, ok := view.Generation(r.Generation)
 	latest := false
 	for _, v := range view.Rows {
@@ -213,7 +232,7 @@ func (l Launcher) Run(ctx context.Context, raw []byte, in manager.Invocation) ma
 			latest = true
 		}
 	}
-	if !ok || !latest || row.State != "active" {
+	if !ok || !latest || row.State != "active" || view.Active(row.UID, r.Generation) != nil {
 		return refused(id, fail("generation_not_active"))
 	}
 	if row.UID != gate.UID {

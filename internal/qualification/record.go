@@ -38,6 +38,7 @@ type Inputs struct {
 	NSSConfiguration linuxos.NSSConfiguration `json:"nss_configuration"`
 	NSSModules       []linuxos.NSSModule      `json:"nss_modules"`
 	StationRange     StationRange             `json:"station_range"`
+	FirstRun         *FirstRun                `json:"first_run,omitempty"`
 }
 type Check struct {
 	Result string `json:"result"`
@@ -58,7 +59,8 @@ type Checks struct {
 }
 
 func (c Checks) values() []Check {
-	return []Check{c.PolicyProtection, c.SourceConfiguration, c.ApprovedSkeleton, c.CronDenial, c.AtDenial, c.AllowPrecedence, c.NoLinger, c.AccountDirectory, c.DynamicUserRanges, c.NoLauncher, c.AccountRestrictions}
+	checks := []Check{c.PolicyProtection, c.SourceConfiguration, c.ApprovedSkeleton, c.CronDenial, c.AtDenial, c.AllowPrecedence, c.NoLinger, c.AccountDirectory, c.DynamicUserRanges, c.NoLauncher, c.AccountRestrictions}
+	return checks
 }
 func (c Checks) valid() bool {
 	for _, v := range c.values() {
@@ -173,6 +175,9 @@ func (i Inputs) Digest() (string, error) {
 func (i Inputs) Validate(p manager.Policy) error {
 	pd, e := PolicyDigest(p)
 	r := i.StationRange
+	if i.FirstRun.Validate(p) != nil || i.FirstRun != nil && i.BinaryDigest != i.FirstRun.Helper.Digest {
+		return ErrRequired
+	}
 	if e != nil || i.Format != "station-qualification-inputs/1" || i.PolicyDigest != pd || !validHash(i.BinaryDigest) || i.BackendDigest != p.BackendDigest || i.SkeletonDigest != p.SkeletonDigest || r != (StationRange{p.UIDMin, p.UIDMax, p.GIDMin, p.GIDMax}) {
 		return ErrRequired
 	}

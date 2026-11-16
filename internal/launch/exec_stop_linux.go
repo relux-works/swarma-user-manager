@@ -41,7 +41,7 @@ func HandleStop(ctx context.Context, raw []byte, in manager.Invocation, d StopDe
 	if e := manager.ValidatePolicy(p); e != nil {
 		return refused(id, e)
 	}
-	if !p.NoLauncher || !p.Qualified || p.Class != "trusted" {
+	if p.NoLauncher || !p.Qualified || p.Class != "trusted" {
 		return refused(id, fail("qualification_required"))
 	}
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(p.Limits.OperationMS)*time.Millisecond)

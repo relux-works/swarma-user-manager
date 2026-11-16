@@ -202,8 +202,8 @@ func TestLauncherRefusesExecutorAndProfileDrift(t *testing.T) {
 		t.Fatal("drift admitted an effect")
 	}
 	flipped := g.deps()
-	flipped.Policy.NoLauncher = false
-	wantCode(t, Launcher{flipped}.Run(context.Background(), g.launchRequest("launch-1", nil), g.invocation(g.caller)), "qualification_required")
+	flipped.Policy.NoLauncher = true
+	wantCode(t, Launcher{flipped}.Run(context.Background(), g.launchRequest("launch-1", nil), g.invocation(g.caller)), "operation_unsupported")
 
 	h := newFixture(t)
 	h.installGate(h.gate())

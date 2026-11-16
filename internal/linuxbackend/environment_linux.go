@@ -240,7 +240,7 @@ func (h *ProductionEnvironment) localFingerprint(ctx context.Context, p manager.
 	if e = verifyFiles(ctx, m.BackendFiles); e != nil {
 		return deploymentFingerprint{}, e
 	}
-	digest, e := linuxos.ExecutingDigest(ctx, filepath.Join(p.Root, "libexec/swarma-user-manager"))
+	digest, e := deploymentBinaryDigest(ctx, p, m)
 	if e != nil {
 		return deploymentFingerprint{}, e
 	}
@@ -253,7 +253,14 @@ func (h *ProductionEnvironment) localFingerprint(ctx context.Context, p manager.
 	if e = verifyFiles(ctx, []FilePin{m.Loader.Cache}); e != nil {
 		return deploymentFingerprint{}, e
 	}
-	if e = checkNoLauncherLocal(ctx, m); e != nil {
+	if m.FirstRun != nil {
+		// With launch capability present, a newly added service reference is no
+		// longer inert. Re-scan under the same finite local-work budget.
+		e = checkNoLauncher(ctx, m, l)
+	} else {
+		e = checkNoLauncherLocal(ctx, m)
+	}
+	if e != nil {
 		return deploymentFingerprint{}, e
 	}
 	etc, e := linuxos.OpenRoot("/etc")
@@ -317,14 +324,12 @@ func (h *ProductionEnvironment) localFingerprint(ctx context.Context, p manager.
 	return deploymentFingerprint{qualification.Hash(b), namespace}, nil
 }
 
-// checkNoLauncherLocal stays under the core lock: retained absence/configuration
-// pins only. Without the protected launcher binary, a new unit reference cannot
-// execute it. Full tree scans belong to issuance, not repeated guard checks.
+// checkNoLauncherLocal rechecks retained absence/presence and configuration pins.
+// The default profile is unchanged. Integration additionally refreshes the full
+// bounded service scan in localFingerprint, because the launcher now exists.
 func checkNoLauncherLocal(ctx context.Context, m DeploymentManifest) error {
-	for _, path := range m.NoLauncher.AbsentEntries {
-		if linuxos.ProtectedAbsent(path) != nil {
-			return qualification.ErrRequired
-		}
+	if e := checkLauncherArtifacts(ctx, m, linuxos.ProtectedAbsent, checkFirstRunLocal); e != nil {
+		return e
 	}
 	unit, e := readPublic(ctx, "/etc/systemd/system/swarma-user-manager-qualify.service")
 	if e != nil || validateQualificationUnit(string(unit), filepath.Join(filepath.Dir(m.NSSHelper), "swarma-user-manager")) != nil {
@@ -339,11 +344,17 @@ func checkNoLauncherLocal(ctx context.Context, m DeploymentManifest) error {
 // Both initial and boot issuance reach this live check through CheckAll. Tree
 // observations grant no pinned inputs; only the reviewed root paths are bound.
 func checkNoLauncher(ctx context.Context, m DeploymentManifest, l linuxos.Limits) error {
-	if e := checkNoLauncherLocal(ctx, m); e != nil {
+	return checkLauncherProfile(ctx, m, l, checkNoLauncherLocal, linuxos.CheckNoLauncherServices)
+}
+
+// The same complete scan is used in both profiles; only the exact installed
+// artifact's absence/presence predicate changes. No service-tree exception.
+func checkLauncherProfile(ctx context.Context, m DeploymentManifest, l linuxos.Limits, local func(context.Context, DeploymentManifest) error, scan func(context.Context, string, linuxos.Limits) error) error {
+	if e := local(ctx, m); e != nil {
 		return e
 	}
 	for _, path := range m.NoLauncher.ServiceRoots {
-		if e := linuxos.CheckNoLauncherServices(ctx, path, l); e != nil {
+		if e := scan(ctx, path, l); e != nil {
 			return e
 		}
 	}
@@ -533,7 +544,7 @@ func (h *ProductionEnvironment) Capture(ctx context.Context, p manager.Policy) (
 	if e != nil {
 		return qualification.Inputs{}, nil, e
 	}
-	digest, e := linuxos.ExecutingDigest(ctx, filepath.Join(p.Root, "libexec/swarma-user-manager"))
+	digest, e := deploymentBinaryDigest(ctx, p, m)
 	if e != nil {
 		return qualification.Inputs{}, nil, e
 	}
@@ -572,7 +583,7 @@ func (h *ProductionEnvironment) Capture(ctx context.Context, p manager.Policy) (
 	if e != nil {
 		return qualification.Inputs{}, nil, e
 	}
-	out := qualification.Inputs{Format: "station-qualification-inputs/1", PolicyDigest: pd, BinaryDigest: digest, BackendDigest: p.BackendDigest, SkeletonDigest: p.SkeletonDigest, NSSConfiguration: cfg, NSSModules: modules, StationRange: qualification.StationRange{UIDMin: p.UIDMin, UIDMax: p.UIDMax, GIDMin: p.GIDMin, GIDMax: p.GIDMax}}
+	out := qualification.Inputs{Format: "station-qualification-inputs/1", PolicyDigest: pd, BinaryDigest: digest, BackendDigest: p.BackendDigest, SkeletonDigest: p.SkeletonDigest, NSSConfiguration: cfg, NSSModules: modules, StationRange: qualification.StationRange{UIDMin: p.UIDMin, UIDMax: p.UIDMax, GIDMin: p.GIDMin, GIDMax: p.GIDMax}, FirstRun: m.FirstRun}
 	if out.Validate(p) != nil {
 		return qualification.Inputs{}, nil, qualification.ErrRequired
 	}
@@ -798,7 +809,12 @@ func (h *ProductionEnvironment) CheckAll(ctx context.Context, p manager.Policy, 
 	}
 	q.AccountDirectory = checkResult(e == nil)
 	q.DynamicUserRanges = checkResult(i.Validate(p) == nil)
-	q.NoLauncher = checkResult(p.NoLauncher && checkNoLauncher(ctx, m, l) == nil)
+	q.NoLauncher = checkResult(checkNoLauncher(ctx, m, l) == nil)
+	if m.FirstRun != nil {
+		// The legacy slot is a profile-wide predicate, not launcher absence:
+		// both pinned binaries and the internal observer must qualify together.
+		q.NoLauncher = checkResult(q.NoLauncher.Result == "ok" && firstRunObservation(ctx))
+	}
 	_, accounts, e := h.reservedNames(ctx)
 	restricted := e == nil && provider != nil && checkInventorySpools(ctx, m.Inventory) == nil
 	ctx = context.WithValue(ctx, issuanceDirectoryKey{}, issuanceDirectory{i: i, names: names})

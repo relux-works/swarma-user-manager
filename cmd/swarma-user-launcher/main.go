@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/relux-works/swarma-user-manager/internal/launch"
+	"github.com/relux-works/swarma-user-manager/internal/linuxbackend"
 	"github.com/relux-works/swarma-user-manager/internal/manager"
 )
 
@@ -56,6 +57,11 @@ func run() int {
 		_ = json.NewEncoder(os.Stdout).Encode(launch.InvocationRefusal(raw, in))
 		return 1
 	}
+	// Scrub before opening any protected store, scanner or qualification handle.
+	placeholder, e := launch.ScrubDescriptors()
+	if e != nil {
+		return refuse(raw, "request_invalid")
+	}
 	p, e := manager.LoadPolicy()
 	if e != nil {
 		return refuse(raw, "qualification_required")
@@ -70,7 +76,10 @@ func run() int {
 		return refuse(raw, "qualification_required")
 	}
 	defer scanner.Close()
-	l := launch.Launcher{Deps: launch.Production(p, manager.FileAuthority{Root: p.Root}, store, scanner)}
+	deps := launch.Production(p, manager.FileAuthority{Root: p.Root}, store, scanner)
+	deps.Scrub = func() (launch.Placeholder, error) { return placeholder, nil }
+	deps.Qualify = linuxbackend.New(p).Qualified
+	l := launch.Launcher{Deps: deps}
 	r := l.Run(context.Background(), raw, in)
 	// A returned response is always a refusal: a successful start replaced
 	// this process image. An OK value here means exec did not happen.
