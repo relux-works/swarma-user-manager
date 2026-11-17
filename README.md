@@ -149,6 +149,15 @@ local syntax verification; keep stdout/stderr, exit codes and raw metadata in
 private task artifacts. The existing hosted root probe does not qualify that host. Open decisions are recorded in
 [the unresolved register](UNRESOLVED_QUESTIONS.md#macos-station-backend-gates).
 
+## Release tools
+
+| Tool | Purpose and command | Outputs |
+|---|---|---|
+| Linux pre-release template (Bash 4+, Go 1.26.10, Git, GNU coreutils, Python 3) | On main: `.scripts/release-admit.sh v1.2.3`; `GO=/absolute/path/to/go .scripts/release-build.sh /absolute/new/dist /absolute/source`; `gh workflow run release.yml --ref main -f tag=v1.2.3`; see [release trust and isolated build setup](docs/releasing.md) | Linux amd64/arm64 binaries, `SHA256SUMS`, `provenance.json`, canonical `release-set.json`; workflow creates a PRE-RELEASE draft |
+| OpenSSH / GitHub CLI optional bot signature | `GO=/absolute/path/to/go .scripts/release-sign.sh v1.2.3`; independent rebuild and exact digest comparison before local signature/upload | `SHA256SUMS.sig`; `.temp/release-sign.*` rebuild/readback evidence; agent-held key, proves nothing about origin |
+| Python 3 metadata / digest verification | `.scripts/release-verify.sh /absolute/assets EXPECTED_FRAGMENT_SHA256`; builder invokes `.scripts/release-metadata.py create`, verifier invokes `check` | Canonical metadata and digest consistency; installer trusts only the aggregate set digest approved by the owner in person before any root step; tag allowlist is no trust root |
+| Release fixture controls / actionlint (optional) | `GO=/absolute/path/to/go .scripts/release-test.sh /absolute/new/scratch`; `actionlint .github/workflows/release.yml` when installed | Real Git/SSH/Go positive and negative controls plus local GitHub CLI double; named logs in isolated scratch; lint output |
+
 ## Generation journal tools
 
 Linux and Go 1.26 or later are required. The Go module pins the format owner's
