@@ -517,8 +517,12 @@ qualified; the proposal is not implementation or activation evidence.
 The pure-Go release profile (`CGO_ENABLED=0`) cannot build `cmd/swarma-nss-probe`
 (`linux && cgo`), but the deployment contract requires it as a protected
 root-owned executable. The release set is therefore not a deployable closure.
-Owner decision: either (a) a cgo collector build profile (per-architecture native
-runners, a pinned C toolchain, `CGO_ENABLED=1` provenance), made first at the
-release template's source, or (b) an explicitly accepted interim exclusion with
-the collector delivered by another owner-approved artifact. Until decided, no
-root step installs the collector from outside an owner-approved digest.
+DECIDED (2026-11-17, the project lead, as a build-profile choice): (a) a cgo
+collector build profile (per-architecture native runners, a pinned C toolchain,
+`CGO_ENABLED=1` provenance), made first at the release template's source, so that
+`swarma-nss-probe` ships in the release set with SHA256SUMS and provenance like
+every other binary. No interim exclusion is accepted. Until that profile lands,
+this repository's pre-release is the pure-Go step only: the exact artifact set
+is enforced by `.github/release/expected-artifacts`, the installer keeps the
+collector as MISSING, and no root step installs it from outside an
+owner-approved digest.

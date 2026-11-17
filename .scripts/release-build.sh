@@ -32,6 +32,11 @@ for arch in amd64 arm64; do
     "$go_bin" build -trimpath -buildvcs=false -ldflags=-buildid= -o "$binary" "$package"
   done <<< "$packages"
 done
+expected="$policy_root/.github/release/expected-artifacts"
+if [[ -f $expected ]]; then
+  diff <(grep -v '^#' "$expected" | sed '/^$/d' | LC_ALL=C sort) \
+       <(cd "$out" && ls -1 | LC_ALL=C sort) >/dev/null || fail artifact-set-mismatch
+fi
 cd "$out"
 python3 "$policy_root/.scripts/release-metadata.py" create "$out" "$commit" \
   "$("$go_bin" env GOVERSION)" "$SOURCE_DATE_EPOCH"
