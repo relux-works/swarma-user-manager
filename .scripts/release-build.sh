@@ -33,10 +33,9 @@ for arch in amd64 arm64; do
   done <<< "$packages"
 done
 expected="$policy_root/.github/release/expected-artifacts"
-if [[ -f $expected ]]; then
-  diff <(grep -v '^#' "$expected" | sed '/^$/d' | LC_ALL=C sort) \
-       <(cd "$out" && ls -1 | LC_ALL=C sort) >/dev/null || fail artifact-set-mismatch
-fi
+[[ -f $expected && ! -L $expected ]] || fail expected-artifacts-missing
+diff <(grep -v '^#' "$expected" | sed '/^$/d' | LC_ALL=C sort) \
+     <(cd "$out" && ls -1 | LC_ALL=C sort) >/dev/null || fail artifact-set-mismatch
 cd "$out"
 python3 "$policy_root/.scripts/release-metadata.py" create "$out" "$commit" \
   "$("$go_bin" env GOVERSION)" "$SOURCE_DATE_EPOCH"

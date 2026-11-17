@@ -35,6 +35,7 @@ cp "$source_root/.github/workflows/release.yml" .github/workflows/
 printf 'module example.invalid/releasefixture\n\ngo 1.25\n' > go.mod
 printf 'package main\nfunc main() { println("inert release fixture") }\n' > cmd/example/main.go
 printf 'main fixture\n' > content
+printf 'example_linux_amd64\nexample_linux_arm64\n' > .github/release/expected-artifacts
 git add .
 git commit -q -S -m 'Create isolated release fixture'
 base=$(git rev-parse HEAD)
@@ -131,6 +132,16 @@ expect_refusal dirty_build_source dirty-build-source .scripts/release-build.sh "
 [[ ! -e $scratch/refused-dist ]] || fail dirty-source-partial-output
 rm "$scratch/build-source/untracked.go"
 expect_ok fixture_build .scripts/release-build.sh "$scratch/assets" "$scratch/build-source"
+# Exact artifact-set control: the build fails closed on any difference from the
+# policy list, and when the policy list is missing. Each case beside the valid build above.
+cp .github/release/expected-artifacts "$scratch/expected.saved"
+printf 'example_linux_amd64\nexample_linux_arm64\nmissing-tool_linux_amd64\n' > .github/release/expected-artifacts
+expect_refusal missing_artifact artifact-set-mismatch .scripts/release-build.sh "$scratch/set-missing" "$scratch/build-source"
+printf 'example_linux_amd64\n' > .github/release/expected-artifacts
+expect_refusal extra_artifact artifact-set-mismatch .scripts/release-build.sh "$scratch/set-extra" "$scratch/build-source"
+rm .github/release/expected-artifacts
+expect_refusal missing_expected_list expected-artifacts-missing .scripts/release-build.sh "$scratch/set-nolist" "$scratch/build-source"
+cp "$scratch/expected.saved" .github/release/expected-artifacts
 fragment=$(sha256sum "$scratch/assets/release-set.json")
 fragment=${fragment%% *}
 expect_ok digest_control "$verify" "$scratch/assets" "$fragment"
