@@ -1,7 +1,8 @@
 # Linux pre-releases (test profile)
 
 The [workflow](../.github/workflows/release.yml) produces a **PRE-RELEASE draft**
-with every `cmd/` main package for Linux amd64/arm64, `SHA256SUMS`,
+with every `cmd/` main package that builds under the pure-Go release profile
+(`CGO_ENABLED=0`) for Linux amd64/arm64, `SHA256SUMS`,
 `provenance.json` and the canonical `release-set.json` fragment. The optional
 bot checksum signature is labelled exactly:
 
@@ -88,7 +89,7 @@ aggregate owner approval remain required.
 [release-build.sh](../.scripts/release-build.sh) requires Go **1.26.10** and a clean
 source checkout. Its optional second argument is an absolute source checkout;
 the executable builder and metadata helper remain in the default-branch checkout.
-Every `main` under `./cmd/...` is built for amd64 and arm64 with `CGO_ENABLED=0`,
+Every `main` under `./cmd/...` that builds under `CGO_ENABLED=0` is built for amd64 and arm64 with `CGO_ENABLED=0`,
 `-mod=readonly -p=2 -trimpath -buildvcs=false -ldflags=-buildid=`, `GOAMD64=v1`,
 `GOARM64=v8.0`, empty `GOEXPERIMENT`, `GOTOOLCHAIN=local`, `GOWORK=off`,
 `GOENV=off`, `LC_ALL=C` and `TZ=UTC`. Modules are pinned by `go.mod`/`go.sum`.
@@ -106,6 +107,14 @@ pure-Go release profile, both Linux architectures build the same command list:
 
 `./cmd/swarma-nss-probe` requires `linux && cgo` and is excluded by the template's
 `CGO_ENABLED=0` profile. No Darwin binaries are built.
+
+**This release set is NOT a complete deployable closure.** The deployment
+contract requires `swarma-nss-probe` as a protected root-owned executable at
+`<root>/libexec/swarma-nss-probe` ([linux backend](linux-backend.md)), and the
+manifest is refused without it. That collector is not in this release set, so no
+root step may install it from outside an owner-approved release-set digest.
+The build profile for it is an open owner decision (see
+[unresolved questions](../UNRESOLVED_QUESTIONS.md)).
 
 `provenance.json` records the source commit, Go version, flags, environment and
 `SOURCE_DATE_EPOCH`. It describes build inputs; it is not an origin attestation.

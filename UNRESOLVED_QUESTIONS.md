@@ -511,3 +511,14 @@ Unknown or late whole-account absence retains fences, claim and cleanup debt.
 No helper/launcher request member or policy verifier is proposed. Linux and macOS
 remain closed until their native mechanisms and negative/control obligations are
 qualified; the proposal is not implementation or activation evidence.
+
+## Release set: the NSS collector is outside the pre-release
+
+The pure-Go release profile (`CGO_ENABLED=0`) cannot build `cmd/swarma-nss-probe`
+(`linux && cgo`), but the deployment contract requires it as a protected
+root-owned executable. The release set is therefore not a deployable closure.
+Owner decision: either (a) a cgo collector build profile (per-architecture native
+runners, a pinned C toolchain, `CGO_ENABLED=1` provenance), made first at the
+release template's source, or (b) an explicitly accepted interim exclusion with
+the collector delivered by another owner-approved artifact. Until decided, no
+root step installs the collector from outside an owner-approved digest.
