@@ -22,6 +22,11 @@ consumer-contract refinement. The specification acceptor and broker section 2.2
 still need to record that obligation explicitly. UID-kind permanence remains
 producer retained-history enforcement, not a durable UID-only consumer check.
 
+The shared-only fixture gate also pins the reference decoder's 8 MiB input
+bound so its refusal branch is exercised. That is a producer-utility refinement,
+not an owner decision silently added to the public schema; the specification
+acceptor still needs to decide whether to adopt the same consumer size bound.
+
 ## Decided architecture
 
 | Decision | Binding disposition |

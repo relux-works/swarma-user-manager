@@ -203,16 +203,29 @@ func TestSharedFixtureConsumerContract(t *testing.T) {
 			}
 			seenJournals[example.Journal] = true
 			view := fixtureJournal(t, example.Journal, example.JournalHead)
-			if example.Name == "duplicate-generation-agent-uid" || example.Name == "unknown-service-uid" {
-				if err := view.Active(int64(*example.UID), strings.Repeat("1", 32)); err != nil {
+			if example.Rule == "uid-binding" && example.Verdict != "accept" || example.Name == "duplicate-generation-agent-uid" {
+				var document Document
+				if err := json.Unmarshal(fixtureBytes(t, example.File), &document); err != nil || len(document.Accounts) == 0 {
+					t.Fatal("UID-binding fixture has no candidate", err)
+				}
+				if err := view.Active(int64(*example.UID), document.Accounts[0].Generation); err != nil {
 					t.Fatal("UID-binding refusal lacks an active queried journal pair", err)
+				}
+			}
+			if example.Rule == "uid-binding-journaled-record" {
+				document, err := Decode(fixtureBytes(t, example.File), view.Tail.Hash)
+				if err != nil || len(document.Accounts) != 1 || view.Active(int64(document.Accounts[0].UID), document.Accounts[0].Generation) != nil {
+					t.Fatal("record-journaled UID-binding row lacks the service's own active pair", err)
+				}
+				if example.Verdict != "accept" && document.Accounts[0].UID == *example.UID {
+					t.Fatal("record-journaled refusal must query another UID")
 				}
 			}
 			if example.Verdict == "accept" {
 				if example.Principal == nil || example.Principal.UID != *example.UID || example.Principal.Generation != example.Generation || example.Principal.Service != ServiceName {
 					t.Fatal("service accept needs its exact consumer principal")
 				}
-				if err := view.Active(int64(*example.UID), example.Generation); err != nil || len(view.Rows) != 1 {
+				if err := view.Active(int64(*example.UID), example.Generation); err != nil {
 					t.Fatal("service accept lacks its exact active journal pair", err)
 				}
 			} else if example.Principal != nil || example.Generation != "" {
@@ -336,7 +349,7 @@ func TestSharedServiceUIDBinding(t *testing.T) {
 	manifest := fixtures(t)
 	seen := 0
 	for _, example := range manifest.Cases {
-		if example.Name != "duplicate-generation-agent-uid" && example.Name != "unknown-service-uid" {
+		if example.Verdict == "accept" || example.Name != "duplicate-generation-agent-uid" && example.Rule != "uid-binding" && example.Rule != "uid-binding-journaled-record" {
 			continue
 		}
 		seen++
@@ -357,7 +370,7 @@ func TestSharedServiceUIDBinding(t *testing.T) {
 			}
 		})
 	}
-	if seen != 2 {
+	if seen != 3 {
 		t.Fatal("missing UID-binding fixture rows", seen)
 	}
 }

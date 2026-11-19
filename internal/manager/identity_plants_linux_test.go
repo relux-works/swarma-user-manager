@@ -27,7 +27,34 @@ func TestIdentityProjectionPlants(t *testing.T) {
 		t.Fatal(err)
 	}
 	root := filepath.Clean(filepath.Join(current, "../.."))
+	canonicalBefore := `if err != nil || !bytes.Equal(canonical, raw) {
+		return document, ErrMismatch
+	}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if decoder.Decode(&document) != nil || document.JournalHead != journalHead {
+		return Document{}, ErrMismatch
+	}
+	reencoded, err := Encode(document)
+	if err != nil || !bytes.Equal(reencoded, raw) {`
+	canonicalAfter := strings.ReplaceAll(strings.ReplaceAll(canonicalBefore, "!bytes.Equal(canonical, raw)", "len(canonical) == 0 || !fixtureCanonicalKeyOrder(raw) || !bytes.Equal(bytes.TrimSpace(raw), raw)"), "!bytes.Equal(reencoded, raw)", "len(reencoded) == 0")
 	plants := []identityPlant{
+		{"consumer-record-uid-blind", "internal/identities/identities_test.go", `if candidate.UID == uid {
+			account, err := document.Service(uid, candidate.Generation)
+			if err != nil || view.Active(int64(uid), candidate.Generation) != nil {`, `if candidate.Kind == "service" && candidate.State == "active" {
+			account, err := document.Service(candidate.UID, candidate.Generation)
+			account.UID = uid
+			if err != nil || view.Active(int64(candidate.UID), candidate.Generation) != nil {`, "./internal/identities", "TestSharedFixtures/foreign-uid-journaled-service", "want principal_ledger_mismatch"},
+		{"document-member-case-folded", "internal/identities/identities.go", `if err != nil || !bytes.Equal(reencoded, raw) {`, `if err != nil || len(reencoded) == 0 {`, "./internal/identities", "TestSharedFixtures/case-variant-document-member", "want principal_ledger_mismatch"},
+		{"account-member-case-folded", "internal/identities/identities.go", `if err != nil || !bytes.Equal(reencoded, raw) {`, `if err != nil || len(reencoded) == 0 {`, "./internal/identities", "TestSharedFixtures/case-variant-account-member", "want principal_ledger_mismatch"},
+		{"ccj-whitespace-ignored", "internal/identities/identities.go", canonicalBefore, canonicalAfter, "./internal/identities", "TestSharedFixtures/inner-whitespace", "want principal_ledger_mismatch"},
+		{"ccj-escapes-ignored", "internal/identities/identities.go", canonicalBefore, canonicalAfter, "./internal/identities", "TestSharedFixtures/escaped-service-name", "want principal_ledger_mismatch"},
+		{"shared-coverage-snapshot-unwitnessed-branch", "internal/identities/fixture_coverage_test.go", `functions, branches := prepareFixtureCoverage(t, work)`, `unwitnessedPath := filepath.Join(work, "internal/identities/identities.go")
+	unwitnessedSource, sourceErr := os.ReadFile(unwitnessedPath)
+	if sourceErr != nil { t.Fatal(sourceErr) }
+	unwitnessedSource = []byte(strings.Replace(string(unwitnessedSource), "var document Document", "var document Document\n\tif len(raw) == 7 { return document, ErrMismatch }", 1))
+	if writeErr := os.WriteFile(unwitnessedPath, unwitnessedSource, 0644); writeErr != nil { t.Fatal(writeErr) }
+	functions, branches := prepareFixtureCoverage(t, work)`, "./internal/identities", "TestSharedFixtureCoverageGate", "uncovered statement/refusal branch"},
 		{"matrix-adjacent-accept-missing", "internal/identities/fixture_matrix_test.go", `validateFixtureMatrix(t, fixtures(t))`, `validateFixtureMatrix(t, func() fixtureManifest { manifest := fixtures(t); for index, example := range manifest.Cases { if example.Name == manifest.Matrix[0].Accept { manifest.Cases = append(manifest.Cases[:index], manifest.Cases[index+1:]...); break } }; return manifest }())`, "./internal/identities", "TestSharedFixtureDecisionMatrix", "lacks adjacent accept/refuse"},
 		{"matrix-adjacent-refuse-missing", "internal/identities/fixture_matrix_test.go", `validateFixtureMatrix(t, fixtures(t))`, `validateFixtureMatrix(t, func() fixtureManifest { manifest := fixtures(t); for index, example := range manifest.Cases { if example.Name == manifest.Matrix[0].Refuse { manifest.Cases = append(manifest.Cases[:index], manifest.Cases[index+1:]...); break } }; return manifest }())`, "./internal/identities", "TestSharedFixtureDecisionMatrix", "lacks adjacent accept/refuse"},
 		{"matrix-rule-missing", "internal/identities/fixture_matrix_test.go", `validateFixtureMatrix(t, fixtures(t))`, `validateFixtureMatrix(t, func() fixtureManifest { manifest := fixtures(t); manifest.Matrix = manifest.Matrix[1:]; return manifest }())`, "./internal/identities", "TestSharedFixtureDecisionMatrix", "matrix lacks decision rules"},

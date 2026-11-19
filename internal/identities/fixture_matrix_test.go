@@ -3,6 +3,7 @@ package identities
 import (
 	"bytes"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"os"
 	"reflect"
@@ -11,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/relux-works/swarma-registrar/ccj"
 )
 
 type fixtureRule struct {
@@ -26,7 +29,9 @@ var fixtureDecisionRules = strings.Fields(`
 	active-service-unique uid-kind-lock journal-head journal-generation
 	journal-present journal-active-creating journal-active-retiring
 	journal-active-removed uid-binding service-kind-agent service-kind-workplace
-	service-active service-trusted
+	service-active service-trusted uid-binding-journaled-record
+	document-member-names-exact account-member-names-exact
+	canonical-whitespace canonical-escapes document-size
 `)
 
 func fixtureDuplicateKeys(decoder *json.Decoder, depth int, failures map[string]bool) error {
@@ -66,10 +71,43 @@ func fixtureDuplicateKeys(decoder *json.Decoder, depth int, failures map[string]
 	return err
 }
 
+func fixtureCanonicalKeyOrder(raw []byte) bool {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	var ordered func() bool
+	ordered = func() bool {
+		token, err := decoder.Token()
+		if err != nil {
+			return false
+		}
+		delimiter, container := token.(json.Delim)
+		if !container {
+			return true
+		}
+		previous := ""
+		for decoder.More() {
+			if delimiter == '{' {
+				key, err := decoder.Token()
+				name, text := key.(string)
+				if err != nil || !text || name < previous {
+					return false
+				}
+				previous = name
+			}
+			if !ordered() {
+				return false
+			}
+		}
+		_, err = decoder.Token()
+		return err == nil
+	}
+	return ordered()
+}
+
 func fixtureRuleFailures(t *testing.T, manifest fixtureManifest, example fixtureCase) []string {
 	t.Helper()
 	raw := fixtureBytes(t, example.File)
 	failures := map[string]bool{}
+	failures["document-size"] = len(raw) > MaxBytes
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.UseNumber()
 	var value map[string]any
@@ -79,17 +117,56 @@ func fixtureRuleFailures(t *testing.T, manifest fixtureManifest, example fixture
 	if err := fixtureDuplicateKeys(json.NewDecoder(bytes.NewReader(raw)), 0, failures); err != nil {
 		t.Fatal("matrix duplicate-member scan failed", err)
 	}
-	canonical, err := json.Marshal(value)
-	if err != nil {
-		t.Fatal(err)
-	}
 	failures["canonical-framing"] = !bytes.Equal(raw, bytes.TrimSpace(raw))
 	if !failures["document-members-unique"] && !failures["account-members-unique"] {
-		failures["canonical-key-order"] = !bytes.Equal(bytes.TrimSpace(raw), canonical)
+		var compact bytes.Buffer
+		if err := json.Compact(&compact, bytes.TrimSpace(raw)); err != nil {
+			t.Fatal(err)
+		}
+		failures["canonical-whitespace"] = !bytes.Equal(bytes.TrimSpace(raw), compact.Bytes())
+		_, parseErr := ccj.Parse(raw, ccj.RegistrationMalformed)
+		if parseErr == nil {
+			var normalized bytes.Buffer
+			decoder := json.NewDecoder(bytes.NewReader(compact.Bytes()))
+			for {
+				token, tokenErr := decoder.Token()
+				if tokenErr != nil {
+					break
+				}
+				if text, ok := token.(string); ok {
+					encoded, encodeErr := ccj.Marshal(text, ccj.RegistrationMalformed)
+					if encodeErr != nil {
+						t.Fatal(encodeErr)
+					}
+					normalized.Write(encoded)
+				}
+			}
+			var originalStrings bytes.Buffer
+			for offset := 0; offset < compact.Len(); offset++ {
+				if compact.Bytes()[offset] != '"' {
+					continue
+				}
+				start := offset
+				for offset++; offset < compact.Len(); offset++ {
+					if compact.Bytes()[offset] == '\\' {
+						offset++
+					} else if compact.Bytes()[offset] == '"' {
+						break
+					}
+				}
+				originalStrings.Write(compact.Bytes()[start : offset+1])
+			}
+			failures["canonical-escapes"] = !bytes.Equal(originalStrings.Bytes(), normalized.Bytes())
+			failures["canonical-key-order"] = !fixtureCanonicalKeyOrder(raw)
+		}
 	}
 	for key := range value {
 		if key != "accounts" && key != "format" && key != "journal_head" {
-			failures["document-members-closed"] = true
+			if strings.EqualFold(key, "accounts") || strings.EqualFold(key, "format") || strings.EqualFold(key, "journal_head") {
+				failures["document-member-names-exact"] = true
+			} else {
+				failures["document-members-closed"] = true
+			}
 		}
 	}
 	for _, key := range []string{"accounts", "format", "journal_head"} {
@@ -125,7 +202,15 @@ func fixtureRuleFailures(t *testing.T, manifest fixtureManifest, example fixture
 		keys := strings.Fields("uid kind name class placement generation state")
 		for key := range account {
 			if !strings.Contains(" "+strings.Join(keys, " ")+" ", " "+key+" ") {
-				failures["account-members-closed"] = true
+				known := false
+				for _, allowed := range keys {
+					known = known || strings.EqualFold(key, allowed)
+				}
+				if known {
+					failures["account-member-names-exact"] = true
+				} else {
+					failures["account-members-closed"] = true
+				}
 			}
 		}
 		for _, key := range keys {
@@ -195,9 +280,19 @@ func fixtureRuleFailures(t *testing.T, manifest fixtureManifest, example fixture
 	}
 	if example.Check == "service" {
 		view := fixtureJournal(t, example.Journal, example.JournalHead)
-		failures["uid-binding"] = selected == nil
+		matched := selected != nil
 		if selected == nil && len(accounts) > 0 {
 			selected = accounts[0].(map[string]any)
+		}
+		if !matched {
+			ownActive := false
+			if selected != nil {
+				ownUID, _ := strconv.ParseInt(fmt.Sprint(selected["uid"]), 10, 64)
+				ownGeneration, _ := selected["generation"].(string)
+				ownActive = view.Active(ownUID, ownGeneration) == nil
+			}
+			failures["uid-binding-journaled-record"] = ownActive
+			failures["uid-binding"] = !ownActive
 		}
 		if selected != nil {
 			failures["service-kind-agent"] = selected["kind"] == "agent"
@@ -209,13 +304,16 @@ func fixtureRuleFailures(t *testing.T, manifest fixtureManifest, example fixture
 		for _, row := range view.Rows {
 			if row.UID == int64(*example.UID) {
 				found = true
-				failures["journal-generation"] = selected != nil && row.Generation != selected["generation"]
+				failures["journal-generation"] = matched && row.Generation != selected["generation"]
 				if row.State != "active" {
 					failures["journal-active-"+row.State] = true
 				}
 			}
 		}
-		failures["journal-present"] = !found
+		failures["journal-present"] = matched && !found
+		if !matched && !failures["uid-binding-journaled-record"] && (!found || selected == nil || view.Active(int64(*example.UID), fmt.Sprint(selected["generation"])) != nil) {
+			failures["journal-present"] = true
+		}
 	}
 	var failed []string
 	for rule, failedRule := range failures {
@@ -272,8 +370,8 @@ func validateFixtureMatrix(t *testing.T, manifest fixtureManifest) error {
 	if len(expected) != 0 {
 		return fmt.Errorf("matrix lacks decision rules: %v", expected)
 	}
-	if strings.Count(string(document), "\n| ") != len(manifest.Matrix)+1 {
-		return fmt.Errorf("document matrix contains unregistered rows")
+	if !bytes.Equal(document, renderFixtureMatrix(t, manifest)) {
+		return fmt.Errorf("generated document differs from cases.json or fixture bytes")
 	}
 	return nil
 }
@@ -293,7 +391,7 @@ func TestSharedFixtureDecisionMatrixControls(t *testing.T) {
 	if err := validateFixtureMatrix(t, manifest); err != nil {
 		t.Fatal("matrix positive control", err)
 	}
-	for _, control := range []string{"missing-accept", "missing-refuse", "missing-rule", "not-adjacent", "confounded-refusal"} {
+	for _, control := range []string{"missing-accept", "missing-refuse", "missing-rule", "not-adjacent", "confounded-refusal", "missing-record-journaled-direction", "record-own-pair-missing", "document-meaning-drift"} {
 		t.Run(control, func(t *testing.T) {
 			mutant := manifest
 			mutant.Cases = append([]fixtureCase{}, manifest.Cases...)
@@ -303,6 +401,30 @@ func TestSharedFixtureDecisionMatrixControls(t *testing.T) {
 			case "missing-rule":
 				mutant.Matrix = mutant.Matrix[1:]
 				expected = "matrix lacks decision rules"
+			case "missing-record-journaled-direction":
+				for index, row := range mutant.Matrix {
+					if row.Rule == "uid-binding-journaled-record" {
+						mutant.Matrix = append(mutant.Matrix[:index], mutant.Matrix[index+1:]...)
+						break
+					}
+				}
+				expected = "matrix lacks decision rules"
+			case "record-own-pair-missing":
+				for index, example := range mutant.Cases {
+					if example.Name == "foreign-uid-journaled-service" {
+						for _, peer := range manifest.Cases {
+							if peer.Name == "unknown-service-uid" {
+								mutant.Cases[index].File = peer.File
+								mutant.Cases[index].Journal = peer.Journal
+								mutant.Cases[index].JournalHead = peer.JournalHead
+							}
+						}
+					}
+				}
+				expected = "refusal is not single-rule"
+			case "document-meaning-drift":
+				mutant.Matrix[0].Meaning += " drift"
+				expected = "document matrix differs"
 			case "missing-accept", "missing-refuse", "not-adjacent":
 				name := mutant.Matrix[0].Accept
 				if control == "missing-refuse" {
@@ -332,5 +454,24 @@ func TestSharedFixtureDecisionMatrixControls(t *testing.T) {
 				t.Fatalf("matrix control %s not detected by %s: %v", control, expected, err)
 			}
 		})
+	}
+}
+
+var updateFixtureMatrix = flag.Bool("update-identity-fixture-matrix", false, "regenerate the shared identity matrix from cases.json")
+
+// Generated documentation binds the manifest, operations and sealed fixture bytes;
+// ordinary validation is read-only and rejects any stale rendered document.
+func TestSharedFixtureMatrixDocument(t *testing.T) {
+	manifest := fixtures(t)
+	want := renderFixtureMatrix(t, manifest)
+	path := "../../docs/identity-fixture-matrix.md"
+	if *updateFixtureMatrix {
+		if err := os.WriteFile(path, want, 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := os.ReadFile(path)
+	if err != nil || !bytes.Equal(got, want) {
+		t.Fatal("generated matrix differs; run go test ./internal/identities -run '^TestSharedFixtureMatrixDocument$' -args -update-identity-fixture-matrix", err)
 	}
 }
