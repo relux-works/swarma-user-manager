@@ -249,6 +249,11 @@ and the matching successful latest systemd invocation. A policy flag alone
 never admits. The [r2 exact-build installation and unit pass](docs/root-qualification-evidence.md#r2-installation-and-qualification-unit)
 is recorded; current or changed deployments still require matching evidence.
 
+The [P8 service-record contract inspection](docs/service-account-contract-gap.md)
+records the missing concrete broker identity-reader/ledger encoding at its
+pinned revision. Service-account lifecycle remains unimplemented; a semantic
+principal interface or active generation alone is not a service-account record.
+
 The core refuses production bump with `bump_key_admission_unconfirmed` before
 its journal or backend access until the Keymaker provision/confirm contract is
 accepted. The [joint PC2 activation-order draft](spec/activation-order.md)

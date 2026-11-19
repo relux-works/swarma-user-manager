@@ -512,6 +512,17 @@ No helper/launcher request member or policy verifier is proposed. Linux and macO
 remain closed until their native mechanisms and negative/control obligations are
 qualified; the proposal is not implementation or activation evidence.
 
+## P8 service-account ledger and broker identity reader
+
+The [pinned contract inspection](docs/service-account-contract-gap.md) records
+STOP at the protected service-account record encoding. Broker `698d9e40`
+publishes section 2.2 semantics and an identity-reader interface but no concrete
+production record decoder; the existing manager ledger is generation-only.
+The manager and broker P2 owners must agree on the closed protected record
+contract and shared byte/semantic fixtures before P8 can claim compatibility.
+This does not require completing P2 activation. No service lifecycle, operator
+commands, new record format, tests or plant results are delivered by this note.
+
 ## Release set: the NSS collector is outside the pre-release
 
 The pure-Go release profile (`CGO_ENABLED=0`) cannot build `cmd/swarma-nss-probe`
