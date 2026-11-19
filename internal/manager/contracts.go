@@ -261,6 +261,7 @@ type Store interface {
 	Load() (State, error)
 	Save(State) error
 	Ledger(genjournal.View) error
+	Identities(State, genjournal.View, string) error
 	Evidence(string, json.RawMessage) error
 	ReadEvidence(string) (json.RawMessage, error)
 }

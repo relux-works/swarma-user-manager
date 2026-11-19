@@ -148,7 +148,7 @@ func (b *Backend) Available(ctx context.Context, a manager.Account) error {
 	if len(s.Accounts)+len(s.Groups) != 0 {
 		return refuse("user_exists_unmanaged")
 	}
-	home, err := b.open(ctx, filepath.Join(b.policy.Root, "workers"))
+	home, err := b.open(ctx, filepath.Dir(a.Home))
 	if err != nil {
 		return refuse("state_unavailable")
 	}

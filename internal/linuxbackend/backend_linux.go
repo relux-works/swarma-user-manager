@@ -12,7 +12,6 @@ import (
 	"errors"
 	"path/filepath"
 	"reflect"
-	"regexp"
 	"sync"
 	"time"
 
@@ -104,7 +103,7 @@ func NewWithEnvironment(p manager.Policy, h Environment, evidence EvidenceStore)
 		if b.host != nil {
 			nss = b.host.Accounts()
 		}
-		return linuxos.RestoreAllocation(ctx, policyRange(p), filepath.Join(p.Root, "workers"), e, d, nss, l, linuxos.IDInterval{Min: uint32(p.UIDMin), Max: uint32(p.UIDMax)}, linuxos.IDInterval{Min: uint32(p.GIDMin), Max: uint32(p.GIDMax)})
+		return linuxos.RestoreAllocation(ctx, policyRange(p), filepath.Dir(e.Reservation.Home), e, d, nss, l, linuxos.IDInterval{Min: uint32(p.UIDMin), Max: uint32(p.UIDMax)}, linuxos.IDInterval{Min: uint32(p.GIDMin), Max: uint32(p.GIDMax)})
 	}
 	b.removals = func(ctx context.Context, e linuxos.RestoreEvidence, l linuxos.Limits) ([]linuxos.Command, error) {
 		d, err := linuxos.OpenRoot("/etc")
@@ -116,7 +115,7 @@ func NewWithEnvironment(p manager.Policy, h Environment, evidence EvidenceStore)
 		if b.host != nil {
 			nss = b.host.Accounts()
 		}
-		return linuxos.RemovalCommands(ctx, policyRange(p), filepath.Join(p.Root, "workers"), e, d, nss, l, linuxos.IDInterval{Min: uint32(p.UIDMin), Max: uint32(p.UIDMax)}, linuxos.IDInterval{Min: uint32(p.GIDMin), Max: uint32(p.GIDMax)})
+		return linuxos.RemovalCommands(ctx, policyRange(p), filepath.Dir(e.Reservation.Home), e, d, nss, l, linuxos.IDInterval{Min: uint32(p.UIDMin), Max: uint32(p.UIDMax)}, linuxos.IDInterval{Min: uint32(p.GIDMin), Max: uint32(p.GIDMax)})
 	}
 	return b
 }
@@ -160,7 +159,7 @@ func limits(l manager.Limits) (linuxos.Limits, error) {
 	return linuxos.Limits{Entries: int(l.DeleteEntries), Depth: int(l.DeleteDepth), Duration: time.Duration(l.StepMS) * time.Millisecond}, nil
 }
 func accountID(p manager.Policy, a manager.Account) error {
-	if a.UID < 1 || a.UID > 4294967294 || a.GID != a.UID || a.UID < p.UIDMin || a.UID > p.UIDMax || a.GID < p.GIDMin || a.GID > p.GIDMax || !regexp.MustCompile(`^worker-[a-z0-9][a-z0-9-]{0,22}$`).MatchString(a.Username) || !regexp.MustCompile(`^[0-9a-f]{32}$`).MatchString(a.Generation) || a.Home != filepath.Join(p.Root, "workers", a.Username) {
+	if a.UID < 1 || a.UID > 4294967294 || a.GID != a.UID || a.UID < p.UIDMin || a.UID > p.UIDMax || a.GID < p.GIDMin || a.GID > p.GIDMax || !manager.AccountValid(p, a) || !manager.ValidGeneration(a.Generation) {
 		return refuse("effect_evidence_unavailable")
 	}
 	return nil
@@ -177,7 +176,11 @@ func restoreEvidence(p manager.Policy, in manager.RestoreInput) (linuxos.Restore
 		return zero, e
 	}
 	o, r := in.OriginalReservation, in.Reservation
-	if accountID(p, restoredAccount(in.Identity)) != nil || accountID(p, o.Account) != nil || !physical(o.Account, r.Account) || r.Account != restoredAccount(in.Identity) || r.Previous != in.Identity.Previous || o.Request.Op != "user.create" || o.Request.V != 1 || o.Request.ID == "" || o.Request.Args.Label == "" || o.Account.Username != "worker-"+o.Request.Args.Label || o.Owner != in.AllocationOwner || o.AllocationOwner != in.AllocationOwner || r.AllocationOwner != in.AllocationOwner || o.Admitted.Principal != o.Owner || o.Admitted.Role != "dispatcher" || !in.AttemptResolved || !hash(in.Key) || (o.Account.Generation != in.Identity.Generation && r.Request.Op != "user.bump" && r.Request.Op != "user.retire") || (in.MayCreate && (r.Request.Op != "user.create" || r.Phase != "provision" || r.Account.Generation != o.Account.Generation || r.Owner != o.Owner || r.Request.ID != o.Request.ID)) {
+	name, role := "worker-"+o.Request.Args.Label, "dispatcher"
+	if o.Request.Args.Kind == "service" {
+		name, role = o.Request.Args.Label, "operator"
+	}
+	if accountID(p, restoredAccount(in.Identity)) != nil || accountID(p, o.Account) != nil || !physical(o.Account, r.Account) || r.Account != restoredAccount(in.Identity) || r.Previous != in.Identity.Previous || o.Request.Op != "user.create" || o.Request.V != 1 || o.Request.ID == "" || o.Request.Args.Label == "" || (o.Request.Args.Kind != "agent" && o.Request.Args.Kind != "service") || o.Account.Username != name || o.Owner != in.AllocationOwner || o.AllocationOwner != in.AllocationOwner || r.AllocationOwner != in.AllocationOwner || o.Admitted.Principal != o.Owner || o.Admitted.Role != role || !in.AttemptResolved || !hash(in.Key) || (o.Account.Generation != in.Identity.Generation && r.Request.Op != "user.bump" && r.Request.Op != "user.retire") || (in.MayCreate && (r.Request.Op != "user.create" || r.Phase != "provision" || r.Account.Generation != o.Account.Generation || r.Owner != o.Owner || r.Request.ID != o.Request.ID)) {
 		return zero, refuse("effect_evidence_unavailable")
 	}
 	// Core has already authenticated quota and explicit successor ancestry against

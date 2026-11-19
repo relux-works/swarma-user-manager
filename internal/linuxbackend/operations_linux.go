@@ -322,7 +322,7 @@ func (b *Backend) planCurrent(ctx context.Context, t manager.Task) (manager.Step
 		if e != nil {
 			return zero, e
 		}
-		a, e := b.open(ctx, filepath.Join(b.policy.Root, "workers"))
+		a, e := b.open(ctx, filepath.Dir(t.Account.Home))
 		if e != nil {
 			return zero, mapError(e)
 		}
@@ -419,7 +419,7 @@ func (b *Backend) planHome(ctx context.Context, t manager.Task) (manager.StepPla
 	if e != nil || receipt != s.handle.Identity() {
 		return zero, refuse("cleanup_pending")
 	}
-	a, e := b.open(ctx, filepath.Join(b.policy.Root, "workers"))
+	a, e := b.open(ctx, filepath.Dir(t.Account.Home))
 	if e != nil {
 		return zero, mapError(e)
 	}
@@ -437,7 +437,7 @@ func (b *Backend) planHome(ctx context.Context, t manager.Task) (manager.StepPla
 	return plan(i), nil
 }
 func (b *Backend) absentFiles(ctx context.Context, t manager.Task) error {
-	a, e := b.open(ctx, filepath.Join(b.policy.Root, "workers"))
+	a, e := b.open(ctx, filepath.Dir(t.Account.Home))
 	if e != nil {
 		return mapError(e)
 	}
@@ -777,7 +777,7 @@ func (b *Backend) executeHome(ctx context.Context, t manager.Task, i manager.OSI
 		s.phase = "populated"
 		return out, nil
 	case "home_publish", "home_quarantine":
-		path := filepath.Join(b.policy.Root, "workers")
+		path := filepath.Dir(t.Account.Home)
 		if i.Operation == "home_quarantine" {
 			path = filepath.Join(b.policy.Root, "lib/user-manager/stages")
 		}

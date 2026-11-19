@@ -473,6 +473,20 @@ func (s *Store) Account(generation string) (manager.Account, genjournal.Floor, e
 	}
 	for _, f := range env.State.Effects {
 		if f.Terminal && f.Failure == "" && f.Account.Generation == generation && (f.Request.Op == "user.create" || f.Request.Op == "user.bump") {
+			agent := false
+			for _, reservation := range env.State.Effects {
+				if reservation.Request.Op == "user.create" && reservation.Account.UID == f.Account.UID {
+					if reservation.Request.Args.Kind != "agent" {
+						return manager.Account{}, zero, fail("generation_not_active")
+					}
+					if reservation.Account.GID == f.Account.GID && reservation.Account.Username == f.Account.Username && reservation.Account.Home == f.Account.Home {
+						agent = true
+					}
+				}
+			}
+			if !agent {
+				return manager.Account{}, zero, fail("generation_not_active")
+			}
 			return f.Account, env.State.Floor, nil
 		}
 	}

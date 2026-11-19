@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/relux-works/swarma-user-manager/internal/identities"
 	"github.com/relux-works/swarma-user-manager/tools/genjournal"
 	"golang.org/x/sys/unix"
 )
@@ -99,16 +100,26 @@ func protectedDir(path string, owner uint32, anchor string) (*os.File, error) {
 	return f, nil
 }
 func openFile(d *os.File, name string, owner uint32) (*os.File, error) {
+	return openFileMode(d, name, owner, -1, 0600)
+}
+func openFileMode(d *os.File, name string, owner uint32, group int64, mode uint32) (*os.File, error) {
 	fd, e := syscall.Openat(int(d.Fd()), name, syscall.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_CLOEXEC|syscall.O_NONBLOCK, 0)
 	if e != nil {
 		return nil, fail("effect_evidence_unavailable")
 	}
 	f := os.NewFile(uintptr(fd), name)
-	if e = checkFile(f, owner, false); e != nil {
+	if e = checkRegularMode(f, owner, group, mode); e != nil {
 		f.Close()
 		return nil, e
 	}
 	return f, nil
+}
+func checkRegularMode(file *os.File, owner uint32, group int64, mode uint32) error {
+	var stat syscall.Stat_t
+	if syscall.Fstat(int(file.Fd()), &stat) != nil || stat.Uid != owner || group >= 0 && int64(stat.Gid) != group || stat.Mode&syscall.S_IFMT != syscall.S_IFREG || stat.Mode&07777 != mode || stat.Nlink != 1 {
+		return fail("state_unavailable")
+	}
+	return accessMetadata(file)
 }
 func readFile(d *os.File, name string, owner uint32, limit int) ([]byte, error) {
 	f, e := openFile(d, name, owner)
@@ -123,10 +134,13 @@ func readFile(d *os.File, name string, owner uint32, limit int) ([]byte, error) 
 	return b, nil
 }
 func atomicFile(d *os.File, name string, b []byte, owner uint32) error {
+	return atomicFileMode(d, name, b, owner, -1, 0600)
+}
+func atomicFileMode(d *os.File, name string, b []byte, owner uint32, group int64, mode uint32) error {
 	if len(b) > maxEvidence {
 		return fail("state_unavailable")
 	}
-	existing, e := openFile(d, name, owner)
+	existing, e := openFileMode(d, name, owner, group, mode)
 	if e == nil {
 		if existing.Close() != nil {
 			return fail("state_unavailable")
@@ -149,7 +163,13 @@ func atomicFile(d *os.File, name string, b []byte, owner uint32) error {
 	}
 	f := os.NewFile(uintptr(fd), temp)
 	defer func() { f.Close(); _ = syscall.Unlinkat(int(d.Fd()), temp) }()
-	if e = checkFile(f, owner, false); e != nil {
+	if group >= 0 && f.Chown(int(owner), int(group)) != nil {
+		return fail("state_unavailable")
+	}
+	if f.Chmod(os.FileMode(mode)) != nil {
+		return fail("state_unavailable")
+	}
+	if e = checkRegularMode(f, owner, group, mode); e != nil {
 		return e
 	}
 	n, e := f.Write(b)
@@ -252,6 +272,48 @@ func (s *DiskStore) Ledger(v genjournal.View) error {
 		return nil
 	}
 	return atomicFile(s.dir, "ledger.json", b, s.owner)
+}
+
+func (s *DiskStore) Identities(state State, view genjournal.View, class string) error {
+	document, err := identityProjection(state, view, class)
+	if err != nil {
+		return err
+	}
+	raw, err := identities.Encode(document)
+	if err != nil {
+		return fail("state_contradictory")
+	}
+	directory, err := protectedDir(filepath.Dir(s.path), s.owner, s.anchor)
+	if err != nil {
+		return err
+	}
+	defer directory.Close()
+	group := int64(0)
+	if s.owner != 0 {
+		group = int64(os.Getgid())
+	}
+	previous, err := openFileMode(directory, "identities.json", s.owner, group, 0644)
+	if err == nil {
+		old, readErr := io.ReadAll(io.LimitReader(previous, maxEvidence+1))
+		closeErr := previous.Close()
+		var envelope identities.Document
+		if readErr != nil || closeErr != nil || len(old) > maxEvidence || json.Unmarshal(old, &envelope) != nil {
+			return fail("state_unavailable")
+		}
+		decoded, decodeErr := identities.Decode(old, envelope.JournalHead)
+		if decodeErr != nil || identities.ValidateTransition(decoded, document) != nil {
+			return fail("state_contradictory")
+		}
+		if bytes.Equal(old, raw) {
+			return nil
+		}
+	} else {
+		var stat unix.Stat_t
+		if !errors.Is(unix.Fstatat(int(directory.Fd()), "identities.json", &stat, unix.AT_SYMLINK_NOFOLLOW), syscall.ENOENT) {
+			return fail("state_unavailable")
+		}
+	}
+	return atomicFileMode(directory, "identities.json", raw, s.owner, group, 0644)
 }
 
 // ProvisionStore is an installer-only operation on an existing protected empty

@@ -10,6 +10,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/relux-works/swarma-user-manager/internal/identities"
 )
 
 // ReservedIdentity comes only from verified durable core state, never helper
@@ -61,10 +63,10 @@ type Restoration struct {
 }
 
 func stationName(name string) bool {
-	return regexp.MustCompile(`^worker-[a-z0-9][a-z0-9-]{0,22}$`).MatchString(name)
+	return regexp.MustCompile(`^worker-[a-z0-9][a-z0-9-]{0,22}$`).MatchString(name) || name == identities.ServiceName
 }
 func validReserved(r Range, homeRoot string, id ReservedIdentity) bool {
-	return r.Min > 0 && r.Max < ^uint32(0) && r.Max >= r.Min && r.Max-r.Min <= 1000000 && id.UID >= r.Min && id.UID <= r.Max && id.GID == id.UID && stationName(id.Name) && filepath.IsAbs(homeRoot) && filepath.Clean(homeRoot) == homeRoot && id.Home == filepath.Join(homeRoot, id.Name) && id.Generation != "" && id.Owner != "" && id.Request != ""
+	return r.Min > 0 && r.Max < ^uint32(0) && r.Max >= r.Min && r.Max-r.Min <= 1000000 && id.UID >= r.Min && id.UID <= r.Max && id.GID == id.UID && stationName(id.Name) && (id.Name != identities.ServiceName || filepath.Base(homeRoot) == "services") && filepath.IsAbs(homeRoot) && filepath.Clean(homeRoot) == homeRoot && id.Home == filepath.Join(homeRoot, id.Name) && id.Generation != "" && id.Owner != "" && id.Request != ""
 }
 
 // RestoreAllocation does not allocate, update cursor/holds or execute tools.

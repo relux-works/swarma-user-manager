@@ -249,10 +249,12 @@ and the matching successful latest systemd invocation. A policy flag alone
 never admits. The [r2 exact-build installation and unit pass](docs/root-qualification-evidence.md#r2-installation-and-qualification-unit)
 is recorded; current or changed deployments still require matching evidence.
 
-The [P8 service-record contract inspection](docs/service-account-contract-gap.md)
-records the missing concrete broker identity-reader/ledger encoding at its
-pinned revision. Service-account lifecycle remains unimplemented; a semantic
-principal interface or active generation alone is not a service-account record.
+The [P8 identity projection contract](docs/identity-projection.md) implements
+operator-only service create/show/retire and the separate protected
+`swarma-managed-identities/1` projection at
+`<root>/lib/user-manager/identities.json`, with shared compatibility fixtures.
+Services never become launch targets. Broker adoption, specification acceptance,
+installation and native qualification remain separate gates.
 
 The core refuses production bump with `bump_key_admission_unconfirmed` before
 its journal or backend access until the Keymaker provision/confirm contract is
@@ -301,6 +303,8 @@ describes protected deployment inputs and the stopped-admission pin/restart flow
 
 | Tool | Purpose | Command | Output |
 |---|---|---|---|
+| P8 identity compatibility | Closed projection, service lifecycle, custody and shared byte/checksum controls | `GOMAXPROCS=2 go test ./internal/identities ./internal/manager ./internal/linuxbackend ./internal/linuxos ./internal/launch -run 'TestShared\|TestIdentityTransition\|TestService\|TestProjection' -count=1`; `(cd testdata/identities-v1 && sha256sum -c SHA256SUMS)` | Named verdicts, shared fixture bytes and Go-owned temporary roots; retain logs in `.temp/` |
+| P8 guard plants and syscall witness | Named overlay-removal assertions and atomic write/fsync/rename order with EIO controls | `GOMAXPROCS=2 go test -v ./internal/manager -run '^TestIdentityProjectionPlants$' -count=1`; `GOMAXPROCS=2 go test -v ./internal/manager -run '^TestProjectionAtomicSyscallTrace$' -count=1` (Linux `strace` required) | Named green controls and actual exit-1 mutant assertions; task-owned trace files under Go temporary roots and console logs in `.temp/`; no host provisioning |
 | Qualification maintenance (owner root shell) | Produce a candidate inputs digest, then renew through the unit | `/opt/swarma/libexec/swarma-user-manager qualify`; `systemctl restart swarma-user-manager-qualify.service` | Initial digest and protected record; r2 initial/unit pass is build-bound, not admission |
 | Boot environment preflight (nonroot) | Exercise protected systemctl, own-unit and cgroup checks under the unit sandbox | Candidate binary `qualify-preflight` inside the [fixed user oneshot](docs/qualification-diagnostics.md#nonroot-live-installation-preflight) | Stable success/refusal lines; no policy, record or root mutation |
 | Loader closure checks | Absolute requester-only RUNPATH, exact ordered lookup evidence, earlier-name/link drift, member metadata and streaming byte bounds | `go test -race -p 1 ./internal/linuxos -run '^TestLoader' -count=1`; `go test -race -p 1 ./internal/linuxbackend -run '^TestQualification(LoaderEvidence\|LoaderCache\|DeploymentSchema\|LoaderSchema)$' -count=1` | Named verdicts; owned temporary ELF fixtures and test-only overlay; no provider RPC or host writes |

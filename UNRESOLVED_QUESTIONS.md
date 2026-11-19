@@ -512,16 +512,32 @@ No helper/launcher request member or policy verifier is proposed. Linux and macO
 remain closed until their native mechanisms and negative/control obligations are
 qualified; the proposal is not implementation or activation evidence.
 
-## P8 service-account ledger and broker identity reader
+## P8/P2 managed identity projection adoption
 
-The [pinned contract inspection](docs/service-account-contract-gap.md) records
-STOP at the protected service-account record encoding. Broker `698d9e40`
-publishes section 2.2 semantics and an identity-reader interface but no concrete
-production record decoder; the existing manager ledger is generation-only.
-The manager and broker P2 owners must agree on the closed protected record
-contract and shared byte/semantic fixtures before P8 can claim compatibility.
-This does not require completing P2 activation. No service lifecycle, operator
-commands, new record format, tests or plant results are delivered by this note.
+RESOLVED for producers by the owner's 2026-11-19 managed-identity projection v1
+decision: [the implemented contract](docs/identity-projection.md) provides the
+separate protected file, operator service lifecycle, disjoint roles and shared
+byte fixtures/checksums without extending `gen-journal/1`. P8 no longer stops on
+the byte-contract gap. The decision binds P8 and P2 pending specification-acceptor
+review on 2026-11-22. Broker P2 must copy the identical fixture bytes/checksum
+list and independently run its real `View.Principal` mapping tests. That adoption,
+broker daemon activation, release installation and the colony qualification run
+are not established by producer tests. Installer-specific plain service-owned
+0700 home requirements also need reconciliation with the existing receipt-backed
+managed skeleton, which this slice intentionally reuses without a custody redesign.
+
+## Go 1.26 close-trace validation environment
+
+The P8 validation run with Go 1.26.8 and explicit `TMPDIR`/`GOTMPDIR`
+reproduces existing failures in `TestManagerCensusCloseErrors` and
+`TestPC2StoreCloseErrors`, including on the unchanged pre-P8 checkpoint.
+Their owned-child launch overrides only `TMPDIR`; Go 1.26's `testing.TempDir`
+uses `GOTMPDIR`, so child fixtures are outside the parent's trace prefix.
+The intended close injection is not applied (`events=0`), which is a failing
+instrument control, not product-negative evidence. The P8 tests and their race
+selection pass, but the full-suite gate remains red. A separate harness repair
+must propagate the child's task-owned temporary root through both variables;
+do not skip these controls, change the product, or report the red gate green.
 
 ## Release set: the NSS collector is outside the pre-release
 

@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/relux-works/swarma-registrar/ccj"
+	"github.com/relux-works/swarma-user-manager/internal/identities"
 	"github.com/relux-works/swarma-user-manager/tools/genjournal"
 )
 
@@ -190,13 +191,16 @@ func parse(raw []byte) (r Request, id any, e error) {
 		if !ok {
 			return r, id, fail("request_invalid")
 		}
-		if r.Args.Kind != "agent" {
+		if r.Args.Kind != "agent" && r.Args.Kind != "service" {
 			return r, id, fail("kind_unsupported")
+		}
+		if r.Args.Kind == "service" && r.Args.Label != identities.ServiceName {
+			return r, id, fail("label_invalid")
 		}
 		if !labelPattern.MatchString(r.Args.Label) {
 			return r, id, fail("label_invalid")
 		}
-	case "user.retire", "user.bump":
+	case "user.retire", "user.bump", "user.show":
 		if !fields(a, "generation") {
 			return r, id, fail("request_invalid")
 		}

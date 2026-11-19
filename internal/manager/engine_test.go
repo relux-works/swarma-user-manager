@@ -60,6 +60,10 @@ func (s *memStore) Save(v State) error {
 	return nil
 }
 func (s *memStore) Ledger(v genjournal.View) error { b, e := canonical(v); s.ledger = b; return e }
+func (s *memStore) Identities(state State, view genjournal.View, class string) error {
+	_, err := identityProjection(state, view, class)
+	return err
+}
 
 type memJournal struct {
 	raw   []byte
@@ -373,7 +377,7 @@ func TestRequestClosed(t *testing.T) {
 		{"bool-version", makeCase(func(x map[string]any) { x["v"] = true }), "request_invalid"},
 		{"missing", makeCase(func(x map[string]any) { delete(x, "request_id") }), "request_invalid"},
 		{"unknown-op", makeCase(func(x map[string]any) { x["op"] = "user.list" }), "operation_unsupported"},
-		{"kind", makeCase(func(x map[string]any) { x["args"].(map[string]any)["kind"] = "service" }), "kind_unsupported"},
+		{"kind", makeCase(func(x map[string]any) { x["args"].(map[string]any)["kind"] = "unknown" }), "kind_unsupported"},
 		{"grants", makeCase(func(x map[string]any) { x["grants"] = []any{} }), "grants_unsupported"},
 		{"label", makeCase(func(x map[string]any) { x["args"].(map[string]any)["label"] = "../escape" }), "label_invalid"},
 		{"nul", makeCase(func(x map[string]any) { x["args"].(map[string]any)["label"] = "x\x00" }), "request_invalid"},

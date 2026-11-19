@@ -37,7 +37,7 @@ func (e *Engine) Handle(ctx context.Context, raw []byte, in Invocation) Response
 	if err != nil {
 		return refused(id, err)
 	}
-	if (r.Op == "user.retire" && caller.Role != "operator") || (r.Op != "user.retire" && caller.Role != "dispatcher") {
+	if caller.Role != requestRole(r) {
 		return refused(id, fail("caller_role_not_permitted"))
 	}
 	if runtime.GOOS != "linux" {
@@ -75,15 +75,18 @@ func (e *Engine) Handle(ctx context.Context, raw []byte, in Invocation) Response
 	x := &execution{engine: e, state: state, ctx: ctx, caller: caller, request: r, unlock: unlock, callerGuard: callerGuard}
 	unlock = nil
 	defer x.release()
-	if err = x.refresh(); err != nil {
-		return refused(id, err)
-	}
-	if err = x.validate(); err != nil {
-		return refused(id, err)
-	}
 	// Ledger is always a projection of the verified journal, never input authority.
-	if err = e.Store.Ledger(x.view); err != nil {
+	if err = e.Journal.Checkpoint(ctx, x.state.Floor, func(view genjournal.View) error {
+		x.view = view
+		if err := x.validate(); err != nil {
+			return err
+		}
+		return x.publish(view)
+	}); err != nil {
 		return refused(id, err)
+	}
+	if r.Op == "user.show" {
+		return x.show()
 	}
 	resuming := false
 	for i := range x.state.Effects {
@@ -182,10 +185,13 @@ func (x *execution) save() error {
 	return x.engine.Journal.Checkpoint(x.ctx, x.state.Floor, func(v genjournal.View) error {
 		x.view = v
 		x.state.Floor = v.Tail
+		if _, err := identityProjection(x.state, v, x.engine.Policy.Class); err != nil {
+			return err
+		}
 		if e := x.engine.Store.Save(x.state); e != nil {
 			return e
 		}
-		return x.engine.Store.Ledger(v)
+		return x.publish(v)
 	})
 }
 func (x *execution) validate() error {
@@ -212,12 +218,16 @@ func (x *execution) validate() error {
 	}
 	keys := map[string]bool{}
 	covered := map[string]bool{}
+	kinds, err := allocationKinds(x.state)
+	if err != nil {
+		return err
+	}
 	for _, f := range x.state.Effects {
 		k := f.Owner + "/" + f.Request.ID
 		if keys[k] || f.Owner == "" || !requestID.MatchString(f.Request.ID) || !validGeneration(f.Account.Generation) || f.Account.UID < p.UIDMin || f.Account.UID > p.UIDMax || f.Account.GID != f.Account.UID || f.Progress < 0 || f.Progress > 16 || f.Batch < 0 {
 			return fail("state_contradictory")
 		}
-		if f.Admitted.Principal != f.Owner || ((f.Request.Op == "user.retire" && f.Admitted.Role != "operator") || (f.Request.Op != "user.retire" && f.Admitted.Role != "dispatcher")) || f.Admitted.UID < 1 || f.Admitted.UID > 4294967294 || !validGeneration(f.Admitted.Generation) {
+		if f.Admitted.Principal != f.Owner || f.Admitted.Role != requestRole(f.Request) || f.Admitted.UID < 1 || f.Admitted.UID > 4294967294 || !validGeneration(f.Admitted.Generation) {
 			return fail("state_contradictory")
 		}
 		if !requestID.MatchString(f.AllocationOwner) || (f.Request.Op == "user.create" && f.AllocationOwner != f.Owner) || (f.Request.Op == "user.retire" && (f.Act == nil || !actOK(*f.Act, f.Admitted, f.Request))) || (f.Request.Op != "user.retire" && f.Act != nil) {
@@ -232,7 +242,7 @@ func (x *execution) validate() error {
 		if err != nil || validated != f.Request {
 			return fail("state_contradictory")
 		}
-		if f.Request.Op == "user.create" && f.Account.Username != "worker-"+f.Request.Args.Label {
+		if f.Request.Op == "user.create" && f.Account != p.accountFor(f.Request.Args.Kind, f.Request.Args.Label, f.Account.UID, f.Account.Generation) {
 			return fail("state_contradictory")
 		}
 		if f.Request.Op == "user.retire" && f.Request.Args.Generation != f.Account.Generation {
@@ -252,7 +262,7 @@ func (x *execution) validate() error {
 				return fail("state_contradictory")
 			}
 		}
-		if f.Account.Home != p.Root+"/workers/"+f.Account.Username || len(f.Account.Username) < 8 || !labelPattern.MatchString(f.Account.Username[7:]) || f.Account.Username[:7] != "worker-" {
+		if !AccountValid(p, f.Account) || kinds[f.Account.UID] == "service" && f.Account.Username != "credential-gateway" || kinds[f.Account.UID] == "agent" && f.Account.Username == "credential-gateway" {
 			return fail("state_contradictory")
 		}
 		switch f.Request.Op {
@@ -333,6 +343,13 @@ func (x *execution) admit(c Caller, r Request) (Effect, error) {
 		}
 		if !found {
 			return f, fail("target_not_owned")
+		}
+		kinds, err := allocationKinds(x.state)
+		if err != nil {
+			return f, err
+		}
+		if r.Op == "user.bump" && kinds[f.Account.UID] != "agent" {
+			return f, fail("kind_unsupported")
 		}
 		latest := false
 		for _, v := range x.view.Rows {
@@ -418,7 +435,7 @@ func (x *execution) admit(c Caller, r Request) (Effect, error) {
 		if old.AllocationOwner == c.key() && isCharged {
 			owned[old.Account.UID] = true
 		}
-		if old.Account.Username == "worker-"+r.Args.Label && isCharged {
+		if old.Account.Username == x.engine.Policy.accountFor(r.Args.Kind, r.Args.Label, old.Account.UID, old.Account.Generation).Username && isCharged {
 			return f, fail("user_exists_unmanaged")
 		}
 	}
@@ -430,6 +447,10 @@ func (x *execution) admit(c Caller, r Request) (Effect, error) {
 		return f, err
 	}
 	p := x.engine.Policy
+	kinds, err := allocationKinds(x.state)
+	if err != nil {
+		return f, err
+	}
 	uid := x.state.Cursor
 	for probes := int64(0); probes < p.Limits.AllocationProbes; probes++ {
 		if x.ctx.Err() != nil {
@@ -439,8 +460,9 @@ func (x *execution) admit(c Caller, r Request) (Effect, error) {
 		if next > p.UIDMax {
 			next = p.UIDMin
 		}
-		if !occupied[uid] && uid >= p.GIDMin && uid <= p.GIDMax {
-			a := p.account(r.Args.Label, uid, g)
+		kind, used := kinds[uid]
+		if !occupied[uid] && (!used || kind == r.Args.Kind) && uid >= p.GIDMin && uid <= p.GIDMax {
+			a := p.accountFor(r.Args.Kind, r.Args.Label, uid, g)
 			stepCtx, cancel := bounded(x.ctx, p.Limits.StepMS)
 			err = x.preflight(func(ctx context.Context) error { return x.engine.Backend.Available(ctx, a) })
 			if err == nil && stepCtx.Err() != nil {
