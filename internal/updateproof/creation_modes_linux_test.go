@@ -4,14 +4,25 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
 
 	"github.com/relux-works/swarma-user-manager/internal/testutil"
 )
 
 // Claim: recorder events and retained native artifacts are exact 0600 files
-// under each mask; the existing private directory policy stays unchanged.
+// under umasks 0022, 0077 and 0002; private directory policy stays unchanged.
+// Recorder events also restore owner-write bits removed by umask 0277.
 func TestUpdateCreationModes(t *testing.T) {
+	t.Run("0277", func(t *testing.T) {
+		recorder := recorderFixture(t)
+		previous := syscall.Umask(0277)
+		defer syscall.Umask(previous)
+		if _, err := recorder.Begin(context.Background(), "boot-mode", "invocation", "mode", ID{}, sampleSnapshot("1")); err != nil {
+			t.Fatal(err)
+		}
+		testutil.Modes(t, recorder.path, 0700, 0600)
+	})
 	testutil.Umasks(t, func(t *testing.T) {
 		recorder := recorderFixture(t)
 		if _, err := recorder.Begin(context.Background(), "boot-mode", "invocation", "mode", ID{}, sampleSnapshot("1")); err != nil {

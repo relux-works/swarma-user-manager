@@ -553,7 +553,7 @@ storage uses 0755/0644, and home contents retain their manifest modes.
 
 | Tool | Purpose / exact entry point | Output |
 |---|---|---|
-| Go race detector | `GOFLAGS=-p=2 go test -race -count=1 ./internal/manager ./internal/pc2store ./internal/launch ./internal/linuxos ./internal/qualmaint ./internal/updateproof ./tools/genjournal -run 'CreationModes$'` | Named subprocess controls under umask 0022, 0077 and 0002; exact metadata and refusal assertions; owned temporary fixtures |
+| Go race detector | `GOFLAGS=-p=2 go test -race -count=1 ./internal/manager ./internal/pc2store ./internal/launch ./internal/linuxos ./internal/qualmaint ./internal/updateproof ./tools/genjournal -run 'CreationModes$'` | Named subprocess controls under umask 0022, 0077 and 0002; additional 0277 controls for private provisioning, maintenance objects, recorder events, owned stages and qualification records, after fixture preparation; exact metadata and refusal assertions; owned temporary fixtures |
 | Go full-suite controls | `(umask 0022; GOMAXPROCS=2 GOFLAGS=-p=2 go test -race -count=1 -timeout=45m ./...)`; repeat with `umask 0077` | Package verdicts; retain logs in task-local `.temp/` |
 
 Use an isolated test environment with absolute HOME, caches, TMPDIR and
