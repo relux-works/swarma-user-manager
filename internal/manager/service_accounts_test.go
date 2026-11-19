@@ -82,7 +82,25 @@ func TestServiceLifecycleAndReplay(t *testing.T) {
 	if !reflect.DeepEqual(retiredState, harness.s.state) || !bytes.Equal(retiredJournal, harness.j.raw) {
 		t.Fatal("retire replay changed effects")
 	}
-	createService(t, harness, "service-recreate")
+	recreated := createService(t, harness, "service-recreate")
+	view, err = harness.j.view(harness.s.state.Floor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	projection, err = identityProjection(harness.s.state, view, "trusted")
+	if err != nil || len(projection.Accounts) != 2 {
+		t.Fatal("rotation projection", projection, err)
+	}
+	current := projection.Accounts[1]
+	if current.UID == uint32(account.UID) || current.Generation == generation || current.Generation != recreated.Result["generation"] {
+		t.Fatal("rotation reused identity", current)
+	}
+	if _, err = projection.Service(current.UID, current.Generation); err != nil {
+		t.Fatal("active rotated service refused", err)
+	}
+	if _, err = projection.Service(uint32(account.UID), generation); err != identities.ErrMismatch {
+		t.Fatal("retired rotated service admitted", err)
+	}
 }
 
 // Wrong-role create/show, missing cleanup authority, duplicate names and service
@@ -300,7 +318,15 @@ func TestProjectionSharesJournalLock(t *testing.T) {
 
 // The real atomic writer emits exactly the shared canonical bytes, with a single
 // 0644 UID/GID-owned inode, and leaves the previous inode immutable across replace.
+// Mixed rows are synthetic inputs, not a verified multi-account journal history.
 func TestProjectionSharedProducerBytes(t *testing.T) {
+	for _, fixture := range []string{"valid", "valid-mixed"} {
+		t.Run(fixture, func(t *testing.T) { testProjectionSharedProducerBytes(t, fixture) })
+	}
+}
+
+func testProjectionSharedProducerBytes(t *testing.T, fixture string) {
+	t.Helper()
 	store, anchor := diskFixture(t)
 	raw, err := os.ReadFile("../../testdata/identities-v1/journal.jsonl")
 	if err != nil {
@@ -314,12 +340,27 @@ func TestProjectionSharedProducerBytes(t *testing.T) {
 	policy := setup(t).e.Policy
 	account := policy.accountFor("service", identities.ServiceName, 30001, strings.Repeat("1", 32))
 	state := State{Effects: []Effect{{Request: Request{Op: "user.create", Args: Args{Kind: "service", Label: identities.ServiceName}}, Account: account}}}
+	if fixture == "valid-mixed" {
+		retired := policy.accountFor("service", identities.ServiceName, 30000, strings.Repeat("3", 32))
+		agent := policy.accountFor("agent", "demo", 30002, strings.Repeat("2", 32))
+		state.Effects = append(state.Effects,
+			Effect{Request: Request{Op: "user.create", Args: Args{Kind: "service", Label: identities.ServiceName}}, Account: retired},
+			Effect{Request: Request{Op: "user.create", Args: Args{Kind: "agent", Label: "demo"}}, Account: agent},
+		)
+		view.Rows = append(view.Rows,
+			genjournal.Row{UID: retired.UID, Generation: retired.Generation, State: "removed"},
+			genjournal.Row{UID: agent.UID, Generation: agent.Generation, State: "active"},
+		)
+	}
 	unlock, err := store.Lock(context.Background(), 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer unlock()
-	if err := journal.Checkpoint(context.Background(), view.Tail, func(locked genjournal.View) error { return store.Identities(state, locked, "trusted") }); err != nil {
+	if err := journal.Checkpoint(context.Background(), view.Tail, func(locked genjournal.View) error {
+		locked.Rows = view.Rows
+		return store.Identities(state, locked, "trusted")
+	}); err != nil {
 		t.Fatal(err)
 	}
 	path := filepath.Join(anchor, "identities.json")
@@ -327,7 +368,7 @@ func TestProjectionSharedProducerBytes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	shared, err := os.ReadFile("../../testdata/identities-v1/valid.json")
+	shared, err := os.ReadFile("../../testdata/identities-v1/" + fixture + ".json")
 	if err != nil || !bytes.Equal(written, shared) {
 		t.Fatal("shared producer bytes differ", err)
 	}

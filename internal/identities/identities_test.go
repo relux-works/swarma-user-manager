@@ -15,12 +15,14 @@ import (
 )
 
 type fixtureCase struct {
-	Name      string `json:"name"`
-	File      string `json:"file"`
-	Check     string `json:"check"`
-	Verdict   string `json:"verdict"`
-	Previous  string `json:"previous"`
-	Condition string `json:"condition"`
+	Name       string  `json:"name"`
+	File       string  `json:"file"`
+	Check      string  `json:"check"`
+	Verdict    string  `json:"verdict"`
+	Previous   string  `json:"previous"`
+	Condition  string  `json:"condition"`
+	UID        *uint32 `json:"uid"`
+	Generation string  `json:"generation"`
 }
 
 type fixtureManifest struct {
@@ -65,15 +67,35 @@ func TestSharedFixtures(t *testing.T) {
 		t.Run(example.Name, func(t *testing.T) {
 			raw := fixtureBytes(t, example.File)
 			document, err := Decode(raw, view.Tail.Hash)
-			if example.Check == "service" && err == nil {
-				_, err = document.Service(manifest.UID, manifest.Generation)
-			}
-			if example.Check == "transition" && err == nil {
+			switch example.Check {
+			case "decode":
+			case "service":
+				if err != nil {
+					t.Fatal("service fixture must decode", err)
+				}
+				uid, generation := manifest.UID, manifest.Generation
+				if example.UID != nil {
+					uid = *example.UID
+				}
+				if example.Generation != "" {
+					generation = example.Generation
+				}
+				var account Account
+				account, err = document.Service(uid, generation)
+				if err == nil && (account.UID != uid || account.Generation != generation || account.Name != ServiceName || account.Kind != "service" || account.State != "active" || account.Class != "trusted" || account.Placement != "local") {
+					t.Fatal("service mapping differs", account)
+				}
+			case "transition":
+				if err != nil {
+					t.Fatal("transition fixture must decode", err)
+				}
 				previous, previousErr := Decode(fixtureBytes(t, example.Previous), view.Tail.Hash)
 				if previousErr != nil {
-					t.Fatal(previousErr)
+					t.Fatal("previous transition fixture must decode", previousErr)
 				}
 				err = ValidateTransition(previous, document)
+			default:
+				t.Fatal("unknown fixture check", example.Check)
 			}
 			if example.Verdict == "accept" {
 				if err != nil {
@@ -129,6 +151,7 @@ func TestIdentityTransitionAndRetiredNameControls(t *testing.T) {
 	next.Accounts = append([]Account{}, previous.Accounts...)
 	current := valid.Accounts[0]
 	current.UID++
+	current.Generation = strings.Repeat("2", 32)
 	next.Accounts = append(next.Accounts, current)
 	if ValidateTransition(previous, next) != nil {
 		t.Fatal("retired name reuse refused")

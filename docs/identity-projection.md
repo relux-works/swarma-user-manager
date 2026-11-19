@@ -79,7 +79,9 @@ protected manager directory. Other writer-created evidence remains 0600.
 
 One bare canonical CCJ-1 document is emitted, with lexicographically sorted
 object keys, no floats and no trailing LF. Accounts are emitted in ascending
-UID order. The readable form is:
+UID order by the producer. Array order is not a decoder admission condition;
+CCJ-1 sorts object keys, not array elements. The shared unsorted-array accept
+control pins that distinction. The readable form is:
 
 ```json
 {
@@ -105,9 +107,9 @@ members, noncanonical bytes, wrong types and unknown enum values refuse.
 | `format` | Exactly `swarma-managed-identities/1` |
 | `journal_head` | Lowercase SHA-256 of the verified current `gen-journal/1` head, including the record LF; empty history uses the journal's zero hash |
 | `accounts` | An array, including `[]` for no managed generations; never null |
-| `uid` | uint32; produced IDs obey the stricter existing nonzero manager/journal range |
+| `uid` | Nonzero uint32; the decoder accepts 4294967295, while produced IDs obey the stricter manager/journal maximum 4294967294 |
 | `kind` | Exactly `agent`, `service` or `workplace`; the producer currently creates only agent/service accounts |
-| `name` | Service: exactly `credential-gateway`; otherwise the actual station/account name |
+| `name` | Nonempty and without NUL; service: exactly `credential-gateway`; otherwise the actual station/account name |
 | `class` | Exactly `trusted` or `untrusted`, from protected manager policy; new lifecycle effects still require trusted class |
 | `placement` | Exactly `local` |
 | `generation` | The current retained journal row's 32-lowercase-hex, nonzero generation |
@@ -119,8 +121,22 @@ kind. The verified journal supplies generation/state/head. Tombstones and prior
 generations remain in the authoritative journal/effect history; the projection
 does not erase or replace them when a same-kind UID is reused.
 
+The reference decoder does not require generations to be unique across UIDs;
+that invariant is enforced by the authoritative generation journal, not this
+projection utility. Shared fixtures pin that acceptance as well as the existing
+zero-UID, all-zero-generation and empty/NUL-name refusals. Those refusals are
+producer-side refinements beyond the decision's scalar shape, not newly inferred
+broker authority rules.
+
+`class` is the current manager-wide protected `Policy.Class`, not retained
+per-record admission evidence. A class-only policy change does not advance the
+journal head: an older trusted projection remains head-valid until the next
+manager invocation republishes. This is a v1 limit, not a claim of continuous
+policy freshness or the broker's registration-time class evidence.
+
 Both initial reconciliation and every saved lifecycle checkpoint publish under
-the existing effect lock **and** the generation journal's checkpoint lock. The
+the exclusive effect lock **and** the generation journal's shared gate/data
+checkpoint locks, which exclude appends and keep the head stable. The
 writer creates an exclusive no-follow temporary file, fixes owner/group/mode,
 writes all canonical bytes, fsyncs the file, closes it, renames it and fsyncs
 the directory. Existing unsafe custody, corrupt projection bytes or a UID-kind
@@ -129,7 +145,9 @@ may be rebuilt from intact protected effects and the verified journal.
 
 The append and the separate projection cannot become one filesystem rename.
 If interrupted after append, an older projection has an obsolete head and
-cannot admit a broker principal; replay reconciles it under the same locks.
+cannot admit a broker principal; the next manager invocation, including replay,
+reconciles it under the same locks. Unrelated agent lifecycle appends also open
+this fail-closed interval; no principal is admitted while the heads differ.
 A directory-fsync error after rename is reported as a failure even if new bytes
 are visible: it is not an acknowledged durability result or rollback proof.
 
@@ -153,14 +171,20 @@ requested current generation can map to
 `Principal{UID: uid, Generation: generation, Service: name}` and role `service`.
 Agent, workplace, untrusted, retired, stale-generation and unknown records have
 no service role. A historical projection comparison also refuses UID-kind
-changes; durable effect history makes that prohibition permanent at the producer.
+changes; this comparison is pairwise and best-effort at the consumer, not a
+durable history across an intervening empty projection. Protected retained
+create effects make that prohibition permanent at the producer.
 
 ## Shared compatibility bytes and tests
 
 [`testdata/identities-v1/`](../testdata/identities-v1/) contains `valid.json`,
+the mixed active/retired/agent and empty-document accept controls,
 `journal.jsonl`, a closed verdict manifest, one fixture per refusal condition
 and `SHA256SUMS`. The producer's real atomic writer is compared byte-for-byte
-with `valid.json`, not merely with another local serializer.
+with `valid.json` and `valid-mixed.json`, not merely with another local
+serializer. The mixed writer test supplies synthetic journal rows at the shared
+head; it proves projection encoding and atomic custody, not that the two-record
+shared journal itself contains a multi-account lifecycle.
 
 Copy this directory's compatibility files byte-for-byte to broker
 `internal/service/testdata/identities-v1/`, preserving the same SHA256SUMS.
