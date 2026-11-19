@@ -87,13 +87,19 @@ single-rule refusal and narrowing consumer plant.
 in an isolated instrumented checkout. It requires 100% statement coverage and
 both outcomes of every `if` in `Decode`, `Document.Validate`,
 `ValidateTransition`, `Document.Service` and `fixtureServicePrincipal`.
+On Linux it also gates `Read` using `TestSharedCustodyFixtures`. Its xattr-refusal
+and read/close-error true paths are explicitly unwitnessed (ACL/capability or
+syscall faults, not portable custody metadata); all other blocks/outcomes are
+required. The gate reports actual Read coverage and excluded source lines.
+The FIFO `not-regular` has expected owner/group, 0644 mode, one link and valid
+buffered bytes; the separate directory row is intentionally multi-rule.
 Missing functions, statements or outcomes fail with the source line.
 Typed passes exercise standalone validation/lookup with the same shared bytes,
 including invalid/head-stale documents; they never replace successful decoding
 for admission. Removing the oversized refusal proves the gate detects the
 missing decoder branch. A separate source plant adds an unwitnessed branch.
 Control-flow saturation is not exhaustive scalar, compound-condition or path
-combination proof. The 8 MiB refusal pins a producer utility limit; specification
+combination proof. The exact 8 MiB accept and 8 MiB + 1 refusal pin a producer utility limit; specification
 acceptance remains separate.
 
 `unjournaled-service`, `inactive-journal-service`, `retiring-journal-service`

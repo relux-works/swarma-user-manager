@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -27,6 +28,8 @@ type fixtureCoverageFunction struct {
 type fixtureCoverageBranch struct {
 	ID, Function, File string
 	Line               int
+	End                int
+	UnwitnessedTrue    string
 }
 
 type fixtureCoverageEdit struct {
@@ -163,7 +166,11 @@ func prepareFixtureCoverage(t *testing.T, root string) ([]fixtureCoverageFunctio
 	}
 	var functions []fixtureCoverageFunction
 	var branches []fixtureCoverageBranch
-	for _, file := range []string{"identities.go", "fixture_lookup.go"} {
+	files := []string{"identities.go", "fixture_lookup.go"}
+	if runtime.GOOS == "linux" {
+		files = append(files, "protected_linux.go")
+	}
+	for _, file := range files {
 		path := filepath.Join(root, "internal/identities", file)
 		raw, err := os.ReadFile(path)
 		if err != nil {
@@ -185,7 +192,7 @@ func prepareFixtureCoverage(t *testing.T, root string) ([]fixtureCoverageFunctio
 				continue
 			}
 			name := function.Name.Name
-			if name != "Decode" && name != "Validate" && name != "ValidateTransition" && name != "Service" && name != "fixtureServicePrincipal" {
+			if name != "Decode" && name != "Validate" && name != "ValidateTransition" && name != "Service" && name != "fixtureServicePrincipal" && name != "Read" {
 				continue
 			}
 			if function.Recv != nil {
@@ -200,8 +207,17 @@ func prepareFixtureCoverage(t *testing.T, root string) ([]fixtureCoverageFunctio
 				}
 				position := positions.Position(conditional.If)
 				id := fmt.Sprintf("%s:%d:%d", original, position.Line, position.Column)
-				branches = append(branches, fixtureCoverageBranch{id, name, original, position.Line})
 				left, right := positions.Position(conditional.Cond.Pos()).Offset, positions.Position(conditional.Cond.End()).Offset
+				branch := fixtureCoverageBranch{ID: id, Function: name, File: original, Line: position.Line, End: positions.Position(conditional.Body.End()).Line}
+				if original == "protected_linux.go" && name == "Read" {
+					switch string(raw[left:right]) {
+					case "!errors.Is(err, syscall.ENODATA)":
+						branch.UnwitnessedTrue = "xattr refusal requires ACL/capability or syscall fault, not portable custody metadata"
+					case "readErr != nil || closeErr != nil":
+						branch.UnwitnessedTrue = "read/close failure requires syscall fault after successful protected open"
+					}
+				}
+				branches = append(branches, branch)
 				edits = append(edits, fixtureCoverageEdit{left, right, "fixtureCoverageBranchHit(" + strconv.Quote(id) + ", " + string(raw[left:right]) + ")"})
 				return true
 			})
@@ -214,7 +230,11 @@ func prepareFixtureCoverage(t *testing.T, root string) ([]fixtureCoverageFunctio
 			t.Fatal(err)
 		}
 	}
-	if len(functions) != 5 || len(branches) == 0 {
+	expectedFunctions := 5
+	if runtime.GOOS == "linux" {
+		expectedFunctions++
+	}
+	if len(functions) != expectedFunctions || len(branches) == 0 {
 		t.Fatal("coverage target set differs", functions)
 	}
 	const probe = `package identities
@@ -247,6 +267,7 @@ func verifyFixtureCoverage(profile []byte, functions []fixtureCoverageFunction, 
 	var output []string
 	for _, function := range functions {
 		statements := 0
+		coveredStatements := 0
 		for _, line := range strings.Split(string(profile), "\n") {
 			fields := strings.Fields(line)
 			if len(fields) != 3 {
@@ -273,31 +294,47 @@ func verifyFixtureCoverage(profile []byte, functions []fixtureCoverageFunction, 
 			}
 			statements += count
 			if fields[2] == "0" && count > 0 {
+				declared := false
+				for _, branch := range branches {
+					if branch.Function == function.Name && branch.File == file && branch.UnwitnessedTrue != "" && firstLine >= branch.Line && lastLine <= branch.End {
+						declared = true
+					}
+				}
+				if declared {
+					continue
+				}
 				return nil, fmt.Errorf("uncovered statement/refusal branch %s:%d in %s", function.File, firstLine, function.Name)
 			}
+			coveredStatements += count
 		}
 		if statements == 0 {
 			return nil, fmt.Errorf("missing coverage %s:%d in %s", function.File, function.Start, function.Name)
 		}
 		outcomes := 0
+		coveredOutcomes := 0
 		for _, branch := range branches {
 			if branch.Function != function.Name {
 				continue
 			}
 			for outcome, count := range hits[branch.ID] {
+				outcomes++
 				if count == 0 {
+					if outcome == 1 && branch.UnwitnessedTrue != "" {
+						output = append(output, fmt.Sprintf("declared unwitnessed %s:%d in %s: %s", branch.File, branch.Line, branch.Function, branch.UnwitnessedTrue))
+						continue
+					}
 					return nil, fmt.Errorf("uncovered if outcome=%t %s:%d in %s", outcome == 1, branch.File, branch.Line, branch.Function)
 				}
-				outcomes++
+				coveredOutcomes++
 			}
 		}
-		output = append(output, fmt.Sprintf("%s: statements %d/%d = 100.0%%; if outcomes %d/%d = 100.0%%", function.Name, statements, statements, outcomes, outcomes))
+		output = append(output, fmt.Sprintf("%s: statements %d/%d = %.1f%%; if outcomes %d/%d = %.1f%%", function.Name, coveredStatements, statements, 100*float64(coveredStatements)/float64(statements), coveredOutcomes, outcomes, 100*float64(coveredOutcomes)/float64(outcomes)))
 	}
 	return output, nil
 }
 
-// Standard Go counters plus independent if-outcome probes must be saturated by
-// manifest rows alone. Dropping the sole size refusal is a real negative control.
+// Manifest rows saturate standard counters and if probes except the two declared
+// Read syscall-error paths. Dropping the sole size refusal is a negative control.
 func TestSharedFixtureCoverageGate(t *testing.T) {
 	current, err := os.Getwd()
 	if err != nil {
@@ -328,14 +365,15 @@ func TestSharedFixtureCoverageGate(t *testing.T) {
 		profile, report := filepath.Join(root, name+".cover"), filepath.Join(root, name+".json")
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 		defer cancel()
-		command := exec.CommandContext(ctx, "go", "test", "-p", "1", "-count=1", "-covermode=count", "-coverprofile="+profile, "-run", "^TestSharedFixtureCoverageRows$", "./internal/identities")
+		selection := "^(TestSharedFixtureCoverageRows|TestSharedCustodyFixtures)$"
+		command := exec.CommandContext(ctx, "go", "test", "-p", "1", "-count=1", "-covermode=count", "-coverprofile="+profile, "-run", selection, "./internal/identities")
 		command.Dir = work
 		command.Env = append(os.Environ(), "SWARMA_SHARED_FIXTURE_COVERAGE_CHILD=1", "SWARMA_SHARED_FIXTURE_BRANCH_REPORT="+report)
 		output, runErr := command.CombinedOutput()
 		if command.ProcessState == nil {
 			t.Fatal("coverage child did not start", runErr)
 		}
-		t.Logf("coverage child=%s pid=%d exit=%d selection=^TestSharedFixtureCoverageRows$\n%s", name, command.ProcessState.Pid(), command.ProcessState.ExitCode(), output)
+		t.Logf("coverage child=%s pid=%d exit=%d selection=%s\n%s", name, command.ProcessState.Pid(), command.ProcessState.ExitCode(), selection, output)
 		if runErr != nil {
 			t.Fatal("shared-only coverage execution failed", runErr)
 		}

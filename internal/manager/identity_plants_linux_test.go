@@ -39,6 +39,9 @@ func TestIdentityProjectionPlants(t *testing.T) {
 	if err != nil || !bytes.Equal(reencoded, raw) {`
 	canonicalAfter := strings.ReplaceAll(strings.ReplaceAll(canonicalBefore, "!bytes.Equal(canonical, raw)", "len(canonical) == 0 || !fixtureCanonicalKeyOrder(raw) || !bytes.Equal(bytes.TrimSpace(raw), raw)"), "!bytes.Equal(reencoded, raw)", "len(reencoded) == 0")
 	plants := []identityPlant{
+		{"R22-reg", "internal/identities/protected_linux.go", `stat.Mode&unix.S_IFMT != unix.S_IFREG || `, ``, "./internal/identities", "TestSharedCustodyFixtures/not-regular", "want principal_ledger_mismatch"},
+		{"shared-coverage-custody-inputs-missing", "internal/identities/fixture_coverage_test.go", `^(TestSharedFixtureCoverageRows|TestSharedCustodyFixtures)$`, `^TestSharedFixtureCoverageRows$`, "./internal/identities", "TestSharedFixtureCoverageGate", "uncovered statement/refusal branch protected_linux.go:"},
+		{"document-size-boundary-refused", "internal/identities/identities.go", `if len(raw) > MaxBytes {`, `if len(raw) >= MaxBytes {`, "./internal/identities", "TestSharedFixtures/accept-oversized-document", "valid control"},
 		{"consumer-record-uid-blind", "internal/identities/identities_test.go", `if candidate.UID == uid {
 			account, err := document.Service(uid, candidate.Generation)
 			if err != nil || view.Active(int64(uid), candidate.Generation) != nil {`, `if candidate.Kind == "service" && candidate.State == "active" {

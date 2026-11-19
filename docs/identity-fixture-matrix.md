@@ -3,7 +3,7 @@
 Generated from `testdata/identities-v1/cases.json`; do not edit by hand.
 Regenerate with `go test ./internal/identities -run '^TestSharedFixtureMatrixDocument$' -args -update-identity-fixture-matrix`.
 
-Manifest SHA-256: `bead91f9719674ea31a1db46acf8cc3fcdadce8bcd3113da16b1c1271fd4a0e5`.
+Manifest SHA-256: `d9cce72f85de42a63c7c72c429fcddd8d2604a289906cdd963e9975dd834c722`.
 
 Contract: the owner's 2026-11-19 managed-identity projection v1 decision in [identity-projection.md](identity-projection.md), and [generation-journal.md](../spec/generation-journal.md). Book alignment: Parts and their accounts / Platform root / Removal, as cited in that contract.
 
@@ -57,13 +57,13 @@ Each ACCEPT is immediately followed by a REFUSE breaking only its named applicab
 
 ## Coverage gate
 
-TestSharedFixtureCoverageGate runs ONLY cases.json rows in an isolated instrumented checkout, requiring 100% statement blocks and both outcomes of every if in Decode, Document.Validate, ValidateTransition, Document.Service and fixtureServicePrincipal. Test helpers do not count as production package coverage, so the unchanged reference lookup is extracted into a temporary non-test file for instrumentation. Every missing function, statement block or if outcome names its source line and fails. This is control-flow coverage, not exhaustive value, compound-condition or path-combination proof.
+TestSharedFixtureCoverageGate runs ONLY cases.json rows in an isolated instrumented checkout, requiring 100% statement blocks and both outcomes of every if in Decode, Document.Validate, ValidateTransition, Document.Service and fixtureServicePrincipal. Linux additionally gates Read with TestSharedCustodyFixtures inputs. Read has two explicitly declared unwitnessed true outcomes and their statement blocks: xattr refusal (ACL/capability or syscall fault) and read/close failure after protected open (syscall fault). All other Read blocks and outcomes are required; its actual coverage and excluded source lines are reported, not called 100%. Test helpers do not count as production package coverage, so the unchanged reference lookup is extracted into a temporary non-test file for instrumentation. Every undeclared missing function, statement block or if outcome names its source line and fails. This is control-flow coverage, not exhaustive value, compound-condition or path-combination proof; Encode remains outside this gate.
 
-Typed validation/lookup passes use only unmarshaled shared bytes, including malformed and stale documents, to cover those standalone APIs; a typed lookup is never an alternative to successful wire decoding. Oversized bytes pin the reference utility's 8 MiB producer limit; they do not silently extend the platform decision.
+Typed validation/lookup passes use only unmarshaled shared bytes, including malformed and stale documents, to cover those standalone APIs; a typed lookup is never an alternative to successful wire decoding. The document-size pair accepts exactly 8 MiB and refuses 8 MiB + 1 byte, pinning the reference utility's producer limit; it does not silently extend the platform decision.
 
 UID-binding has two independent witnesses: uid-binding holds the queried UID's active generation peer; uid-binding-journaled-record holds the selected service's own active pair and a different queried UID/generation. Neither direction substitutes for the other. Missing, creating, retiring, removed and mismatched-generation journals remain separate refusals.
 
-Custody is outside the byte-predicate matrix: TestSharedCustodyFixtures retains its valid control and single-condition metadata refusals. Synthetic decode neighbors do not claim a complete lifecycle journal. Producer lifecycle coverage and exact producer-byte tests remain separate; fixture coverage establishes neither broker adoption nor host qualification.
+Custody is outside the byte-predicate matrix but supplies Read coverage: TestSharedCustodyFixtures retains its valid control and single-condition metadata refusals. The not-regular FIFO has the expected owner/group, mode 0644, one link and buffered valid bytes: it breaks only the type rule, and R22-reg must fail that row. The separate not-regular-directory row intentionally also violates mode/link rules and is not a single-rule witness. Synthetic decode neighbors do not claim a complete lifecycle journal. Producer lifecycle coverage and exact producer-byte tests remain separate; fixture coverage establishes neither broker adoption nor host qualification.
 
 ## Shared cases
 
@@ -147,6 +147,7 @@ Custody is outside the byte-predicate matrix: TestSharedCustodyFixtures retains 
 | symlink | custody | principal_ledger_mismatch | symlink.json |  | none |
 | hardlink | custody | principal_ledger_mismatch | hardlink.json |  | none |
 | not-regular | custody | principal_ledger_mismatch | not-regular.json |  | none |
+| not-regular-directory | custody | principal_ledger_mismatch | not-regular.json |  | none |
 | duplicate-uid-cross-kind | decode | principal_ledger_mismatch | duplicate-uid-cross-kind.json |  | none |
 | duplicate-generation-agent-uid | View.Principal | principal_ledger_mismatch | duplicate-generation-agent-uid.json | journal-duplicate-generation-agent-uid.jsonl | 30002 |
 | accept-unknown-service-uid | View.Principal | accept | accept-unknown-service-uid.json | journal-accept-unknown-service-uid.jsonl | 30002 |
@@ -212,7 +213,7 @@ Custody is outside the byte-predicate matrix: TestSharedCustodyFixtures retains 
 | accept-noncanonical.json | baf5271fa7a346564cca4f4e42d24ab71bd92d6507316e780c4a2ae8c59b0206 |
 | accept-nul-name.json | dfb4e7d754c94c93c45ba01d10efd2bbbfe49ac697830f111d6b633a9f3f25e9 |
 | accept-null-accounts.json | baf5271fa7a346564cca4f4e42d24ab71bd92d6507316e780c4a2ae8c59b0206 |
-| accept-oversized-document.json | baf5271fa7a346564cca4f4e42d24ab71bd92d6507316e780c4a2ae8c59b0206 |
+| accept-oversized-document.json | 107ac1785ce5a76ae719a8e0332f837d83b236787a389af515a858fa912b4e85 |
 | accept-removed-journal-service.json | baf5271fa7a346564cca4f4e42d24ab71bd92d6507316e780c4a2ae8c59b0206 |
 | accept-retired-generation.json | baf5271fa7a346564cca4f4e42d24ab71bd92d6507316e780c4a2ae8c59b0206 |
 | accept-retiring-journal-service.json | baf5271fa7a346564cca4f4e42d24ab71bd92d6507316e780c4a2ae8c59b0206 |
@@ -241,7 +242,7 @@ Custody is outside the byte-predicate matrix: TestSharedCustodyFixtures retains 
 | bad-journal-head.json | b334ec0a2e4ffa2657f89200ddc79b8bb7bee19c0c9e0da7fbc68af7fc52510e |
 | case-variant-account-member.json | 6a98b334d61f5e389d58dc947afc85f9c60378490de5d9a91321bafa48fad34b |
 | case-variant-document-member.json | fdcd105c1c7e0b8ca911395611ad470e75131840c6a96049a63e6b35cb16eee0 |
-| cases.json | bead91f9719674ea31a1db46acf8cc3fcdadce8bcd3113da16b1c1271fd4a0e5 |
+| cases.json | d9cce72f85de42a63c7c72c429fcddd8d2604a289906cdd963e9975dd834c722 |
 | duplicate-account-key.json | d86203a8bae00c1868701982eef9ffb32f9cdb1bf68e97caa2a5f115fee4f2c2 |
 | duplicate-generation-agent-uid.json | 3af60837cece7611826b4888892d521bb7f724b76b9acbdd4397dbead8fd0211 |
 | duplicate-generation.json | 01e24c816050b16dc20f64a75c08507dfcbf9f059173a2f28695daf1421bd4e0 |

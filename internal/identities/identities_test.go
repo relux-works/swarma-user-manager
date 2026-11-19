@@ -173,6 +173,13 @@ func TestSharedFixtures(t *testing.T) {
 	})
 }
 
+// The shared document-size pair brackets the exact producer limit, not a smaller cap.
+func TestSharedFixtureDocumentSizeBoundary(t *testing.T) {
+	if len(fixtureBytes(t, "accept-oversized-document.json")) != MaxBytes || len(fixtureBytes(t, "oversized-document.json")) != MaxBytes+1 {
+		t.Fatal("shared document-size pair must bracket MaxBytes exactly")
+	}
+}
+
 // Every row declares its consumer operation; only journal-backed service accepts
 // promise an exact Principal. Decode and producer-only transitions promise none.
 func TestSharedFixtureConsumerContract(t *testing.T) {

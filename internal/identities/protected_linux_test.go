@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"golang.org/x/sys/unix"
 )
 
 // Custody failures return one bounded refusal and leave the shared bytes untouched.
@@ -61,6 +63,39 @@ func TestSharedCustodyFixtures(t *testing.T) {
 				if err := os.Remove(path); err != nil {
 					t.Fatal(err)
 				}
+				if err := unix.Mkfifo(path, 0644); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Chmod(path, 0644); err != nil {
+					t.Fatal(err)
+				}
+				var stat unix.Stat_t
+				if err := unix.Stat(path, &stat); err != nil {
+					t.Fatal(err)
+				}
+				if stat.Mode&unix.S_IFMT != unix.S_IFIFO || stat.Mode&07777 != 0644 || stat.Nlink != 1 || stat.Uid != owner || stat.Gid != group {
+					t.Fatal("FIFO must violate only the regular-file rule")
+				}
+				// A spare reader retains valid bytes after the writer closes, so
+				// a missing type guard reaches Decode without blocking or an I/O error.
+				reader, err := unix.Open(path, unix.O_RDONLY|unix.O_NONBLOCK|unix.O_CLOEXEC, 0)
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { unix.Close(reader) })
+				writer, err := os.OpenFile(path, os.O_WRONLY|unix.O_NONBLOCK, 0)
+				if err != nil {
+					t.Fatal(err)
+				}
+				written, writeErr := writer.Write(raw)
+				closeErr := writer.Close()
+				if writeErr != nil || written != len(raw) || closeErr != nil {
+					t.Fatal("FIFO valid-byte control", written, writeErr, closeErr)
+				}
+			case "directory":
+				if err := os.Remove(path); err != nil {
+					t.Fatal(err)
+				}
 				if err := os.Mkdir(path, 0755); err != nil {
 					t.Fatal(err)
 				}
@@ -78,7 +113,7 @@ func TestSharedCustodyFixtures(t *testing.T) {
 			} else if !errors.Is(err, ErrMismatch) {
 				t.Fatalf("want principal_ledger_mismatch, got %v", err)
 			}
-			if example.Condition != "missing-file" && example.Condition != "not-regular" {
+			if example.Condition != "missing-file" && example.Condition != "not-regular" && example.Condition != "directory" {
 				if err := os.Chmod(path, 0644); err != nil {
 					t.Fatal(err)
 				}
