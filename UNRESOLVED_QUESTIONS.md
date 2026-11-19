@@ -560,17 +560,20 @@ selection pass, but the full-suite gate remains red. A separate harness repair
 must propagate the child's task-owned temporary root through both variables;
 do not skip these controls, change the product, or report the red gate green.
 
-## Release set: the NSS collector is outside the pre-release
+## Release set: native cgo NSS collector
 
-The pure-Go release profile (`CGO_ENABLED=0`) cannot build `cmd/swarma-nss-probe`
-(`linux && cgo`), but the deployment contract requires it as a protected
-root-owned executable. The release set is therefore not a deployable closure.
 DECIDED (2026-11-17, the project lead, as a build-profile choice): (a) a cgo
-collector build profile (per-architecture native runners, a pinned C toolchain,
-`CGO_ENABLED=1` provenance), made first at the release template's source, so that
-`swarma-nss-probe` ships in the release set with SHA256SUMS and provenance like
-every other binary. No interim exclusion is accepted. Until that profile lands,
-this repository's pre-release is the pure-Go step only: the exact artifact set
-is enforced by `.github/release/expected-artifacts`, the installer keeps the
-collector as MISSING, and no root step installs it from outside an
-owner-approved digest.
+collector build profile with per-architecture native runners, a pinned C
+toolchain and `CGO_ENABLED=1` provenance. No interim exclusion is accepted.
+The release controls adopt the optional native cgo template at source revision
+`103208a1` (template PR #68), naming `./cmd/swarma-nss-probe` in main-owned
+policy and both Linux architecture artifacts in the exact expected set.
+The collector therefore ships with checksums and provenance like every other
+binary; collection refuses an incomplete set. See [the release profile](docs/releasing.md#optional-native-cgo-profile).
+
+Artifact delivery does not establish installed protected root ownership,
+runtime qualification or owner approval. The installer still keeps a missing
+collector as MISSING, and no root step may install any executable from outside
+an owner-approved aggregate release-set digest. Native arm64 execution and the
+pinned production-image build remain release-runner evidence obligations,
+not claims established by local fixture controls or host-toolchain builds.

@@ -32,10 +32,11 @@ read -r kind public_key _ < "$scratch/key.pub"
 printf 'release-tag namespaces="git" %s %s\n' "$kind" "$public_key" > .github/release/allowed_signers
 cp "$source_root"/.scripts/release-* .scripts/
 cp "$source_root/.github/workflows/release.yml" .github/workflows/
+cp "$source_root/.github/release/cgo-toolchain.json" .github/release/
+printf 'example_linux_amd64\nexample_linux_arm64\n' > .github/release/expected-artifacts
 printf 'module example.invalid/releasefixture\n\ngo 1.25\n' > go.mod
 printf 'package main\nfunc main() { println("inert release fixture") }\n' > cmd/example/main.go
 printf 'main fixture\n' > content
-printf 'example_linux_amd64\nexample_linux_arm64\n' > .github/release/expected-artifacts
 git add .
 git commit -q -S -m 'Create isolated release fixture'
 base=$(git rev-parse HEAD)
@@ -65,6 +66,12 @@ git -c "user.signingkey=$scratch/other-key" tag -s v1.2.0 -m 'Allowlist replacem
 git restore --source="$base" -- .github/release/allowed_signers
 git add .github/release/allowed_signers
 git commit -q -S -m 'Restore default-branch policy'
+printf './cmd/example\n' > .github/release/cgo-packages
+git add .github/release/cgo-packages
+git commit -q -S -m 'Fixture tag edits cgo opt-in'
+git tag -s v1.3.0 -m 'Cgo policy replacement control'
+git rm -q .github/release/cgo-packages
+git commit -q -S -m 'Restore empty cgo policy'
 git update-ref refs/remotes/origin/main HEAD
 main=$(git rev-parse HEAD)
 git switch -q -c side
@@ -105,6 +112,7 @@ sign="$scratch/work/.scripts/release-sign.sh"
 
 # Real signed objects prove each distinct admission refusal beside a valid ancestor.
 expect_ok ancestor_tag_on_main "$admit" v1.0.0
+expect_refusal tag_owned_cgo_policy tagged-release-policy-differs "$admit" v1.3.0
 expect_refusal lightweight_tag annotated-tag-required "$admit" v1.0.1
 expect_refusal unsigned_tag ssh-signature-required "$admit" v1.0.2
 expect_refusal untrusted_tag inconsistent-tag-signature "$admit" v1.0.3
@@ -132,16 +140,6 @@ expect_refusal dirty_build_source dirty-build-source .scripts/release-build.sh "
 [[ ! -e $scratch/refused-dist ]] || fail dirty-source-partial-output
 rm "$scratch/build-source/untracked.go"
 expect_ok fixture_build .scripts/release-build.sh "$scratch/assets" "$scratch/build-source"
-# Exact artifact-set control: the build fails closed on any difference from the
-# policy list, and when the policy list is missing. Each case beside the valid build above.
-cp .github/release/expected-artifacts "$scratch/expected.saved"
-printf 'example_linux_amd64\nexample_linux_arm64\nmissing-tool_linux_amd64\n' > .github/release/expected-artifacts
-expect_refusal missing_artifact artifact-set-mismatch .scripts/release-build.sh "$scratch/set-missing" "$scratch/build-source"
-printf 'example_linux_amd64\n' > .github/release/expected-artifacts
-expect_refusal extra_artifact artifact-set-mismatch .scripts/release-build.sh "$scratch/set-extra" "$scratch/build-source"
-rm .github/release/expected-artifacts
-expect_refusal missing_expected_list expected-artifacts-missing .scripts/release-build.sh "$scratch/set-nolist" "$scratch/build-source"
-cp "$scratch/expected.saved" .github/release/expected-artifacts
 fragment=$(sha256sum "$scratch/assets/release-set.json")
 fragment=${fragment%% *}
 expect_ok digest_control "$verify" "$scratch/assets" "$fragment"
@@ -242,17 +240,26 @@ expect_ok rebuilt_signature ssh-keygen -Y verify -f "$scratch/fixture-file-signe
   -I fixture -n file -s "$GH_FIXTURE/SHA256SUMS.sig" < "$scratch/original-sums"
 expect_refusal existing_signature existing-asset "$sign" v1.0.0
 expect_ok no_signature_overwrite cmp "$scratch/uploaded-signature" "$GH_FIXTURE/SHA256SUMS.sig"
+expect_refusal cgo_controls_direct_invocation run-release-test-required bash "$source_root/.scripts/release-cgo-test.sh"
+source "$source_root/.scripts/release-cgo-test.sh"
 # Finite template assertions cover the reviewed workflow contract, not hosted execution.
 workflow_policy() {
-  python3 - "$source_root" <<'POLICY'
+  python3 - "$source_root" "${1:-$source_root/.github/workflows/release.yml}" <<'POLICY'
 import pathlib
 import re
 import sys
 root = pathlib.Path(sys.argv[1])
-workflow = (root / ".github/workflows/release.yml").read_text()
+workflow = pathlib.Path(sys.argv[2]).read_text()
 assert "  workflow_dispatch:" in workflow and not re.search(r"^  push:", workflow, re.M)
-assert workflow.count("if: github.ref == 'refs/heads/main' && github.event.repository.default_branch == 'main'") == 2
-assert workflow.count("          ref: main\n") == 2
+assert workflow.count("github.ref == 'refs/heads/main' && github.event.repository.default_branch == 'main'") == 3
+assert workflow.count("          ref: main\n") == 3
+assert "runner: ubuntu-24.04\n" in workflow and "runner: ubuntu-24.04-arm\n" in workflow
+assert "image: ${{ needs.build.outputs.cgo_image }}" in workflow
+assert "needs.build.outputs.cgo == 'false' && needs.cgo.result == 'skipped'" in workflow
+assert "needs.cgo.result == 'success'" in workflow
+draft = workflow.split("\n  draft:\n", 1)[1]
+assert "      !cancelled() && github.ref" in draft and "always()" not in draft, "draft-must-respect-cancellation"
+assert "python3 .scripts/release-profile.py collect" in workflow
 assert "--draft --prerelease" in workflow
 assert "agent-held key, proves nothing about origin" in workflow
 assert "python3 .scripts/release-metadata.py check" in workflow
@@ -273,4 +280,8 @@ print("Default-branch dispatch, pre-release label, action pins, permissions, doc
 POLICY
 }
 expect_ok workflow_default_branch_and_prerelease_policy workflow_policy
+# The finite workflow checker must reject the formerly non-cancellable draft.
+sed 's/!cancelled()/always()/' "$source_root/.github/workflows/release.yml" > "$scratch/uncancellable-draft.yml"
+expect_refusal workflow_uncancellable_draft_rejected draft-must-respect-cancellation \
+  workflow_policy "$scratch/uncancellable-draft.yml"
 printf 'Release controls passed; scratch evidence retained at %s\n' "$scratch"

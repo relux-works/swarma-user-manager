@@ -1,7 +1,5 @@
-# The exact artifact set this repository releases under the pure-Go profile.
-# The build fails closed on any difference. swarma-nss-probe (linux && cgo) is
-# NOT in this set: the cgo collector profile is the next release unit (decision
-# below in UNRESOLVED_QUESTIONS.md); it is added here when that profile lands.
+swarma-nss-probe_linux_amd64
+swarma-nss-probe_linux_arm64
 swarma-slotd-demo_linux_amd64
 swarma-slotd-demo_linux_arm64
 swarma-user-launcher_linux_amd64

@@ -1,8 +1,7 @@
 # Linux pre-releases (test profile)
 
 The [workflow](../.github/workflows/release.yml) produces a **PRE-RELEASE draft**
-with every `cmd/` main package that builds under the pure-Go release profile
-(`CGO_ENABLED=0`) for Linux amd64/arm64, `SHA256SUMS`,
+with every `cmd/` main package for Linux amd64/arm64, `SHA256SUMS`,
 `provenance.json` and the canonical `release-set.json` fragment. The optional
 bot checksum signature is labelled exactly:
 
@@ -35,9 +34,10 @@ separate runtime qualification; artifact delivery cannot activate the user manag
 
 GitHub loads a tag-push workflow from the tag itself. This template therefore
 has **no tag-push trigger**. After pushing a tag, an authorized operator dispatches
-`release.yml` **on main**, passing the tag as data. Both jobs require the dispatch
-ref and repository default branch to be `main`; both check out `main` with full
-history. The draft job requires the identical policy commit used by the build.
+`release.yml` **on main**, passing the tag as data. All jobs require the dispatch
+ref and repository default branch to be `main`; all check out `main` with full
+history. The native cgo and draft jobs require the identical policy commit used
+by the pure-Go build. Native jobs are skipped when the cgo policy is empty.
 If the repository renames its default branch, revise this contract first.
 
 ```bash
@@ -89,32 +89,19 @@ aggregate owner approval remain required.
 [release-build.sh](../.scripts/release-build.sh) requires Go **1.26.10** and a clean
 source checkout. Its optional second argument is an absolute source checkout;
 the executable builder and metadata helper remain in the default-branch checkout.
-Every `main` under `./cmd/...` that builds under `CGO_ENABLED=0` is built for amd64 and arm64 with `CGO_ENABLED=0`,
+Every non-policy `main` under `./cmd/...` is built for amd64 and arm64 with `CGO_ENABLED=0`,
 `-mod=readonly -p=2 -trimpath -buildvcs=false -ldflags=-buildid=`, `GOAMD64=v1`,
 `GOARM64=v8.0`, empty `GOEXPERIMENT`, `GOTOOLCHAIN=local`, `GOWORK=off`,
 `GOENV=off`, `LC_ALL=C` and `TZ=UTC`. Modules are pinned by `go.mod`/`go.sum`.
 `SOURCE_DATE_EPOCH` is the tag commit's committer timestamp, recorded as an input;
 Go does not use it to normalize binaries. Duplicate command basenames fail.
 
-The module is `github.com/relux-works/swarma-user-manager`. Under this fixed
-pure-Go release profile, both Linux architectures build the same command list:
-
-| Main package | amd64 artifact | arm64 artifact |
-|---|---|---|
-| `./cmd/swarma-user-manager` | `swarma-user-manager_linux_amd64` | `swarma-user-manager_linux_arm64` |
-| `./cmd/swarma-user-launcher` | `swarma-user-launcher_linux_amd64` | `swarma-user-launcher_linux_arm64` |
-| `./cmd/swarma-slotd-demo` | `swarma-slotd-demo_linux_amd64` | `swarma-slotd-demo_linux_arm64` |
-
-`./cmd/swarma-nss-probe` requires `linux && cgo` and is excluded by the template's
-`CGO_ENABLED=0` profile. No Darwin binaries are built.
-
-**This release set is NOT a complete deployable closure.** The deployment
-contract requires `swarma-nss-probe` as a protected root-owned executable at
-`<root>/libexec/swarma-nss-probe` ([linux backend](linux-backend.md)), and the
-manifest is refused without it. That collector is not in this release set, so no
-root step may install it from outside an owner-approved release-set digest.
-The build profile for it is an open owner decision (see
-[unresolved questions](../UNRESOLVED_QUESTIONS.md)).
+The main-owned [expected-artifacts](../.github/release/expected-artifacts) file
+lists the exact binary basenames, sorted, one per line. No globs, comments,
+duplicates or exclusions are accepted. Collection fails for missing or extra
+files, symlinks, mismatched input commits or incomplete architecture inputs.
+The intermediate pure-Go set is checked against that list minus the explicitly
+selected cgo artifacts; only the complete collected set can become a draft.
 
 `provenance.json` records the source commit, Go version, flags, environment and
 `SOURCE_DATE_EPOCH`. It describes build inputs; it is not an origin attestation.
@@ -223,9 +210,137 @@ mismatched-digest, missing-label and non-prerelease refusals, plus rebuild/sign,
 readback and no-overwrite controls. This is not hosted workflow evidence.
 No managed account, launcher or live release API is touched by the tests.
 
-When copying the template, include `.scripts/release-*` (including the Python 3
-metadata helper), workflow and docs. Change the repository default in the signing
+When copying the template, include `.scripts/release-*` (including both Python 3
+helpers and the sourced cgo controls), `.github/release/`, workflow and docs.
+Replace the exact expected-artifact list for the adopting repository. Change the repository default in the signing
 helper, install the public **tag consistency** pin, verify the v* tag ruleset,
 land controls on main, and run scratch controls plus two independent full builds.
 Preserve the interim owner-approved aggregate trust boundary. Dedicated key
 custody and runtime qualification remain separate owner gates.
+
+## User manager artifact set
+
+The module is `github.com/relux-works/swarma-user-manager`. The complete Linux
+pre-release set contains these binaries on both architectures; no Darwin binaries
+are built:
+
+| Main package | Profile | amd64 artifact | arm64 artifact |
+|---|---|---|---|
+| `./cmd/swarma-nss-probe` | native cgo | `swarma-nss-probe_linux_amd64` | `swarma-nss-probe_linux_arm64` |
+| `./cmd/swarma-slotd-demo` | pure Go | `swarma-slotd-demo_linux_amd64` | `swarma-slotd-demo_linux_arm64` |
+| `./cmd/swarma-user-launcher` | pure Go | `swarma-user-launcher_linux_amd64` | `swarma-user-launcher_linux_arm64` |
+| `./cmd/swarma-user-manager` | pure Go | `swarma-user-manager_linux_amd64` | `swarma-user-manager_linux_arm64` |
+
+The `linux && cgo` NSS collector ships with the same checksum and aggregate-digest
+approval requirements as every other executable. The deployment contract requires
+it at `<root>/libexec/swarma-nss-probe` as a protected root-owned executable
+([Linux backend](linux-backend.md)). The cgo profile supplies its release artifacts;
+it does not install them, establish protected ownership or qualify the runtime.
+The installer still refuses a missing collector and no root step may use a binary
+outside the owner-approved aggregate release-set digest. This implements the
+[decided build-profile ruling](../UNRESOLVED_QUESTIONS.md#release-set-native-cgo-nss-collector).
+
+## Optional native cgo profile
+
+This repository opts in with `./cmd/swarma-nss-probe` in the main-owned
+[cgo-packages](../.github/release/cgo-packages) policy. Both native artifacts are
+required in the complete pre-release set; no interim exclusion is accepted.
+An empty or absent policy disables the optional profile for other adopters,
+leaving their pure-Go binary set, flags and provenance format unchanged.
+Opt-in belongs to each adopting repository on **main**, not to a tag or to a
+workflow input. These policy files
+are already inside the admission scripts existing release-policy tree check.
+This refines build-input handling only; the installation book chapter and
+helper specification cited above retain their trust and qualification boundaries.
+
+To opt in, list sorted, unique package paths, one per line, for example:
+
+```text
+./cmd/example-nss-probe
+```
+
+Paths must be main packages below `./cmd/`, with no traversal, whitespace or
+wildcards. Add **both** `example-nss-probe_linux_amd64` and
+`example-nss-probe_linux_arm64` to `expected-artifacts`; omission is a refusal,
+not permission to exclude a protected executable. A cgo-only main absent from
+the policy is never built. A non-policy main always uses `CGO_ENABLED=0`, even
+if it has an alternative cgo implementation. Dependency cgo is enabled only
+while building an explicitly selected main.
+
+The workflow uses `ubuntu-24.04` for amd64 and `ubuntu-24.04-arm` for arm64.
+Each native job runs in the multi-architecture GCC image pinned by digest in
+[cgo-toolchain.json](../.github/release/cgo-toolchain.json). It pins GCC 14.2.0
+and the image containing glibc 2.36; the digest also freezes compiler support
+files, libc patch level and binutils. No runtime package installation, C cross
+compiler or emulation is used. The helper refuses a non-native host or compiler
+target and mismatched compiler/libc versions. Repinning is a reviewed main
+policy change, never an ambient environment override. The image is the
+[official GCC image](https://hub.docker.com/_/gcc); its pinned index includes
+Linux amd64 and arm64 images.
+
+The C policy fixes `CGO_CFLAGS`, `CGO_CPPFLAGS`, `CGO_CXXFLAGS`, `CGO_FFLAGS`
+and `CGO_LDFLAGS`; ambient compiler selection, flag allowlists and include/library
+search overrides are discarded. C compilation uses `-O2 -g0`; linking disables
+the ELF build ID with `-Wl,--build-id=none`. Go still uses `-mod=readonly -p=2`,
+`-trimpath`, `-buildvcs=false` and explicit
+`-ldflags="-buildid= -linkmode=external -extldflags=-Wl,--build-id=none"`.
+
+For each architecture, the helper clones the identical admitted commit into
+**two independent source paths**, with separate absolute homes, caches, module
+stores and temporary directories. Both builds must have identical SHA-256
+digests before any output binary or receipt is exported. Private build evidence
+remains under the supplied absolute `TMPDIR`. The receipt records compiler
+version/banner, target, libc version, linker version, image digest, C and Go
+flags, source commit, package list and both-build comparison. Collection checks
+both native receipts and their artifact digests, embeds them in the `cgo` array
+of `provenance.json`, and regenerates `SHA256SUMS` and canonical `release-set.json`
+over the complete exact set. Receipts are build-input records, not signatures.
+
+The receipt field `toolchain.image` is the **policy-declared** image reference,
+not an observed container identity. The hosted job selects that same reference
+as its container image. A local build outside that image does not attest to
+having used it: the compiler version/banner, target, libc version and linker
+banner are the observed toolchain facts.
+
+For local independent reconstruction, keep tooling/policy in a reviewed main
+checkout and build source in a separate clean checkout. Use the pinned image
+on **each native architecture**, Go 1.26.10 and the isolated environment described
+above. The internal entry points are:
+
+```bash
+# Pure subset; never publish this intermediate directory as the release.
+GO=/absolute/path/to/go .scripts/release-build.sh /absolute/pure /absolute/source pure
+# On the corresponding native host, in the pinned toolchain environment:
+GO=/absolute/path/to/go python3 .scripts/release-profile.py build \
+  /absolute/cgo-amd64 /absolute/main-policy /absolute/source amd64
+GO=/absolute/path/to/go python3 .scripts/release-profile.py build \
+  /absolute/cgo-arm64 /absolute/main-policy /absolute/source arm64
+# After transferring both native outputs without modification:
+python3 .scripts/release-profile.py collect /absolute/dist /absolute/main-policy \
+  SOURCE_COMMIT /absolute/pure /absolute/cgo-amd64 /absolute/cgo-arm64
+python3 .scripts/release-profile.py check /absolute/dist /absolute/main-policy
+```
+
+The existing optional `release-sign.sh` is pure-Go only: a nonempty cgo policy
+makes its ordinary build refuse `cgo-native-builds-required`, before signing or
+uploading anything. It must not sign an incomplete subset. Independent native
+reconstruction and owner approval of the aggregate digest remain necessary;
+this profile neither installs nor qualifies the later adopting consumer.
+
+`release-test.sh` sources `release-cgo-test.sh`. Its real local fixture uses a
+main package tagged `linux && cgo` with a `!cgo` fallback, two fresh builds and
+an executable C result. Physical and symlinked source paths must both exclude
+that dual-mode policy main from the pure subset. The fallback is removed only
+for the later omitted-policy control, which exercises a cgo-only main.
+The synthetic fixture policy explicitly pins the available local compiler/libc;
+it does not claim to execute the production image. Controls check an omitted
+policy, a dual-mode non-policy package, wrong architecture, toolchain drift,
+compiler-target mismatch, an incomplete/extra artifact set, changed receipted
+bytes and canonical receipts with mismatched commit, compiler version or C
+flags. An ancestor commit cannot substitute for the pure set build input.
+Each new input/target refusal must leave no output directory. A bounded plant
+changes the second build and must fail specifically on reproducibility, leaving
+no publishable output. The collector positive control uses real local output
+and an explicitly synthetic peer receipt; it is not a native peer build claim.
+Native arm64 execution and the pinned production image require their actual
+runner environments, not that collector fixture or a local CI substitute.
