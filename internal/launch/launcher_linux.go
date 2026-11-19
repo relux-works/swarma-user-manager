@@ -33,13 +33,14 @@ type Deps struct {
 	Drop      func(uid, gid uint32) error
 	Enter     func(home *os.File) error
 	Exec      func(fd int, argv, env []string) error
+	Confine   func() error
 	Qualify   func(context.Context, manager.Policy) error
 }
 
 // Production returns native seams for the root launcher binary. The entry must
 // also wire Qualify to the integrated backend; a missing qualifier refuses.
 func Production(p manager.Policy, a manager.Authority, s *Store, scanner Scanner) Deps {
-	return Deps{Policy: p, Authority: a, Journal: manager.NativeJournal{Path: filepath.Join(p.Root, "lib/user-manager/generations")}, Store: s, Scanner: scanner, Clock: BootClock{}, Scrub: ScrubDescriptors, Place: PlaceFD3, Session: NewSession, Self: SelfIdentity, Drop: DropPrivileges, Enter: func(h *os.File) error { return unix.Fchdir(int(h.Fd())) }, Exec: ExecVerified}
+	return Deps{Policy: p, Authority: a, Journal: manager.NativeJournal{Path: filepath.Join(p.Root, "lib/user-manager/generations")}, Store: s, Scanner: scanner, Clock: BootClock{}, Scrub: ScrubDescriptors, Place: PlaceFD3, Session: NewSession, Self: SelfIdentity, Drop: DropPrivileges, Enter: func(h *os.File) error { return unix.Fchdir(int(h.Fd())) }, Exec: ExecVerified, Confine: ConfineUnixOnly}
 }
 
 type Launcher struct{ Deps }
@@ -71,35 +72,35 @@ type ExecProfile struct {
 	Ceilings []string `json:"ceilings,omitempty"`
 }
 
-func (l Launcher) resolveExecutor(id string) (*os.File, string, error) {
+func (l Launcher) resolveExecutor(id string) (*os.File, approvedExecutor, error) {
 	s := l.Store
 	etc, e := manager.ProtectedDir(filepath.Join(s.root, "etc"), s.owner, s.anchor)
 	if e != nil {
-		return nil, "", fail("executor_not_approved")
+		return nil, approvedExecutor{}, fail("executor_not_approved")
 	}
 	defer etc.Close()
 	b, e := manager.ReadProtected(etc, "approved-executors.json", s.owner, manager.MaxRequest)
 	if e != nil {
-		return nil, "", fail("executor_not_approved")
+		return nil, approvedExecutor{}, fail("executor_not_approved")
 	}
 	var list approvedExecutors
 	if manager.Strict(b, &list) != nil || list.Format != executorsFormat || list.Executors == nil {
-		return nil, "", fail("executor_not_approved")
+		return nil, approvedExecutor{}, fail("executor_not_approved")
 	}
 	for _, x := range list.Executors {
 		if x.ID != id {
 			continue
 		}
 		if !executorPattern.MatchString(x.ID) {
-			return nil, "", fail("executor_not_approved")
+			return nil, approvedExecutor{}, fail("executor_not_approved")
 		}
 		f, e := openExecutable(x.Path, x.Digest, s.owner, s.anchor)
 		if e != nil {
-			return nil, "", e
+			return nil, approvedExecutor{}, e
 		}
-		return f, x.Path, nil
+		return f, x, nil
 	}
-	return nil, "", fail("executor_not_approved")
+	return nil, approvedExecutor{}, fail("executor_not_approved")
 }
 
 func (l Launcher) pinnedProfile(g Gate) (ExecProfile, error) {
@@ -192,11 +193,15 @@ func (l Launcher) Run(ctx context.Context, raw []byte, in manager.Invocation) ma
 	}
 	// External preparation outside the shared lock: approved executable and
 	// pinned exec profile are provisional facts, rechecked only by identity.
-	exe, exePath, e := l.resolveExecutor(r.Executor)
+	exe, executor, e := l.resolveExecutor(r.Executor)
 	if e != nil {
 		return refused(id, e)
 	}
 	defer exe.Close()
+	mapping, e := l.launchMapping(executor)
+	if e != nil {
+		return refused(id, e)
+	}
 	if _, e := l.pinnedProfile(gate); e != nil {
 		return refused(id, e)
 	}
@@ -395,7 +400,13 @@ func (l Launcher) Run(ctx context.Context, raw []byte, in manager.Invocation) ma
 	unlock()
 	held = false
 	env := []string{"HOME=" + account.Home, "USER=" + account.Username, "LOGNAME=" + account.Username, "PATH=/usr/bin:/bin", "LANG=C.UTF-8", "TMPDIR=" + account.Home + "/tmp"}
-	if e := d.Exec(int(exe.Fd()), []string{exePath}, env); e != nil {
+	if mapping != nil {
+		env = append(env, mapping.environment()...)
+		if d.Confine == nil || d.Confine() != nil {
+			return refused(id, fail("launch_confinement_unavailable"))
+		}
+	}
+	if e := d.Exec(int(exe.Fd()), []string{executor.Path}, env); e != nil {
 		return refused(id, fail("backend_failed"))
 	}
 	return manager.Response{ID: r.ID, OK: true, Result: map[string]any{"execution_id": r.ExecutionID, "pid": int64(pid)}, State: row.State}

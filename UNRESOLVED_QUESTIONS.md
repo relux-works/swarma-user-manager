@@ -1,5 +1,15 @@
 # Unresolved station-account questions
 
+## Claude gateway launch mapping v1 Core review
+
+The [worker-side mapping contract](docs/claude-gateway-launch.md) is the
+**owner decision 2026-11-19, Core review pending** (review scheduled for
+2026-11-22). It resolves the previously undefined worker launch mapping for
+qualification units only. Gateway intake alignment, protected installation,
+native root qualification, real credential injection and activation remain
+separate delivery/owner gates. The launcher change does not decide the broker
+daemon or operator-act activation interface and does not change receipt bytes.
+
 The [station-account v0 draft](spec/stations-v0.md) is a specification slice,
 not a production capability. Architecture decisions and remaining publication
 gates are distinguished below.

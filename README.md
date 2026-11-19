@@ -70,6 +70,12 @@ The drop-to-exec goroutine stays on one OS thread; the final check reads
 alone cannot enable launch. Root qualification, installation, containment and
 independent original-deadline stop remain external gates.
 
+The [protected Claude gateway launch mapping](docs/claude-gateway-launch.md)
+adds opt-in, approved-executor-bound selection, a fixed secret-free environment
+and Unix-only seccomp before exec. It is an **owner decision 2026-11-19, Core
+review pending**, limited to qualification units. Unlisted executors and start
+receipt bytes are unchanged; no gateway or broker activation is implied.
+
 ## Principles
 
 - [A3 package-update requalification](spec/upgrade-requalification.md) specifies the sole signed-apt-chain automatic re-pin exception. Its evidence recorder, chain verifier and state reconciler are implemented for review; time/deployment integration, automatic pinning, containment/notification and root qualification remain pending; station admission stays closed until that slice is landed and qualified. It does not implement A1p's separate administrator command.
@@ -321,6 +327,7 @@ describes protected deployment inputs and the stopped-admission pin/restart flow
 | Station core build | Build the bounded one-request entrypoint | `go build -o .temp/swarma-user-manager ./cmd/swarma-user-manager` | Binary in `.temp/`; closed result JSON on stdout |
 | First-run launcher build | Build the root one-shot launcher | `go build -o .temp/swarma-user-launcher ./cmd/swarma-user-launcher` | Binary in `.temp/`; closed refusal JSON on stdout, nothing on success |
 | Launch/stop tests | Closed intake, start gate, ledgers, R-OBS mapping, D5a absence proof with its saved-UID plant, stop loop, launcher pipeline and exec.stop | `go test -p 1 ./internal/launch ./cmd/swarma-user-launcher -count=1`; add `-race` for race checks | Named verdicts; owned temporary roots and subprocesses; see [the launcher note](docs/first-run-launcher.md) |
+| Gateway launch controls | Closed protected mappings, exact environment and legacy bytes, native seccomp child controls and narrowing source plants | `go test ./internal/launch -run '^TestLaunch[MC]' -count=1 -v` | Named verdicts and owned temporary subprocess/overlay fixtures; capture logs under `.temp/` |
 | Launch/stop guard plants | `go test -v -count=1 -timeout=10m ./internal/launch -run '^TestFix4GuardPlantsTurnRed$'` | Named green controls and exit-1 guard-removal assertions; temporary overlays under Go test scratch; retain console logs in `.temp/` |
 | Native credential witness | On an explicitly authorized disposable root runner: `SWARMA_LAUNCH_ROOT_WITNESS=apply go test -v -count=1 ./internal/launch -run '^TestNativeDropExecCredentials$'` | Eight actual drop/exec reports; skips without both explicit opt-in and root; no account provisioning |
 | NSS collector build (Linux, Go with cgo and C compiler) | Build the status-aware read-only NSS ABI helper | `go build -o .temp/swarma-nss-probe ./cmd/swarma-nss-probe` | Helper binary in `.temp/`; bounded sanitized JSON; systemd ABI mode is diagnostic only, never completeness authority; no password hashes |

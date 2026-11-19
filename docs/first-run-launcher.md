@@ -91,10 +91,24 @@ manifest/input/record encodings gain no bytes.
 <root>/lib/user-manager/receipts/<generation>/<execution_id>.json   root 0644 start receipts
 <root>/etc/approved-executors.json             station-approved-executors/1 {id,path,sha256}
 <root>/etc/exec-profiles/<id>.json             station-exec-profile/1, body digest pinned by the gate
+<root>/etc/launch-mappings/                   root:root 0755, no directory links
+  index.json       station-launch-mappings/1: sorted unique mapped executor IDs
+  <executor_id>.json station-launch-mapping/1: approved executor digest and fixed gateway settings
+<root>/run/credential-gateway/<generation>/gateway.sock   generation Unix socket, no links
 ```
 
 `launch.ProvisionStore` initializes an empty launch directory (installer
 only). Missing or torn evidence refuses and is never recreated.
+
+Mapping files are root:root 0644 regular files with exactly one link, opened
+without following links and checked with fstat. Their formats are closed CCJ-1.
+An absent selection index selects the unchanged legacy path; an unlisted
+executor ignores its mapping file. A listed executor must have a valid mapping
+and existing socket before launch admission. Qualification evidence records the
+mapping file SHA-256 separately: start receipts gain no fields or bytes.
+See the [Claude gateway launch contract](claude-gateway-launch.md), **owner
+decision 2026-11-19, Core review pending**; this is not installation or activation
+approval.
 
 ## Launch order (helper §7 with committed-start A)
 
@@ -109,6 +123,8 @@ only). Missing or torn evidence refuses and is never recreated.
    digest, same boot and unexpired validity (`target_not_owned` otherwise).
 5. Outside the lock: approved executable opened without following links and
    digest-verified (`executor_not_approved`, `executable_digest_mismatch`);
+   selection index and selected mapping read once, protected metadata and
+   approved digest checked, and generation socket checked without links;
    exec-profile body digest verified (`qualification_required` on drift).
 6. Under the shared lock: both caller and worker generations active and latest
    in the same protected journal view (`generation_not_active`); caller and
@@ -125,7 +141,12 @@ only). Missing or torn evidence refuses and is never recreated.
    refused, capabilities empty, no-new-privileges (`privilege_drop_failed`).
 9. C: validity rechecked, invalidation ledger re-read through the retained
    root handle, one debit line appended and synced through the retained
-   root handle; lock released; `execveat` with a fixed environment.
+   root handle; lock released; compose the fixed environment. A mapped Claude
+   executor receives only the six existing base entries, the fixed Unix socket,
+   HTTP base URL, OAuth placeholder and five traffic-disable flags. Install the
+   Unix-only seccomp filter with no-new-privileges before `execveat`; a missing
+   or failed filter refuses `launch_confinement_unavailable`. Unmapped executors
+   receive the original environment and no new filter.
 
 A refusal after step 7 retains the receipt; the effect stays admitted with
 its stop obligation and is resolved only by `exec.stop`.
