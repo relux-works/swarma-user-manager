@@ -14,7 +14,10 @@ artifact digest. The owner approves that one digest **in person before any root
 step** (OD-3 plan digest). Two independent reads of each release PR must compare
 artifact digests with a second independent build before assembling that set.
 The helper below supplies a rebuild comparison, not either review verdict or the
-owner's approval. A dedicated release key outside agent sessions remains an
+owner's approval. In this repository the cgo policy is nonempty, so the
+two-argument helper refuses (`cgo-native-builds-required`); the complete-set
+comparison comes from the independent native reconstruction under
+[Optional native cgo profile](#optional-native-cgo-profile) below. A dedicated release key outside agent sessions remains an
 owner key-custody decision (OD-2).
 
 ## Book and specification boundary
@@ -89,6 +92,8 @@ aggregate owner approval remain required.
 [release-build.sh](../.scripts/release-build.sh) requires Go **1.26.10** and a clean
 source checkout. Its optional second argument is an absolute source checkout;
 the executable builder and metadata helper remain in the default-branch checkout.
+With a nonempty cgo policy, as here, it requires the third argument `pure` and
+then produces only the intermediate pure subset, never a release set.
 Every non-policy `main` under `./cmd/...` is built for amd64 and arm64 with `CGO_ENABLED=0`,
 `-mod=readonly -p=2 -trimpath -buildvcs=false -ldflags=-buildid=`, `GOAMD64=v1`,
 `GOARM64=v8.0`, empty `GOEXPERIMENT`, `GOTOOLCHAIN=local`, `GOWORK=off`,
@@ -127,11 +132,16 @@ commit and toolchain. Resolve absolute scratch paths before launching Go; set
 From a trusted default-branch checkout:
 
 ```bash
+# Pure subset only: it omits the native NSS collector and is never a release set.
 GO=/absolute/path/to/go1.26.10/bin/go .scripts/release-build.sh \
-  /absolute/scratch/dist /absolute/scratch/source
-cmp /absolute/first/dist/SHA256SUMS /absolute/second/dist/SHA256SUMS
-cmp /absolute/first/dist/release-set.json /absolute/second/dist/release-set.json
+  /absolute/scratch/pure /absolute/scratch/source pure
+cmp /absolute/first/pure/SHA256SUMS /absolute/second/pure/SHA256SUMS
+cmp /absolute/first/pure/release-set.json /absolute/second/pure/release-set.json
 ```
+
+The complete-set comparison is a `cmp` of the collected `SHA256SUMS` and
+`release-set.json` from two independent runs of the native procedure under
+[Optional native cgo profile](#optional-native-cgo-profile) below, which needs both native outputs from the pinned image.
 
 The output directory must not exist. Matching hashes prove reproducibility for
 that pair of builds, source and environment; they do not establish origin.
@@ -258,7 +268,7 @@ An empty or absent policy disables the optional profile for other adopters,
 leaving their pure-Go binary set, flags and provenance format unchanged.
 Opt-in belongs to each adopting repository on **main**, not to a tag or to a
 workflow input. These policy files
-are already inside the admission scripts existing release-policy tree check.
+are already inside the admission script's existing release-policy tree check.
 This refines build-input handling only; the installation book chapter and
 helper specification cited above retain their trust and qualification boundaries.
 
