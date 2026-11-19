@@ -303,15 +303,34 @@ func (s *Store) makeLineage(role, copyID string) (err error) {
 		return e
 	}
 	defer closeInto(&err, &d)
-	e = s.step("lineage-create", func() error { return unix.Mkdirat(int(d.Fd()), copyID, 0750) })
+	var child *os.File
+	e = s.step("lineage-create", func() error {
+		if e := unix.Mkdirat(int(d.Fd()), copyID, 0750); e != nil {
+			return e
+		}
+		fd, e := unix.Openat(int(d.Fd()), copyID, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC|unix.O_NONBLOCK, 0)
+		if e != nil {
+			return errors.Join(ErrUnavailable, e)
+		}
+		child = os.NewFile(uintptr(fd), copyID)
+		if e = child.Chmod(0750); e != nil {
+			return errors.Join(ErrUnavailable, e)
+		}
+		return nil
+	})
+	defer closeInto(&err, &child)
 	if e != nil && !errors.Is(e, unix.EEXIST) {
 		return e
 	}
-	child, e := openAt(d, copyID, true, s.policy)
-	if e != nil {
+	if child == nil {
+		child, e = openAt(d, copyID, true, s.policy)
+		if e != nil {
+			return e
+		}
+	}
+	if e = check(child, s.policy, 0750, true); e != nil {
 		return e
 	}
-	defer closeInto(&err, &child)
 	if e = s.sync("lineage-sync", child); e != nil {
 		return e
 	}
@@ -334,6 +353,7 @@ func (s *Store) writeFile(rel string, b []byte) (err error) {
 		fd, e := unix.Openat(int(d.Fd()), name, unix.O_WRONLY|unix.O_CREAT|unix.O_EXCL|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0640)
 		if e == nil {
 			f = os.NewFile(uintptr(fd), name)
+			e = f.Chmod(0640)
 		}
 		return e
 	})

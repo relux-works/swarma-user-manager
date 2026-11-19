@@ -248,6 +248,9 @@ func (r *Recorder) append(events []event, v event) error {
 	}
 	f := os.NewFile(uintptr(fd), "event")
 	defer f.Close()
+	if f.Chmod(0600) != nil {
+		return ErrStore
+	}
 	// A torn append remains present and blocks recovery. Never silently truncate it.
 	if protected(f, r.owner, false) != nil {
 		return ErrStore

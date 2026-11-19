@@ -133,7 +133,12 @@ func TestVerifierFailClosedWalk(t *testing.T) {
 		t.Fatal("outside sentinel changed")
 	}
 	os.Remove(control)
-	os.WriteFile(control, bytes, 0640)
+	if e = os.WriteFile(control, bytes, 0640); e != nil {
+		t.Fatal(e)
+	}
+	if e = os.Chmod(control, 0640); e != nil {
+		t.Fatal(e)
+	}
 	if _, e = home.Verify(ctx, m, testLimits()); e != nil {
 		t.Fatal(e)
 	}
@@ -147,7 +152,12 @@ func TestVerifierFailClosedWalk(t *testing.T) {
 	if _, e = home.Verify(ctx, m, testLimits()); e == nil {
 		t.Fatal("missing accepted")
 	}
-	os.WriteFile(control, bytes, 0640)
+	if e = os.WriteFile(control, bytes, 0640); e != nil {
+		t.Fatal(e)
+	}
+	if e = os.Chmod(control, 0640); e != nil {
+		t.Fatal(e)
+	}
 	leaf := filepath.Join(path, ".platform", "skills")
 	t.Cleanup(func() {
 		if e := unix.Chmod(leaf, 0750); e != nil && !errors.Is(e, unix.ENOENT) {

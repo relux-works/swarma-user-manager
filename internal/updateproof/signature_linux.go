@@ -100,17 +100,17 @@ func authenticate(ctx context.Context, p Profile, b Bundle, clock Clock) ([]byte
 	defer key.Close()
 	// Only retained local bytes enter a private temporary verifier directory.
 	// gpgv has no configuration files; an explicit keyring excludes its defaults.
-	dir, e := os.MkdirTemp("", "swarma-update-proof-")
+	dir, e := privateDirectory("swarma-update-proof-")
 	if e != nil {
 		return nil, "", ErrStore
 	}
 	defer os.RemoveAll(dir)
-	if os.WriteFile(filepath.Join(dir, "release"), b.Release, 0600) != nil {
+	if writePrivateFile(filepath.Join(dir, "release"), b.Release) != nil {
 		return nil, "", ErrStore
 	}
 	args := []string{"--homedir", dir, "--keyring", "/proc/self/fd/4", "--status-fd", "2", "--output", "-"}
 	if len(b.Signature) > 0 {
-		if os.WriteFile(filepath.Join(dir, "signature"), b.Signature, 0600) != nil {
+		if writePrivateFile(filepath.Join(dir, "signature"), b.Signature) != nil {
 			return nil, "", ErrStore
 		}
 		args = append(args, filepath.Join(dir, "signature"), filepath.Join(dir, "release"))

@@ -129,7 +129,7 @@ func traceCensusCloseChild(t *testing.T, mode string, inject bool) {
 		}
 	}()
 	cmd := exec.Command(os.Args[0], "-test.run=^TestManagerCensusCloseHelper$", "-test.v", "-test.timeout=45s")
-	cmd.Env = append(os.Environ(), "TMPDIR="+work, "CENSUS_CLOSE_ARM="+arm, "CENSUS_CLOSE_CASE="+mode, fmt.Sprintf("CENSUS_CLOSE_INJECT=%v", inject))
+	cmd.Env = append(os.Environ(), "TMPDIR="+work, "GOTMPDIR="+work, "CENSUS_CLOSE_ARM="+arm, "CENSUS_CLOSE_CASE="+mode, fmt.Sprintf("CENSUS_CLOSE_INJECT=%v", inject))
 	cmd.Stdout, cmd.Stderr = out, out
 	cmd.SysProcAttr = &syscall.SysProcAttr{Ptrace: true}
 	if e = cmd.Start(); e != nil {

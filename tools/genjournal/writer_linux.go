@@ -33,11 +33,17 @@ func initialize(path string, p policy) error {
 		return refuse("journal_create")
 	}
 	// Any failure preserves partial genesis. Admission is externally closed until verified.
-	d, e := openDirectory(path, p, true)
+	d, e := openDirectory(path, p, false)
 	if e != nil {
 		return e
 	}
 	defer d.file.Close()
+	if d.file.Chmod(0755) != nil {
+		return refuse("journal_mode")
+	}
+	if e = statOK(d.file, p.owner, 0755, true); e != nil {
+		return e
+	}
 	for _, name := range []string{"gate.lock", "data.lock", "journal"} {
 		f, e := d.create(name)
 		if e != nil {

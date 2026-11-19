@@ -227,6 +227,9 @@ func TestQualificationShadowGroupRead(t *testing.T) {
 		if e := os.WriteFile(filepath.Join(path, name), []byte("shadow:!::\n"), 0640); e != nil {
 			t.Fatal(e)
 		}
+		if e := os.Chmod(filepath.Join(path, name), 0640); e != nil {
+			t.Fatal(e)
+		}
 		var st unix.Stat_t
 		b, e := protectedReadChecked(context.Background(), d, name, 1000, func(s unix.Stat_t) bool {
 			return shadowProtection(name, s, d.owner, d.group+1, d.group, true)

@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/relux-works/swarma-user-manager/internal/testutil"
 	"github.com/relux-works/swarma-user-manager/tools/genjournal"
 )
 
@@ -207,6 +208,7 @@ func TestV1MigrationGated(t *testing.T) {
 			if e != nil || !bytes.Equal(backup, original) {
 				t.Fatal("original bytes not preserved", e)
 			}
+			testutil.Mode(t, filepath.Join(s.path, "effects.v1-"+a.OriginalDigest+".json"), 0600)
 		})
 	}
 }

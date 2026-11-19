@@ -65,6 +65,8 @@ func lifecycleTransitionShapes(previous, next identities.Document) []string {
 // Every publication, including creating/retiring intermediates, decodes and
 // preserves UID kinds. Emitted record/transition shapes need shared ACCEPT rows;
 // this bounded in-memory lifecycle does not qualify native host publication.
+// Long retained histories use the existing integration-fixture headroom;
+// dedicated deadline/refusal tests keep setup's original short budgets.
 func TestProjectionSharedLifecycleCoverage(t *testing.T) {
 	var manifest struct {
 		Cases []struct{ Name, File, Previous, Check, Verdict string }
@@ -107,6 +109,9 @@ func TestProjectionSharedLifecycleCoverage(t *testing.T) {
 		}
 	}
 	harness := setup(t)
+	harness.e.Policy.Limits.OperationMS = diskOperationBudget.Milliseconds()
+	harness.e.Policy.Limits.StepMS = diskStepBudget.Milliseconds()
+	harness.b.evidenceTTL = diskOperationBudget
 	store := &lifecycleProjectionStore{memStore: harness.s}
 	harness.e.Store = store
 	first := harness.created(t)

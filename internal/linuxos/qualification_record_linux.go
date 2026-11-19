@@ -169,6 +169,9 @@ func (s QualificationFile) Publish(ctx context.Context, b []byte) (err error) {
 		return e
 	} // Unsupported anonymous storage refuses; no named fallback.
 	f := os.NewFile(uintptr(fd), "qualification-candidate")
+	if e = f.Chmod(0600); e != nil {
+		return errors.Join(e, f.Close())
+	}
 	// A separate retained reference keeps identity alive even when closing the
 	// writer reports an error. Neither descriptor is recovered from a pathname.
 	ownedFD, e := unix.FcntlInt(f.Fd(), unix.F_DUPFD_CLOEXEC, 0)

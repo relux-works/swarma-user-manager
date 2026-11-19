@@ -205,7 +205,7 @@ func traceCloseChild(t *testing.T, mode string, inject bool) {
 		}
 	}()
 	cmd := exec.Command(os.Args[0], "-test.run=^TestPC2StoreCloseHelper$", "-test.v", "-test.timeout=45s")
-	cmd.Env = append(os.Environ(), "TMPDIR="+work, "PC2_CLOSE_ARM="+arm, "PC2_CLOSE_CASE="+mode, fmt.Sprintf("PC2_CLOSE_INJECT=%v", inject))
+	cmd.Env = append(os.Environ(), "TMPDIR="+work, "GOTMPDIR="+work, "PC2_CLOSE_ARM="+arm, "PC2_CLOSE_CASE="+mode, fmt.Sprintf("PC2_CLOSE_INJECT=%v", inject))
 	cmd.Stdout, cmd.Stderr = out, out
 	cmd.SysProcAttr = &syscall.SysProcAttr{Ptrace: true}
 	if e = cmd.Start(); e != nil {

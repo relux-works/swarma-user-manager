@@ -33,7 +33,8 @@ func lifetimeChildCommand(t *testing.T, name string, extra ...string) *exec.Cmd 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	t.Cleanup(cancel)
 	cmd := exec.CommandContext(ctx, exe, "-test.run=^"+name+"$", "-test.timeout=8s")
-	cmd.Env = append(os.Environ(), extra...)
+	cmd.Env = append(os.Environ(), "GORACE="+os.Getenv("GORACE")+" atexit_sleep_ms=0")
+	cmd.Env = append(cmd.Env, extra...)
 	return cmd
 }
 

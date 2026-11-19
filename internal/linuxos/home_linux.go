@@ -130,6 +130,10 @@ func privateStage(d *Dir) (_ *os.File, name string, err error) {
 	if e != nil {
 		return nil, name, e
 	}
+	if e = f.Chmod(0700); e != nil {
+		f.Close()
+		return nil, name, e
+	}
 	if err = metadata(f, d.owner, d.group, 0700, unix.S_IFDIR); err != nil {
 		f.Close()
 		return nil, name, err
@@ -166,6 +170,9 @@ func (d *Dir) Install(ctx context.Context, name string, m Manifest, l Limits) (s
 		return stage, e
 	}
 	defer closed(home, &err)
+	if e = home.Chmod(0700); e != nil {
+		return stage, e
+	}
 	if e = metadata(home, d.owner, d.group, 0700, unix.S_IFDIR); e != nil {
 		return stage, e
 	}
@@ -443,6 +450,9 @@ func (d *Dir) ReplaceManaged(ctx context.Context, m Manifest, path string) (stag
 	defer closed(wrapper, &err)
 	// Default group may be inherited from a setgid parent: set and verify it.
 	if e = unix.Fchown(int(wrapper.Fd()), int(d.owner), int(d.group)); e != nil {
+		return stage, e
+	}
+	if e = wrapper.Chmod(0700); e != nil {
 		return stage, e
 	}
 	if e = metadata(wrapper, d.owner, d.group, 0700, unix.S_IFDIR); e != nil {

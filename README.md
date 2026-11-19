@@ -542,3 +542,24 @@ passing qualification. Traces and child logs use task-local temporary directorie
 under `TMPDIR`. Shared hosts should serialize heavy test runs, including
 Go tests/builds, race, syscall probes and mutants. No CLI is installed by these
 fixtures, and no repository-wide test run is required for this scope.
+
+### Explicit creation modes
+
+New retained objects receive their contract modes explicitly on the created
+descriptor, independently of the process umask. The entrypoint's restrictive
+umask remains defense in depth. Existing retained objects are still checked, never
+silently repaired: PC2 uses 0750/0640, private stores use 0700/0600, generation
+storage uses 0755/0644, and home contents retain their manifest modes.
+
+| Tool | Purpose / exact entry point | Output |
+|---|---|---|
+| Go race detector | `GOFLAGS=-p=2 go test -race -count=1 ./internal/manager ./internal/pc2store ./internal/launch ./internal/linuxos ./internal/qualmaint ./internal/updateproof ./tools/genjournal -run 'CreationModes$'` | Named subprocess controls under umask 0022, 0077 and 0002; exact metadata and refusal assertions; owned temporary fixtures |
+| Go full-suite controls | `(umask 0022; GOMAXPROCS=2 GOFLAGS=-p=2 go test -race -count=1 -timeout=45m ./...)`; repeat with `umask 0077` | Package verdicts; retain logs in task-local `.temp/` |
+
+Use an isolated test environment with absolute HOME, caches, TMPDIR and
+GOTMPDIR. The package watchdog accommodates the long suite. Production and
+dedicated deadline-test budgets are unchanged; the retained-history coverage
+fixture opts into existing integration-fixture headroom. Close-syscall probes
+set both child temporary-directory variables to their owned trace prefix.
+Only the runbook checker and lifetime re-exec children disable the race
+runtime's exit sleep, preserving the real writer deadline and race checks.

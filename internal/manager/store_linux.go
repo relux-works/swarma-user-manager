@@ -335,6 +335,10 @@ func provisionStore(path string, cursor int64, owner uint32, anchor string) erro
 			return fail("state_unavailable")
 		}
 		f := os.NewFile(uintptr(fd), name)
+		if f.Chmod(0600) != nil {
+			f.Close()
+			return fail("state_unavailable")
+		}
 		if name == "effects.json" {
 			b, _ := effectBytes(State{Format: stateFormat, Floor: genjournal.Floor{Seq: 0, Hash: genjournal.ZeroHash}, Cursor: cursor, Effects: []Effect{}, Revision: 1, OSRecords: []OSRecord{}})
 			n, e := f.Write(b)

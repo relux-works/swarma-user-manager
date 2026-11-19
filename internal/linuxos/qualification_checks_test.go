@@ -23,6 +23,9 @@ func TestPolicyProtectionQualificationRefused(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(path, "policy"), []byte("policy"), 0640); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.Chmod(filepath.Join(path, "policy"), 0640); err != nil {
+		t.Fatal(err)
+	}
 	if r := CheckPolicyFile(ctx, d, "policy", 4096); r.State != QualificationFailed {
 		t.Fatal("broad policy mode not failed", r)
 	}

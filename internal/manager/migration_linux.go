@@ -89,6 +89,10 @@ func migrateV1(ctx context.Context, path string, j Journal, approvalPath string,
 				return fail("effect_evidence_unavailable")
 			}
 		} else {
+			if f.Chmod(0600) != nil {
+				f.Close()
+				return fail("state_unavailable")
+			}
 			n, werr := f.Write(original)
 			syncErr := f.Sync()
 			closeErr := f.Close()

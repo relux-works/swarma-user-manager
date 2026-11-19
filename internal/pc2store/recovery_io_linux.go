@@ -227,6 +227,9 @@ func (d *ReadDirectory) replaceRecoveryGuard(expected FileImage, raw []byte) (ou
 		}
 		f = os.NewFile(uintptr(fd), name)
 		defer closeInto(&err, &f)
+		if e = f.Chmod(0640); e != nil {
+			return out, errors.Join(ErrUnavailable, e)
+		}
 		if e = check(f, d.policy, 0640, false); e != nil {
 			return out, e
 		}

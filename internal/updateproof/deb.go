@@ -101,13 +101,13 @@ func decodeDeb(ctx context.Context, p Profile, deb []byte, part string) ([]byte,
 		return nil, e
 	}
 	defer f.Close()
-	dir, e := os.MkdirTemp("", "swarma-update-deb-")
+	dir, e := privateDirectory("swarma-update-deb-")
 	if e != nil {
 		return nil, ErrStore
 	}
 	defer os.RemoveAll(dir)
 	name := filepath.Join(dir, "archive.deb")
-	if os.WriteFile(name, deb, 0600) != nil {
+	if writePrivateFile(name, deb) != nil {
 		return nil, ErrStore
 	}
 	flag := "--fsys-tarfile"

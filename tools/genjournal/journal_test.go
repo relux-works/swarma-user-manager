@@ -327,7 +327,7 @@ func testTool(t *testing.T, p policy) string {
 	tool := filepath.Join(p.anchor, "checker")
 	// Single-quote escaping is used only for this locally generated test launcher.
 	quote := func(s string) string { return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'" }
-	body := "#!/bin/sh\nexec " + quote(bin) + " -test.run='^TestRunbookTool$' -- \"$@\"\n"
+	body := "#!/bin/sh\nexport GORACE=\"${GORACE:+$GORACE }atexit_sleep_ms=0\"\nexec " + quote(bin) + " -test.run='^TestRunbookTool$' -- \"$@\"\n"
 	if e = os.WriteFile(tool, []byte(body), 0755); e != nil {
 		t.Fatal(e)
 	}

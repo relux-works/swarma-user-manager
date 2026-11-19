@@ -93,6 +93,9 @@ func TestIntegratedExecutablePin(t *testing.T) {
 			if e := os.WriteFile(path, b, 0755); e != nil {
 				t.Fatal(e)
 			}
+			if e := os.Chmod(path, 0755); e != nil {
+				t.Fatal(e)
+			}
 			pin := qualification.ExecutablePin{Path: path, Digest: qualification.Hash(b), Mode: 0755}
 			switch mode {
 			case "missing":
@@ -203,6 +206,9 @@ func TestLauncherArtifactProfiles(t *testing.T) {
 			m.FirstRun.Launcher.Digest, m.FirstRun.Helper.Digest = qualification.Hash(b), qualification.Hash(b)
 			for _, pin := range []qualification.ExecutablePin{m.FirstRun.Launcher, m.FirstRun.Helper} {
 				if e := os.WriteFile(pin.Path, b, 0755); e != nil {
+					t.Fatal(e)
+				}
+				if e := os.Chmod(pin.Path, 0755); e != nil {
 					t.Fatal(e)
 				}
 			}

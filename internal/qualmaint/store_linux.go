@@ -250,6 +250,9 @@ func (w localWriter) putObject(b []byte) (Ref, error) {
 		if err = s.step("object.create", func() error {
 			var e error
 			f, e = openAt(s.objects, name, false, unix.O_WRONLY|unix.O_CREAT|unix.O_EXCL)
+			if e == nil {
+				e = f.Chmod(0600)
+			}
 			return e
 		}); err != nil {
 			if f != nil {

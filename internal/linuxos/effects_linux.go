@@ -173,6 +173,10 @@ func (d *Dir) CreateStage(ctx context.Context, key string) (stage *OwnedStage, e
 	if e != nil {
 		return nil, e
 	}
+	if e = f.Chmod(0700); e != nil {
+		f.Close()
+		return nil, e
+	}
 	if e = metadata(f, d.owner, d.group, 0700, unix.S_IFDIR); e != nil {
 		f.Close()
 		return nil, e

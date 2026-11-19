@@ -623,6 +623,9 @@ func retainArtifactAt(d *os.File, owner uint32, b []byte, l Limits, syncFile fun
 	}
 	f := os.NewFile(uintptr(fd), name)
 	defer f.Close()
+	if f.Chmod(0600) != nil {
+		return ErrStore
+	}
 	if protected(f, owner, false) != nil {
 		return ErrStore
 	}
