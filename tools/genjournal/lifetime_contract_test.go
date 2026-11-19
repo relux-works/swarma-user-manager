@@ -130,6 +130,9 @@ func TestAppendPreparedLifetimeExactTail(t *testing.T) {
 				if e := os.WriteFile(path, f.before, 0644); e != nil {
 					t.Fatal(e)
 				}
+				if e := os.Chmod(path, 0644); e != nil {
+					t.Fatal(e)
+				}
 			}
 			if mode == "advance" {
 				f.hooks.at = func(event string) error {
