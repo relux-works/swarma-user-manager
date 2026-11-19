@@ -197,6 +197,8 @@ owner-approved **aggregate** digest and its entire selected artifact set.
 actionlint .github/workflows/release.yml  # If installed; otherwise report missing.
 for script in .scripts/release-*.sh; do bash -n "$script" || exit; done
 GO=/absolute/path/to/go1.26.10/bin/go .scripts/release-test.sh /absolute/new/scratch
+GO=/absolute/path/to/go1.26.10/bin/go bash .scripts/user-manager-release-test.sh \
+  /absolute/new/scratch /absolute/new/retained-scratch
 ```
 
 The scratch test owns its empty home/config/caches, Git repositories and ephemeral
@@ -209,6 +211,13 @@ traversal, duplicates and symlinks. A local GitHub CLI double exercises off-main
 mismatched-digest, missing-label and non-prerelease refusals, plus rebuild/sign,
 readback and no-overwrite controls. This is not hosted workflow evidence.
 No managed account, launcher or live release API is touched by the tests.
+
+The repository-specific companion preserves the earlier adoption tests named
+`missing_artifact`, `extra_artifact` and `missing_expected_list` without changing
+the shared template scripts. It reuses the completed suite source fixture and
+exercises the real builder with missing/extra expected binaries and absent policy,
+beside valid builds. The template now reports artifact differences as
+`unexpected-artifact-set`; absent policy reports the exact missing policy path.
 
 When copying the template, include `.scripts/release-*` (including both Python 3
 helpers and the sourced cgo controls), `.github/release/`, workflow and docs.
