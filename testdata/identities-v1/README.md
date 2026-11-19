@@ -31,13 +31,31 @@ and `uid`; consumers must not replace those with header defaults.
   both `previous` and `file` decode against the shared head. The verdict belongs
   to `ValidateTransition`, not a consumer Principal or durable history across an
   intervening empty document. Same-kind retirement accepts; a retained UID kind
-  change refuses.
+  change refuses even with a fresh generation. Same-kind UID reuse under a new
+  generation accepts, both while creating (projected retired) and when active.
 - `check=custody`, `consumer=custody`: apply `condition` before reading the valid
   fixture bytes. Missing-file leaves the file absent; unreadable-file uses mode
   0000 for an unprivileged read; wrong-mode uses 0600. Wrong-owner/group use
   mismatching expected fixture IDs (production still requires 0:0). Symlink,
   hardlink and not-regular apply those filesystem shapes. Every row refuses with
   `principal_ledger_mismatch` without changing fixture bytes.
+
+`duplicate-uid.json` isolates UID uniqueness with an active and a retired
+service at one UID and distinct generations. `duplicate-uid-cross-kind.json`
+retains the compound variant as an extra control. `uid-kind-change.json` changes
+kind with a fresh generation, so generation-based transition indexing cannot
+stand in for retained UID history.
+
+`valid-active-agent`, `valid-retired-agent` and `valid-lifecycle` cover active and
+retired agents, repeated agent names and two retired gateways beside an active
+gateway. `valid-agent-recreate-creating` also accepts two retired agents sharing
+a name: the previous retirement and the next allocation's creating intermediate.
+The lifecycle projection uses synthetic neighboring rows at the shared
+head, just like the mixed projection; its case journals authorize only the
+queried active service. Both retired gateway UIDs have explicit refusal rows.
+`duplicate-generation-agent-uid` and `unknown-service-uid` refuse an agent or
+missing UID despite the active service's matching generation. They retain the
+UID-only consumer operation and do not supply a generation lookup argument.
 
 `mixed-wrong-generation` is deliberately absent from the consumer manifest:
 `View.Principal` cannot express a caller-selected generation. The producer-only
@@ -57,11 +75,19 @@ service names instead refuse decoding.
 
 `TestSharedFixtures` resolves each service UID from the projection and checks
 the resolved generation with `genjournal.View.Active`, without passing an
-expected generation as a consumer lookup input. `TestSharedFixtureConsumerContract`
+expected generation as a consumer lookup input. Its separate producer-only
+neighbor probe also requires the pairwise API to refuse another UID, even when
+given an active service's generation. `TestSharedFixtureConsumerContract`
 checks per-kind metadata and journal-backed Principal promises;
 `TestSharedServiceJournalBinding` pairs valid controls with wrong-head,
-missing-pair and wrong-generation refusals. `TestSharedCustodyFixtures` and
-`TestProjectionSharedProducerBytes` retain custody and producer-byte controls.
+missing-pair and wrong-generation refusals. `TestSharedServiceUIDBinding`
+separately checks both the UID-only consumer mapping and the producer pairwise
+API against the wrong-UID rows. `TestSharedCustodyFixtures` and
+`TestProjectionSharedProducerBytes` retain custody and producer-byte controls,
+including the lifecycle bytes. `TestProjectionSharedLifecycleCoverage` drives
+the real engine through agent retirement, label recreation, freed-UID reuse and
+two gateway rotations; every emitted projection and consecutive transition
+must validate, with matching shared ACCEPT record/transition shapes.
 `TestSharedFixtureChecksums` verifies digests and complete fixture coverage.
 These tests do not establish broker adoption or host qualification.
 

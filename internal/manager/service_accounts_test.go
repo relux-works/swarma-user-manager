@@ -320,7 +320,7 @@ func TestProjectionSharesJournalLock(t *testing.T) {
 // 0644 UID/GID-owned inode, and leaves the previous inode immutable across replace.
 // Mixed rows are synthetic inputs, not a verified multi-account journal history.
 func TestProjectionSharedProducerBytes(t *testing.T) {
-	for _, fixture := range []string{"valid", "valid-mixed"} {
+	for _, fixture := range []string{"valid", "valid-mixed", "valid-lifecycle"} {
 		t.Run(fixture, func(t *testing.T) { testProjectionSharedProducerBytes(t, fixture) })
 	}
 }
@@ -351,6 +351,21 @@ func testProjectionSharedProducerBytes(t *testing.T, fixture string) {
 			genjournal.Row{UID: retired.UID, Generation: retired.Generation, State: "removed"},
 			genjournal.Row{UID: agent.UID, Generation: agent.Generation, State: "active"},
 		)
+	}
+	if fixture == "valid-lifecycle" {
+		for _, example := range []struct {
+			kind, label, generation, state string
+			uid                            int64
+		}{
+			{"agent", "demo", strings.Repeat("2", 32), "removed", 30000},
+			{"agent", "demo", strings.Repeat("5", 32), "active", 30002},
+			{"service", identities.ServiceName, strings.Repeat("3", 32), "removed", 30003},
+			{"service", identities.ServiceName, strings.Repeat("4", 32), "removed", 30004},
+		} {
+			account := policy.accountFor(example.kind, example.label, example.uid, example.generation)
+			state.Effects = append(state.Effects, Effect{Request: Request{Op: "user.create", Args: Args{Kind: example.kind, Label: example.label}}, Account: account})
+			view.Rows = append(view.Rows, genjournal.Row{UID: account.UID, Generation: account.Generation, State: example.state})
+		}
 	}
 	unlock, err := store.Lock(context.Background(), 0)
 	if err != nil {

@@ -116,6 +116,16 @@ func TestSharedFixtures(t *testing.T) {
 				if example.Generation != "" {
 					generation = example.Generation
 				}
+				// This producer-only neighbor probe does not add a generation
+				// argument to the UID-only consumer mapping below.
+				for _, candidate := range document.Accounts {
+					if candidate.UID != uid && candidate.Kind == "service" && candidate.State == "active" && candidate.Class == "trusted" && candidate.Placement == "local" {
+						account, producerErr := document.Service(uid, candidate.Generation)
+						if !errors.Is(producerErr, ErrMismatch) || account != (Account{}) {
+							t.Fatal("producer accepted another UID", account, producerErr)
+						}
+					}
+				}
 				var account Account
 				account, err = fixtureServicePrincipal(document, view, uid)
 				if err == nil && (account.UID != uid || account.Generation != generation || account.Name != ServiceName || account.Kind != "service" || account.State != "active" || account.Class != "trusted" || account.Placement != "local") {
@@ -304,7 +314,40 @@ func TestIdentityTransitionAndRetiredNameControls(t *testing.T) {
 	}
 	next.Accounts[0].Kind = "agent"
 	next.Accounts[0].Name = "worker-demo"
+	next.Accounts[0].Generation = strings.Repeat("3", 32)
 	if !errors.Is(ValidateTransition(previous, next), ErrMismatch) {
 		t.Fatal("retired UID changed kind")
+	}
+}
+
+// Both UID-only consumer mapping and the producer pairwise API refuse a matching
+// service generation at an agent or absent UID; the actual service is a control.
+func TestSharedServiceUIDBinding(t *testing.T) {
+	manifest := fixtures(t)
+	seen := 0
+	for _, example := range manifest.Cases {
+		if example.Name != "duplicate-generation-agent-uid" && example.Name != "unknown-service-uid" {
+			continue
+		}
+		seen++
+		t.Run(example.Name, func(t *testing.T) {
+			view := fixtureJournal(t, example.Journal, example.JournalHead)
+			document, err := Decode(fixtureBytes(t, example.File), view.Tail.Hash)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := document.Service(manifest.UID, manifest.Generation); err != nil {
+				t.Fatal("actual service refused", err)
+			}
+			if account, err := document.Service(*example.UID, manifest.Generation); !errors.Is(err, ErrMismatch) || account != (Account{}) {
+				t.Fatal("producer accepted another UID", account, err)
+			}
+			if account, err := fixtureServicePrincipal(document, view, *example.UID); !errors.Is(err, ErrMismatch) || account != (Account{}) {
+				t.Fatal("consumer accepted another UID", account, err)
+			}
+		})
+	}
+	if seen != 2 {
+		t.Fatal("missing UID-binding fixture rows", seen)
 	}
 }

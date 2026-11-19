@@ -181,10 +181,29 @@ create effects make that prohibition permanent at the producer.
 the mixed active/retired/agent and empty-document accept controls,
 `journal.jsonl`, a closed verdict manifest, one fixture per refusal condition
 and `SHA256SUMS`. The producer's real atomic writer is compared byte-for-byte
-with `valid.json` and `valid-mixed.json`, not merely with another local
-serializer. The mixed writer test supplies synthetic journal rows at the shared
-head; it proves projection encoding and atomic custody, not that the two-record
+with `valid.json`, `valid-mixed.json` and `valid-lifecycle.json`, not merely with
+another local serializer. The mixed and lifecycle writer tests supply synthetic
+journal rows at the shared head; this proves projection encoding and atomic custody, not that the two-record
 shared journal itself contains a multi-account lifecycle.
+
+The lifecycle accept includes retired/active agents sharing a name and two
+retired gateways beside an active gateway. Separate accepts cover a lone
+retired agent and same-kind UID reuse under a fresh generation, including its
+creating intermediate. Another accept covers the two retired same-name agents
+visible while recreating an agent. `TestProjectionSharedLifecycleCoverage` records every
+publication from real engine agent create/retire/recreate, freed-UID reuse and
+two gateway rotations. It validates each document and consecutive pair, then
+requires shared ACCEPT counterparts for each kind/state/repeated-name shape,
+including multiple same-state names, and each
+allocation/state/generation transition it observed. It is an in-memory engine
+regression, not native qualification or an assertion that synthetic fixture
+neighbors are journal-authorized service principals.
+
+Duplicate-UID refusal bytes use two service records with distinct generations;
+fresh-generation kind-change refusals separately pin retained UID history.
+Wrong-UID service rows exercise both an agent sharing the active service's
+generation and an unknown UID. Their consumer operation remains UID-only;
+`TestSharedServiceUIDBinding` additionally pins the producer's pairwise API.
 
 Copy this directory's compatibility files byte-for-byte to broker
 `internal/service/testdata/identities-v1/`, preserving the same SHA256SUMS.
