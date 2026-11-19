@@ -85,7 +85,7 @@ Both run as root for one operation at a time, are invoked through `sudo` by conf
 ```
 swarma-user-manager helper-op/1
 { v: 1,
-  op:         "user.create" | "user.retire" | "user.bump" | "user.list" | "effect.observe" | "exec.stop" | "archive.sweep" | "fw.apply" | "fw.remove",
+  op:         "user.create" | "user.show" | "user.retire" | "user.bump" | "user.list" | "effect.observe" | "exec.stop" | "archive.sweep" | "fw.apply" | "fw.remove",
   request_id: string (≤ 64),           // mutation: caller-scoped effect key; read: correlation, §§4.6, 5
   args:       { … per operation … } }
 
@@ -95,6 +95,16 @@ swarma-user-manager helper-result/1
 ```
 
 `user.bump` is the closed station-agent operation in [stations-v0.md §6](stations-v0.md#6-same-account-generation-bump); it adds no caller-selected UID, path or key and remains subject to that slice's qualification gates.
+
+`user.show` is the operator-only retained-generation metadata read in
+[stations-v0.md §2](stations-v0.md#2-invocation-and-closed-requests):
+`args: {generation}` and
+`result: {uid,gid,name,home,kind,generation,state,class,placement}`. It creates no
+lifecycle effect. That slice also admits operator-only service creation for the
+closed name `credential-gateway`, not general service provisioning. These
+refinements follow [the projection contract](../docs/identity-projection.md) and
+the 2026-11-19 **managed-identity projection v1** owner decision, pending
+specification acceptor review on return on 2026-11-22.
 
 `effect.observe` is a read-only operation in `helper-op/1` (R-OBS). Its arguments identify the original effect's `request_id`, operation and digest of its canonical arguments; the outer `request_id` remains request correlation and does not admit a new effect. The exact argument/result member encoding and canonical digest bytes are unpublished (§14, question 8); no additional wire fields or refusal codes are assigned here. Its observation result is exactly one of:
 

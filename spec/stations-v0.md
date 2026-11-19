@@ -9,8 +9,9 @@
 
 One station is one agent, one OS account, one identity, its own signer binding,
 home and root context. Pooling, shared UIDs and adopting an existing unmanaged
-account are forbidden. Linux is the first backend. Only trusted `agent`
-allocations are in this slice; being a station does not establish trust.
+account are forbidden. Linux is the first backend. This slice admits trusted
+`agent` allocations and the operator-only service exception below; a service
+is not a station, and being a station does not establish trust.
 
 The user manager owns OS account allocation, ownership scaffolding, generation
 fences and account cleanup. Curator owns home composition, approved control
@@ -35,7 +36,7 @@ interface, not an installed capability claimed by this draft.
 
 | In v0 | Explicitly outside this slice |
 |---|---|
-| `user.create` with `kind=agent`; `user.retire`; same-account `user.bump` | Service/workplace/donor provisioning; pooling; arbitrary UID/GID/path input |
+| Dispatcher `user.create` with `kind=agent`; operator `user.create` with `kind=service,label=credential-gateway`; operator `user.show` and `user.retire`; same-account agent `user.bump` | Other service names; workplace/donor provisioning; service bump or launch; pooling; arbitrary UID/GID/path input |
 | Root-owned generation/effect evidence; duplicate-request recovery | General `user.list`, `effect.observe`, `exec.stop` APIs; their later contracts remain in helper.md |
 | Managed-home protection; local cleanup and generation fencing | Launcher installation/execution; credential binding, signing, identity registration/revocation |
 | Required preinstalled static UID-range deny | Firewall v1, per-account rule updates, web/network opt-ins |
@@ -43,11 +44,21 @@ interface, not an installed capability claimed by this draft.
 | Explicit call-driven cleanup | ALLSTOP, usage watcher, automatic expiry retirement, macOS/Windows |
 
 These exclusions narrow the release, not the accepted later design. Refuse
-excluded operations as `operation_unsupported`, non-agent kinds as
-`kind_unsupported`, untrusted admission as `class_unsupported`, and non-Linux
-backends as `platform_unsupported` before reserving identity or changing state.
+excluded operations as `operation_unsupported`, kinds other than `agent` or
+the operator-only `service` exception as `kind_unsupported`, untrusted admission
+as `class_unsupported`, and non-Linux backends as `platform_unsupported` before
+reserving identity or changing state.
 There is no permissive fallback. Unsupported request members remain
 `request_invalid`; `grants` specifically refuses `grants_unsupported`.
+
+The service exception and protected projection follow
+[`docs/identity-projection.md`](../docs/identity-projection.md) and the owner
+decision **managed-identity projection v1** of 2026-11-19, pending specification
+acceptor review on return on 2026-11-22. The closed service-name set contains
+only `credential-gateway`; a different service label refuses `label_invalid`.
+Service creation, lookup and retirement retain the same custody, policy range,
+journal and lock rules; they grant no launcher authority. Other non-agent kinds
+remain `kind_unsupported`, and service bump remains `kind_unsupported`.
 
 `active` means a locally provisioned account, not a usable or running station.
 No provider start is admitted by this slice. Later launch integration MUST
@@ -68,6 +79,9 @@ Only a root-configured dispatcher principal may create or bump its own agent
 allocations, within its configured quota. In local v0, only the configured
 operator principal may retire, through an authenticated, exact-content-confirmed
 per-act export waiver ([authority sources](station-effect-receipts.md#6-accepted-local-v0-authority-sources)).
+The configured operator alone may create `credential-gateway` as `kind=service`
+or call `user.show`; its protected owner scope must cover the target allocation,
+including its own service allocations. Lookup admits no new lifecycle effect.
 Dispatcher retirement with export confirmation comes later. The principal's
 protected service identity and generation MUST still match policy; numeric UID
 reuse cannot inherit authority. An installer is not an agent caller. The
@@ -95,6 +109,8 @@ other well-typed operation string refuses `operation_unsupported`.
 
 ```json
 {"v":1,"op":"user.create","request_id":"create-example","args":{"kind":"agent","label":"dev-example"}}
+{"v":1,"op":"user.create","request_id":"service-example","args":{"kind":"service","label":"credential-gateway"}}
+{"v":1,"op":"user.show","request_id":"show-example","args":{"generation":"b4e7ac8e9b954d54924ad23d9e040de1"}}
 {"v":1,"op":"user.retire","request_id":"retire-example","args":{"generation":"b4e7ac8e9b954d54924ad23d9e040de1"}}
 {"v":1,"op":"user.bump","request_id":"bump-example","args":{"generation":"b4e7ac8e9b954d54924ad23d9e040de1"}}
 ```
@@ -114,6 +130,18 @@ exactly `username,uid,gid,home,generation,state`; retire has exactly
 **current** state, which can differ on terminal replay. For bump it describes
 the returned new generation, not whatever generation now occupies the UID.
 UID/GID are positive integers selected by policy; `home` is helper-derived.
+
+For operator-only `user.show`, `args` contains exactly `generation` and the
+success `result` contains exactly `uid,gid,name,home,kind,generation,state,class,placement`.
+`name` is the retained account name (not a `username` member), `kind` is its
+permanent `agent` or `service` kind, `class` is the current protected manager
+policy class, and `placement` is `local`. Both result and envelope `state` are
+the requested generation's retained journal state: `creating`, `active`,
+`retiring` or `removed`. Retired generations remain queryable; unknown or
+out-of-scope targets refuse `target_not_owned`. A dispatcher lookup refuses
+`caller_role_not_permitted`. This is a metadata read, not activation or a
+service-principal admission; the projection mapping is defined in
+[`docs/identity-projection.md`](../docs/identity-projection.md).
 
 A refusal uses exactly `{request_id,ok:false,error:{code,message}}`; an
 unrecoverable or schema-invalid request ID is represented by JSON `null`;

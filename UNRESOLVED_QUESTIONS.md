@@ -6,6 +6,16 @@ gates are distinguished below.
 The broader [helper.md §14](spec/helper.md#14-open-questions) retains its own
 later-phase questions; this register does not resolve or renumber them.
 
+## Managed identity v1: pending specification alignment
+
+The 2026-11-19 **managed-identity projection v1** owner decision binds producer
+units P8/P2 pending specification acceptor review on return on 2026-11-22.
+[The producer contract](docs/identity-projection.md) and the station service/show
+exception do not resolve the older public-ledger locator in helper §4.5 and
+broker §4.2, workplace kind versus placement vocabulary, or installer directory
+search permissions for the broker account. Those decisions and activation
+remain separate gates; this fix round does not choose replacements for them.
+
 ## Decided architecture
 
 | Decision | Binding disposition |
