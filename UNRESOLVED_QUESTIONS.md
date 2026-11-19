@@ -16,6 +16,12 @@ broker §4.2, workplace kind versus placement vocabulary, or installer directory
 search permissions for the broker account. Those decisions and activation
 remain separate gates; this fix round does not choose replacements for them.
 
+The [fixture decision matrix](docs/identity-fixture-matrix.md) pins the queried
+journal pair (present, matching generation and active) as the producer's shared
+consumer-contract refinement. The specification acceptor and broker section 2.2
+still need to record that obligation explicitly. UID-kind permanence remains
+producer retained-history enforcement, not a durable UID-only consumer check.
+
 ## Decided architecture
 
 | Decision | Binding disposition |

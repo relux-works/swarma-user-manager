@@ -27,6 +27,7 @@ type fixtureCase struct {
 	Journal     string            `json:"journal"`
 	JournalHead string            `json:"journal_head"`
 	Principal   *fixturePrincipal `json:"principal"`
+	Rule        string            `json:"rule"`
 }
 
 type fixturePrincipal struct {
@@ -42,6 +43,7 @@ type fixtureManifest struct {
 	UID         uint32        `json:"uid"`
 	Generation  string        `json:"generation"`
 	Cases       []fixtureCase `json:"cases"`
+	Matrix      []fixtureRule `json:"matrix"`
 }
 
 func fixtureBytes(t *testing.T, name string) []byte {
@@ -128,7 +130,10 @@ func TestSharedFixtures(t *testing.T) {
 				}
 				var account Account
 				account, err = fixtureServicePrincipal(document, view, uid)
-				if err == nil && (account.UID != uid || account.Generation != generation || account.Name != ServiceName || account.Kind != "service" || account.State != "active" || account.Class != "trusted" || account.Placement != "local") {
+				if err == nil && example.Verdict == "accept" && (example.Principal == nil || *example.Principal != (fixturePrincipal{account.UID, account.Generation, account.Name})) {
+					t.Fatal("consumer principal differs", account, example.Principal)
+				}
+				if err == nil && (account.UID != uid || example.Verdict == "accept" && account.Generation != generation || account.Name != ServiceName || account.Kind != "service" || account.State != "active" || account.Class != "trusted" || account.Placement != "local") {
 					t.Fatal("service mapping differs", account)
 				}
 			case "transition":
@@ -198,6 +203,11 @@ func TestSharedFixtureConsumerContract(t *testing.T) {
 			}
 			seenJournals[example.Journal] = true
 			view := fixtureJournal(t, example.Journal, example.JournalHead)
+			if example.Name == "duplicate-generation-agent-uid" || example.Name == "unknown-service-uid" {
+				if err := view.Active(int64(*example.UID), strings.Repeat("1", 32)); err != nil {
+					t.Fatal("UID-binding refusal lacks an active queried journal pair", err)
+				}
+			}
 			if example.Verdict == "accept" {
 				if example.Principal == nil || example.Principal.UID != *example.UID || example.Principal.Generation != example.Generation || example.Principal.Service != ServiceName {
 					t.Fatal("service accept needs its exact consumer principal")

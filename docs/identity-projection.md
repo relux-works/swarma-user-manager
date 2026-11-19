@@ -202,8 +202,18 @@ neighbors are journal-authorized service principals.
 Duplicate-UID refusal bytes use two service records with distinct generations;
 fresh-generation kind-change refusals separately pin retained UID history.
 Wrong-UID service rows exercise both an agent sharing the active service's
-generation and an unknown UID. Their consumer operation remains UID-only;
+generation and an unknown projection UID, each with an ACTIVE queried journal
+pair. Their consumer operation remains UID-only;
 `TestSharedServiceUIDBinding` additionally pins the producer's pairwise API.
+
+The [decision fixture matrix](identity-fixture-matrix.md) records every wire
+predicate and its adjacent ACCEPT/single-rule REFUSE pair in `cases.json`.
+The independent `TestSharedFixtureDecisionMatrix` refuses missing pairs,
+documentation drift and confounded witnesses. Journal absence, generation
+mismatch and creating/retiring/removed pairs each have sealed service refusals
+and valid controls. Narrowing plants for J1 and U1 must fail the shared rows.
+The journal-pair obligation remains the safe-direction consumer refinement
+recorded here for the specification acceptor; the owner decision is not rewritten.
 
 Copy this directory's compatibility files byte-for-byte to broker
 `internal/service/testdata/identities-v1/`, preserving the same SHA256SUMS.

@@ -54,8 +54,29 @@ The lifecycle projection uses synthetic neighboring rows at the shared
 head, just like the mixed projection; its case journals authorize only the
 queried active service. Both retired gateway UIDs have explicit refusal rows.
 `duplicate-generation-agent-uid` and `unknown-service-uid` refuse an agent or
-missing UID despite the active service's matching generation. They retain the
-UID-only consumer operation and do not supply a generation lookup argument.
+missing projection UID despite an ACTIVE queried UID/generation in their own
+journals. They cannot refuse merely because the journal lacks the queried UID.
+They retain the UID-only consumer operation and do not supply a generation
+lookup argument.
+
+## Decision-rule pairs
+
+The [decision matrix](../../docs/identity-fixture-matrix.md) and the manifest's
+`matrix` agree exactly. Every rule has an immediately adjacent ACCEPT/REFUSE
+pair in `cases`, tagged with that `rule`. `TestSharedFixtureDecisionMatrix`
+independently checks every applicable predicate: an ACCEPT breaks none, and its
+REFUSE breaks only the named rule. Missing sides, missing rules, nonadjacency,
+documentation drift and a confounded refusal fail. Bounded negative controls
+demonstrate those failures rather than relying on the checker accepting itself.
+
+`unjournaled-service`, `inactive-journal-service`, `retiring-journal-service`
+and `removed-journal-service` have eligible active/trusted/local service records
+and exact head bindings, but respectively a missing, creating, retiring or
+removed journal pair. `wrong-generation` separately pins generation mismatch.
+Each has a sealed, adjacent journal-backed ACCEPT counterpart. The J1 missing
+and state-tolerating plants, and U1's generation-indexed UID-blind consumer,
+must fail `TestSharedFixtures` on these actual shared rows, not a producer-only
+probe or bytes rewritten only in Go.
 
 `mixed-wrong-generation` is deliberately absent from the consumer manifest:
 `View.Principal` cannot express a caller-selected generation. The producer-only
