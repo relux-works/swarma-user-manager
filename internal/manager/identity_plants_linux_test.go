@@ -28,8 +28,9 @@ func TestIdentityProjectionPlants(t *testing.T) {
 	}
 	root := filepath.Clean(filepath.Join(current, "../.."))
 	plants := []identityPlant{
-		{"case-uid-ignored", "internal/identities/identities_test.go", `if example.UID != nil {`, `if false && example.UID != nil {`, "./internal/identities", "TestSharedFixtures/uid-max", "valid control"},
-		{"case-generation-ignored", "internal/identities/identities_test.go", `if example.Generation != "" {`, `if false && example.Generation != "" {`, "./internal/identities", "TestSharedFixtures/valid-other-generation", "valid control"},
+		{"case-uid-ignored", "internal/identities/identities_test.go", `if example.UID != nil {`, `if false && example.UID != nil {`, "./internal/identities", "TestSharedFixtures/valid-other-generation", "valid control"},
+		{"case-generation-ignored", "internal/identities/identities_test.go", `if example.Generation != "" {`, `if false && example.Generation != "" {`, "./internal/identities", "TestSharedFixtures/valid-other-generation", "service mapping differs"},
+		{"journal-pair-ignored", "internal/identities/identities_test.go", `view.Active(int64(uid), candidate.Generation) != nil`, `false`, "./internal/identities", "TestSharedServiceJournalBinding/missing-active-pair", "unjournaled principal accepted"},
 		{"allocator-kind-skip", "internal/manager/engine.go", `(!used || kind == r.Args.Kind)`, `(!used || kind == r.Args.Kind || used)`, "./internal/manager", "TestServiceUIDKindDisjointness", "want success"},
 		{"single-account-only", "internal/identities/identities.go", `document.Accounts == nil`, `len(document.Accounts) != 1`, "./internal/identities", "TestSharedFixtures/valid-mixed", "service fixture must decode"},
 		{"empty-accounts-refused", "internal/identities/identities.go", `document.Accounts == nil`, `document.Accounts == nil || len(document.Accounts) == 0`, "./internal/identities", "TestSharedFixtures/valid-empty", "valid control"},
