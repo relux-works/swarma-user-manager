@@ -23,18 +23,24 @@ mapping, metadata modes and Unix-only confinement. Untagged readers refuse
 the lab kind. The tagged manager also serves C0c native observations with
 `--lab-observation` on its fixed protected Unix socket, using the existing
 native store lock and a separate durable observation counter. It never grants
-launch or credential authority. This is **not the complete M1 unit**: full
-setup, bounded executor and access readback remain open at the native
-per-attempt accounting boundary. C0b resolved the earlier bound-field gap.
+launch or credential authority. Tagged start admission additionally validates
+the C0b bounds and approval graph, complete protected plan/profile pins, native
+account/start joins and original deadlines. C0e makes G1b the sole per-attempt
+gate; M1 does not count vendor attempts. This is **not the complete M1 unit**:
+the full root setup, genuine pinned client realization, authenticated approval
+import and privileged-access readback are not delivered or qualified.
 See [scope, STOP evidence and validation tools](docs/lab-profile-m1.md).
 
 Tools: `go build -p 1 ./...` and `go build -tags manager_lab -p 1 ./...` build
 the two graphs; `go test -p 1 -count=1 -timeout=20m ./...` retains production
 checks; `go test -tags manager_lab -p 1 -count=1 -v -timeout=20m
-./internal/launch` exercises tagged mappings and source-overlay mutants.
+ -skip "^TestLaunchMappingPlants$" ./internal/launch ./cmd/swarma-user-launcher
+./cmd/swarma-user-manager` exercises tagged mappings, admission and observation
+source-overlay mutants; the unchanged default-only plant harness runs above.
 Use isolated absolute HOME/caches/cwd; retain command exits and named mutant
 evidence under `.temp/lab-m1/` and `.temp/lab-m1-resume/`. The focused C0c gate is
 `go test -tags manager_lab -p 1 -count=1 -v -run "^TestLabObservation" ./internal/launch`.
+The C0b gate is `go test -tags manager_lab -p 1 -count=1 -v -run "^TestLabStart" ./internal/launch`.
 The full setup command is not implemented; the observation metadata writer is
 installer-only. No credential, installed access roster or native qualification
 is implied.

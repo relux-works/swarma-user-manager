@@ -1,23 +1,25 @@
 # Lab profile v0: M1 construction and remaining boundary
 
-Status: **STOP:C0B_ATTEMPT_ACCOUNTING_BOUNDARY**. Partial producer delivery,
+Status: **STOP:M1_SETUP_ACCESS_NOT_DELIVERED**. Partial producer delivery,
 not full M1 acceptance, installed qualification, a release or key-use authority.
-The previous missing-bounded-invocation-contract STOP is **resolved**.
+Both earlier bounded-contract and attempt-accounting STOP points are resolved.
+The retained branch did not contain the full setup or access readback described
+as already delivered in the resume request. This record does not invent them.
 
 ## Source authority
 
-Fresh shallow broker clone: ../broker-design-c0bc at
-eef0f9f3388c3b35ce562f126540fc333370ec43 (C0b/C0c, PR 81).
+Fresh shallow broker clone: ../broker-design-c0e at
+9f1f90faadb6f51b3c4767c8276a4c3b5e0d1066 (C0e, PR 82).
 The frozen contracts/lab-v0 inventory, bounded-invocation.md, observation.md,
 fixtures and profile sections 2–5 and 7 govern this source. Manager origin/main
 remained 7c5e9eebbaf859246d4e5adc600a6727e5773e34 after the resume fetch;
-the signed mapping commit is retained without a needless rebase.
+both delivered signed commits are retained without a needless rebase.
 
 Book dispositions reuse **OS user and network**, **Credentials** and
 **Operator and interfaces**, as cited by the broker profile and C0c. The lab
 exception is not a production spec change. No contract/probe byte is changed.
-The test-only verbatim inventory and observation fixture are sealed against
-their C0 index digests, not re-generated goldens.
+The compiled verbatim inventory and test-only observation/client/wire/price
+fixtures are sealed against their C0 index digests, not re-generated goldens.
 
 ## Implemented source
 
@@ -105,51 +107,68 @@ Debit/invalidation heads hash the complete raw native prefixes; manager head
 uses the native journal algorithm, with only the required algorithm label.
 These choices need B1/B5 contract consumption review, not fixture approval.
 
-## Remaining scope/contract decision
+## Approved start admission (C0b/C0e)
 
-C0b now completely defines bound fields, decimal micro-USD, owner approval
-targets, full-plan joins and first-bound/UNKNOWN semantics. It explicitly says
-that one CLI process is NOT proof of one invocation, requires reservation before
-EVERY potentially billable attempt, and forbids advisory spend flags or post-hoc
-usage as hard enforcement. The pinned client/probe's documented HTTP-400 control
-contains internal retry attempts; these are not qualified forwarding profiles.
+Only linux && manager_lab consumes the exact C0 inventory. The selected launch
+must carry a closed canonical launch-plan/1, all C0b bounds, true budget approval
+and the full off-VM approval digest. USD is a six-decimal string converted with
+integer arithmetic, never float. Model/output and complete client, wire, price
+and contract-index pins equal the frozen reviewed profile, not altered goldens.
+Native opened executor bytes must equal the approved executor pin. Every
+required InputPin occurs exactly once; every duplicate name refuses. Context,
+predecessor heads, target generation, complete approval/release/access graph
+and immutable gateway group join the complete native launch plan. ManagerJoin
+must agree internally and match the protected terminal native account request,
+request digest and current native floor; no manager response is synthesized.
 
-The preserved M1 launch mapping sends the client directly to the generation
-gateway socket. M1 owns process-start receipts/debits, not the gateway's upstream
-forward or authoritative charge evidence. The closed C0 inventory has no
-authenticated per-attempt reservation/admission/settlement interface between
-that forwarder and the executor. A local process counter cannot close that
-boundary, and an optional worker proxy would not by itself prevent direct use
-of the admitted generation gateway socket. Source scope is M1 only.
+The protected private station-lab-start-admission/1 import records the approved
+complete hashes, native request/start/generation/epoch, boot, installed store
+generation, qualified UTC/monotonic anchor, qualification deadline, available
+cap and revocation. Files are 0600 under the native private launch directory;
+missing, malformed, unsafe, revoked, mismatched or expired input refuses before
+an intent/receipt/debit. Deadline checks run after bounded record reads, again
+after process absence, and at the final native debit boundary. Every accepted
+check advances the local monotonic high-water; a later partial regression also
+refuses. The original
+import/group/qualification/approval/access deadlines are never extended.
 
-Evidence at the pinned revisions: C0b bounded-invocation.md, Executor section
-requires pre-forward ordinals and independently enforceable worst-case charge
-reservations. probe/REPORT.md section 4 records three Messages POSTs in its
-single-process HTTP-400 control. mapping_linux.go validateLaunchMapping and
-environment fix the generation gateway socket. The complete surfaces.json
-inventory closes the lab formats but supplies no per-attempt forwarder gate.
-These are a capability boundary and contract gap, not a claim that M1 parsed
-or implemented the bounded-invocation approval protocol.
+Required protected files: lab-start-admission, lab-invocation, lab-approval,
+lab-release, lab-access, lab-group, lab-price, lab-client and lab-wire. Private
+import fields and code are in internal/launch/admission_lab_linux.go. This is
+an integration precondition, NOT a supported hand-authored approval mechanism:
+B5 must authenticate the owner and current qualification/access facts before
+format-owned placement. A digest or channel=owner-terminal is not authentication.
+There is no authenticated placement bridge or full setup CLI in this source.
 
-Clean paths considered:
+G1b alone owns attempt ordinals, worst-case reservations, authoritative usage
+settlement, first-bound stopping and sticky UNKNOWN. M1 neither parses its
+mutable ledger nor counts processes as billable attempts. Its existing native
+one-start debit is distinct. C0e retires the former attempt-accounting STOP.
 
-1. Process start/count/timeout supervision: preserves native launch but misses
-   SDK attempts and pre-forward cost reservation; insufficient under C0b.
-2. CLI soft spend limit or stdout usage: cannot prove a hard bound, complete
-   accounting or a zero-refund UNKNOWN; explicitly forbidden by C0b.
-3. An independently enforced gateway-side gate joined to M1's durable ordinal
-   and reservation ledger: viable, but needs its source owner and a reviewed
-   cross-unit contract before M1 can consume it. No new wire method is invented.
-4. A different demonstrably bounded client/executor realization: needs exact
-   capability evidence and, where bytes change, reviewed probe/profile/release
-   pins. The frozen client is never silently modified.
+## Remaining source and native gates
 
-Required decision/input: select and approve the sole per-attempt admission and
-authoritative settlement boundary with G1/B4/B5/C0, or supply a reviewed native
-executor control mechanism meeting those same constraints. This is distinct
-from the RESOLVED bound-field issue and from later human live-budget approval.
-No full setup/executor success stub, synthesized owner act, sudo provenance or
-privileged-access roster is provided. Full M1 is not ready for review.
+The retained branch contained mapping plus observation metadata writers only.
+It did not deliver section 7.2 prepare/qualify/create-identities/verify-identities
+or a genuine sudo-based helper invocation, exact pinned Claude client wrapper,
+complete privileged-access scanner or authenticated protected approval import.
+Those are not replaced here with a root helper exception, spoofed SUDO_UID,
+handwritten journal, qualified:true switch, fixture-only success or soft budget.
+The complete M1 row is consequently NOT ready for review.
+
+The actual entry cannot be qualified on this unprivileged checkout. Native
+qualification requires the separately approved fresh lab deployment and current
+boot policy/skeleton/NSS/helper closure. Owner-endpoint, hypervisor/control-plane
+and complete vendor administration/audit facts cannot be established from this
+process or from an access JSON document. Sections 3/4/7 require owner/B5/Q
+inputs, not a permission inference from root access. No live installation,
+credential, vendor call or shared-service change was attempted.
+
+Clean continuation: finish the format-owned setup and pinned client entry in
+M1, agree its authenticated protected import/instance transitions with B5,
+then qualify genuine helper execution and C0c timing/access readbacks on the
+owner-approved fresh lab. A narrower review of the delivered source slices
+must explicitly exclude those unimplemented obligations; it is not full M1
+acceptance. Per-attempt ownership requires no further decision.
 
 ## Evidence and limits
 
@@ -169,9 +188,10 @@ No owner-root action, credential, vendor request or privileged-agent exclusion
 claim was made. External guest/endpoint/vendor readbacks remain owner/Infra
 inputs; fixture JSON cannot prove them.
 
-Acceptance rows A01/A02/A03/A09/A10 have partial construction coverage. A04/A06/
-A11/A12 and the rest of the assigned rows remain uncovered at their integrated
-level. No assigned row is out of contract. Missing coverage blocks READY status.
+All nine assigned rows have at most partial construction coverage. A04/A06/A11/
+A12 now include composed rejection of unsafe attested access or unapproved pins,
+not actual access collection, installation or owner authentication. No assigned
+row is out of contract. Missing integrated coverage blocks READY status.
 The exact row/test/mutant table, signature status and real command exits belong
 to the requested out/HANDOFF.md. The brief has acceptance rows but no separate
 attack-surface catalogue table; that brief gap is not a coverage waiver.
@@ -186,10 +206,12 @@ checkout, HOME, caches, config and temporary directories. Retain logs/exits.
 | Go | go build -p 1 ./...; go build -tags manager_lab -p 1 ./... | Untagged/tagged build logs |
 | Go | go test -p 1 -count=1 -v -timeout=20m ./... | Existing production tests and default rejection |
 | Go | go test -tags manager_lab -p 1 -count=1 -v -timeout=20m -skip ^TestLaunchMappingPlants$ ./internal/launch ./cmd/swarma-user-launcher ./cmd/swarma-user-manager | Tagged tests and named overlay kills; unchanged default-only original plant harness is exercised separately |
+| Go | go test -tags manager_lab -p 1 -count=1 -v -run ^TestLabStart ./internal/launch | Admission controls, C0 catalogue and per-gate source overlays |
 | Go | go test -tags manager_lab -p 1 -count=1 -v -run ^TestLabObservationPlants$ ./internal/launch | Per-gate baseline, intended named failure and unaffected control |
 | Go | go list -json ./internal/launch; go list -tags manager_lab -json ./internal/launch | Actual tag-selected files |
 | Go | go vet -tags manager_lab ./internal/launch ./internal/manager ./cmd/swarma-user-manager; go mod verify | Static checks and pinned-module integrity |
 | gofmt / Git | gofmt -l internal/launch/observation*.go; git diff --check; git verify-commit HEAD | Formatting, diff and signature evidence |
 
-Task-only logs and environment recipes are in .temp/lab-m1/ and
-.temp/lab-m1-resume/. No publication or installed adoption is implied.
+Task-only logs and environment recipes are in .temp/lab-m1/,
+.temp/lab-m1-resume/ and .temp/lab-m1-c0e/. No publication or installed adoption
+is implied. The requested out/HANDOFF.md carries actual checks and real exits.

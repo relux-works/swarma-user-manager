@@ -105,7 +105,7 @@ func labContractValue(value any, kind string, contract labObservationContract) e
 
 // Claim: the untouched C0c fixture and actual collector output have the exact frozen recursively closed wire shapes, with both discriminator directions refused.
 func TestLabObservationFrozenShapes(test *testing.T) {
-	if labDigest([]byte(labObservationFrozenSchema)) != "sha256:a18e404b606e6bfed36342aaaf56914b09bb39ffd3e872e396493e03909e4e05" || labDigest([]byte(labObservationFrozenFixture)) != "sha256:ea6b0ded999473a2f875a8dbda6d650b3df02e3a384156a914bbf4c540e8fe2d" {
+	if labDigest([]byte(labObservationFrozenSchema)) != "sha256:6c520459f15bf77a83fb0414d46cc65e777d2956292f8132154003129bd59c71" || labDigest([]byte(labObservationFrozenFixture)) != "sha256:ea6b0ded999473a2f875a8dbda6d650b3df02e3a384156a914bbf4c540e8fe2d" {
 		test.Fatal("frozen C0 bytes changed")
 	}
 	var contract labObservationContract

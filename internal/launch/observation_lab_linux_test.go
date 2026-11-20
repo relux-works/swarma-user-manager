@@ -19,24 +19,8 @@ import (
 
 func observationFixture(test *testing.T) (*fixture, *labObservationSource, []byte) {
 	test.Helper()
-	fixture, _, dependencies := labMappingFixture(test)
+	fixture, _, dependencies := labMappingFixture(test, "observation-launch")
 	binding := LabObservationBinding{labObservationBindingFormat, int64(os.Getuid()), int64(os.Getgid()), "fixture-manager", strings.Repeat("b", 64), strings.Repeat("c", 32), strings.Repeat("d", 32), fixture.caller.Principal, fixtureGen}
-	created, err := manager.ReadProtected(fixture.store.journal, "effects.json", fixture.owner, 8*1024*1024)
-	if err != nil {
-		test.Fatal(err)
-	}
-	empty := manager.State{Format: manager.StateFormat, Floor: genjournal.Floor{Seq: 0, Hash: genjournal.ZeroHash}, Cursor: fixture.policy.UIDMin, Effects: []manager.Effect{}, OSRecords: []manager.OSRecord{}, Revision: 1}
-	inner, _ := manager.ObjectBytes(empty)
-	fresh, _ := manager.ObjectBytes(managerEnvelope{manager.StoreFormat, empty, manager.DigestBytes(inner)})
-	if err := manager.WriteProtected(fixture.store.journal, "effects.json", fresh, fixture.owner); err != nil {
-		test.Fatal(err)
-	}
-	if err := fixture.store.provisionLabObservation(binding.StoreGeneration, &memJournal{}); err != nil {
-		test.Fatal("observation install", err)
-	}
-	if err := manager.WriteProtected(fixture.store.journal, "effects.json", created, fixture.owner); err != nil {
-		test.Fatal(err)
-	}
 	if err := fixture.store.installLabObservationBinding(binding); err != nil {
 		test.Fatal(err)
 	}

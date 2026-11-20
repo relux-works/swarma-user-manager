@@ -11,12 +11,18 @@ import (
 	"testing"
 )
 
-func labMappingFixture(t *testing.T) (*fixture, launchMapping, Deps) {
+func labMappingFixture(t *testing.T, requestIDs ...string) (*fixture, launchMapping, Deps) {
 	t.Helper()
 	fixture, mapping, deps := mappingFixture(t)
 	mapping.Kind = "claude-api-key-lab-v0"
 	mapping.CredentialVariable = "ANTHROPIC_API_KEY"
 	writeMappingObject(t, filepath.Join(fixture.root, "etc/launch-mappings", fixtureExecutor+".json"), mapping)
+	provisionLabFixture(t, fixture)
+	requestID := "mapping-control"
+	if len(requestIDs) > 0 {
+		requestID = requestIDs[0]
+	}
+	newLabAdmissionFixture(t, fixture, requestID)
 	return fixture, mapping, deps
 }
 

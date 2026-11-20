@@ -310,11 +310,21 @@ func (l Launcher) Run(ctx context.Context, raw []byte, in manager.Invocation) ma
 		}
 		return refused(id, fail("target_not_owned"))
 	}
+	labCheck, e := l.admitLabStart(r, mapping, executor, boot, now, view.Tail)
+	if e != nil {
+		return refused(id, e)
+	}
 	// D5a: zero processes over the real, effective and saved UID; a failed or
 	// partial scan keeps the launch closed.
 	absence, e := ProveAbsence(ctx, limitScanner(d.Scanner, gate.Stop.MaxProcesses), uint32(account.UID))
 	if e != nil || !absence.Proved {
 		return refused(id, fail("uid_not_clean"))
+	}
+	if labCheck != nil {
+		currentBoot, currentMS, clockErr := d.Clock.Now()
+		if clockErr != nil || !labCheck(currentBoot, currentMS) {
+			return refused(id, fail("lab_start_unapproved"))
+		}
 	}
 	if !found {
 		effects.Launches = append(effects.Launches, l.effect(caller, r, gate, account.UID))
@@ -376,6 +386,9 @@ func (l Launcher) Run(ctx context.Context, raw []byte, in manager.Invocation) ma
 	boot2, now2, e := d.Clock.Now()
 	if e != nil || boot2 != boot || now2 >= gate.ExpiresMS {
 		return refused(id, fail("target_not_owned"))
+	}
+	if labCheck != nil && !labCheck(boot2, now2) {
+		return refused(id, fail("lab_start_unapproved"))
 	}
 	invBytes, e := readLedger(invR)
 	if e != nil {

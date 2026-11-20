@@ -16,23 +16,26 @@ gates are distinguished below.
 The broader [helper.md §14](spec/helper.md#14-open-questions) retains its own
 later-phase questions; this register does not resolve or renumber them.
 
-## Lab profile v0 M1: native attempt-accounting boundary
+## Lab profile v0 M1: setup and access qualification
 
 RESOLVED: broker C0b at `eef0f9f3388c3b35ce562f126540fc333370ec43` supplies
 the complete bounded-invocation bytes, approval targets and required joins.
 The old missing-bound-fields STOP no longer applies.
 
-OPEN: M1 owns native process starts, while the credential-bearing gateway owns
-each billable forward. The pinned client can retry inside one process. The
-frozen interfaces do not expose an authenticated per-attempt admission and
-authoritative settlement boundary between them. A process counter, soft spend
-flag or post-hoc usage cannot implement C0b. Decide and review the gateway-side
-reservation/settlement integration (with its source owner), or approve/re-probe
-an executor/client path with demonstrable independent hard controls. M1 must not
-invent a new cross-unit wire protocol or broaden its closed mapping silently.
-See [the current M1 record](docs/lab-profile-m1.md). Mapping and the tagged C0c
-observation source are partial delivery only; full setup, bounded executor,
-privileged-access readback and integrated acceptance remain open.
+RESOLVED: C0e at `9f1f90faadb6f51b3c4767c8276a4c3b5e0d1066` makes G1b
+the sole per-forward attempt/reservation/settlement owner. M1 adds only approved
+start admission and serves C0c; it has no monetary attempt counter.
+
+OPEN: the retained branch contained mapping and observation metadata writers,
+not the full root setup entry, genuine sudo/helper/client realization or a
+complete privileged-access readback. The new source validates frozen C0b
+records and protected expected pins, joins the native start, and refuses unsafe
+attested access. It does not authenticate an owner from JSON or collect missing
+guest/control-plane/endpoint/vendor facts. The protected B5 approval import,
+current-boot native installation/qualification, exact pinned client realization
+and owner-approved external access evidence remain required. No production
+helper root bypass, hand-authored identity journal, fake owner act or permissive
+source provider is an acceptable substitute. See [the M1 record](docs/lab-profile-m1.md).
 
 ## Managed identity v1: pending specification alignment
 
