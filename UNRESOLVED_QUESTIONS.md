@@ -16,6 +16,17 @@ gates are distinguished below.
 The broader [helper.md §14](spec/helper.md#14-open-questions) retains its own
 later-phase questions; this register does not resolve or renumber them.
 
+## Lab profile v0 M1: bounded executor contract
+
+M1 is stopped at the missing approved bounded invocation contract. Broker C0 at
+`7a730950fb0965fdfc34081b7d390f02e8c9a3bd` freezes an inert client observation
+with `live_budget_approved:false`; selecting new executable bounds must not
+silently change that wire/profile contract. See
+[the M1 stop record](docs/lab-profile-m1.md#stop-point-and-exact-missing-input)
+for exact evidence, considered alternatives and the C0 resolution required.
+Only the build-tagged closed mapping slice is implemented. Setup, executor,
+access readback and all full-unit acceptance obligations remain open.
+
 ## Managed identity v1: pending specification alignment
 
 The 2026-11-19 **managed-identity projection v1** owner decision binds producer

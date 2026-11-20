@@ -150,7 +150,7 @@ func (l Launcher) launchMapping(executor approvedExecutor) (*launchMapping, erro
 }
 
 func (mapping launchMapping) valid(root, executorID string) bool {
-	if mapping.Format != launchMappingFormat || mapping.ExecutorID != executorID || !manager.HashOK(mapping.ExecutorSHA256) || mapping.Kind != "claude-gateway" || mapping.BaseURL != "http://api.anthropic.com" || mapping.CredentialVariable != "CLAUDE_CODE_OAUTH_TOKEN" || mapping.Placeholder != "ssh-placeholder" || mapping.Network != "unix-only" {
+	if mapping.Format != launchMappingFormat || mapping.ExecutorID != executorID || !manager.HashOK(mapping.ExecutorSHA256) || mapping.Kind != "claude-gateway" && !labMappingValid(mapping) || mapping.BaseURL != "http://api.anthropic.com" || mapping.CredentialVariable != "CLAUDE_CODE_OAUTH_TOKEN" && !labMappingValid(mapping) || mapping.Placeholder != "ssh-placeholder" || mapping.Network != "unix-only" {
 		return false
 	}
 	prefix := filepath.Join(root, "run/credential-gateway") + "/"
@@ -184,7 +184,7 @@ func (l Launcher) gatewaySocket(path string) error {
 }
 
 func (mapping launchMapping) environment() []string {
-	return []string{
+	return mappingEnvironment(mapping, []string{
 		"ANTHROPIC_UNIX_SOCKET=" + mapping.GatewaySocket,
 		"ANTHROPIC_BASE_URL=http://api.anthropic.com",
 		"CLAUDE_CODE_OAUTH_TOKEN=ssh-placeholder",
@@ -193,5 +193,5 @@ func (mapping launchMapping) environment() []string {
 		"DISABLE_ERROR_REPORTING=1",
 		"DISABLE_AUTOUPDATER=1",
 		"DISABLE_UPDATES=1",
-	}
+	})
 }

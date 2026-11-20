@@ -14,6 +14,23 @@ covers one host and its exact build; admission remained unconfigured. Production
 lifecycle under load, complete inventory and A3 automatic requalification remain
 outside those passes.
 
+## Lab profile v0 mapping slice
+
+The `manager_lab` build tag adds only the closed
+`claude-api-key-lab-v0` launch mapping, with
+`ANTHROPIC_API_KEY=ssh-placeholder`, while preserving the production OAuth
+mapping, metadata modes and Unix-only confinement. Untagged readers refuse
+the lab kind. This is **not the complete M1 unit**: setup, bounded executor and
+access readback remain stopped pending the frozen bounded invocation contract.
+See [scope, STOP evidence and validation tools](docs/lab-profile-m1.md).
+
+Tools: `go build -p 1 ./...` and `go build -tags manager_lab -p 1 ./...` build
+the two graphs; `go test -p 1 -count=1 -timeout=20m ./...` retains production
+checks; `go test -tags manager_lab -p 1 -count=1 -v -timeout=20m
+./internal/launch` exercises tagged mappings and source-overlay mutants.
+Use isolated absolute HOME/caches/cwd; retain command exits and named mutant
+evidence under `.temp/lab-m1/`. No credential or native qualification is implied.
+
 ## Demo slot service
 
 The temporary [slot daemon](cmd/swarma-slotd-demo/README.md) has a separate
