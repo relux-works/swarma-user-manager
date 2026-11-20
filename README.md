@@ -14,14 +14,18 @@ covers one host and its exact build; admission remained unconfigured. Production
 lifecycle under load, complete inventory and A3 automatic requalification remain
 outside those passes.
 
-## Lab profile v0 mapping slice
+## Lab profile v0 producer slices
 
-The `manager_lab` build tag adds only the closed
+The `manager_lab` build tag adds the closed
 `claude-api-key-lab-v0` launch mapping, with
 `ANTHROPIC_API_KEY=ssh-placeholder`, while preserving the production OAuth
 mapping, metadata modes and Unix-only confinement. Untagged readers refuse
-the lab kind. This is **not the complete M1 unit**: setup, bounded executor and
-access readback remain stopped pending the frozen bounded invocation contract.
+the lab kind. The tagged manager also serves C0c native observations with
+`--lab-observation` on its fixed protected Unix socket, using the existing
+native store lock and a separate durable observation counter. It never grants
+launch or credential authority. This is **not the complete M1 unit**: full
+setup, bounded executor and access readback remain open at the native
+per-attempt accounting boundary. C0b resolved the earlier bound-field gap.
 See [scope, STOP evidence and validation tools](docs/lab-profile-m1.md).
 
 Tools: `go build -p 1 ./...` and `go build -tags manager_lab -p 1 ./...` build
@@ -29,7 +33,11 @@ the two graphs; `go test -p 1 -count=1 -timeout=20m ./...` retains production
 checks; `go test -tags manager_lab -p 1 -count=1 -v -timeout=20m
 ./internal/launch` exercises tagged mappings and source-overlay mutants.
 Use isolated absolute HOME/caches/cwd; retain command exits and named mutant
-evidence under `.temp/lab-m1/`. No credential or native qualification is implied.
+evidence under `.temp/lab-m1/` and `.temp/lab-m1-resume/`. The focused C0c gate is
+`go test -tags manager_lab -p 1 -count=1 -v -run "^TestLabObservation" ./internal/launch`.
+The full setup command is not implemented; the observation metadata writer is
+installer-only. No credential, installed access roster or native qualification
+is implied.
 
 ## Demo slot service
 

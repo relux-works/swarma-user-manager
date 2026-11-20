@@ -16,6 +16,7 @@ import (
 
 type mappingProfilePlant struct {
 	name, source, before, after, test, assertion, control, tags string
+	pattern                                                     string
 }
 
 func assertMappingProfilePlant(t *testing.T, plant mappingProfilePlant) {
@@ -50,6 +51,9 @@ func assertMappingProfilePlant(t *testing.T, plant mappingProfilePlant) {
 		ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 		defer cancel()
 		arguments := []string{"test", "-p", "1", "-count=1", "-v", "-timeout=90s", "-run", "^(TestLabMapping(EnvironmentAndConfinement|Admission|ConfinementRefusal|OneStart)|TestProductionRejectsLabMapping|TestLaunchMappingGates|TestLaunchConfinementFilter)$"}
+		if plant.pattern != "" {
+			arguments[len(arguments)-1] = plant.pattern
+		}
 		if plant.tags != "" {
 			arguments = append(arguments, "-tags", plant.tags)
 		}

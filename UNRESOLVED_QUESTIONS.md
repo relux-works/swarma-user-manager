@@ -16,16 +16,23 @@ gates are distinguished below.
 The broader [helper.md §14](spec/helper.md#14-open-questions) retains its own
 later-phase questions; this register does not resolve or renumber them.
 
-## Lab profile v0 M1: bounded executor contract
+## Lab profile v0 M1: native attempt-accounting boundary
 
-M1 is stopped at the missing approved bounded invocation contract. Broker C0 at
-`7a730950fb0965fdfc34081b7d390f02e8c9a3bd` freezes an inert client observation
-with `live_budget_approved:false`; selecting new executable bounds must not
-silently change that wire/profile contract. See
-[the M1 stop record](docs/lab-profile-m1.md#stop-point-and-exact-missing-input)
-for exact evidence, considered alternatives and the C0 resolution required.
-Only the build-tagged closed mapping slice is implemented. Setup, executor,
-access readback and all full-unit acceptance obligations remain open.
+RESOLVED: broker C0b at `eef0f9f3388c3b35ce562f126540fc333370ec43` supplies
+the complete bounded-invocation bytes, approval targets and required joins.
+The old missing-bound-fields STOP no longer applies.
+
+OPEN: M1 owns native process starts, while the credential-bearing gateway owns
+each billable forward. The pinned client can retry inside one process. The
+frozen interfaces do not expose an authenticated per-attempt admission and
+authoritative settlement boundary between them. A process counter, soft spend
+flag or post-hoc usage cannot implement C0b. Decide and review the gateway-side
+reservation/settlement integration (with its source owner), or approve/re-probe
+an executor/client path with demonstrable independent hard controls. M1 must not
+invent a new cross-unit wire protocol or broaden its closed mapping silently.
+See [the current M1 record](docs/lab-profile-m1.md). Mapping and the tagged C0c
+observation source are partial delivery only; full setup, bounded executor,
+privileged-access readback and integrated acceptance remain open.
 
 ## Managed identity v1: pending specification alignment
 
