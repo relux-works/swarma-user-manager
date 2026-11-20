@@ -30,7 +30,7 @@ func TestLabStartApproved(test *testing.T) {
 	}
 }
 
-// Claim: malformed or unapproved bounds, approval/context/input/group mismatches and unsafe attested access refuse before any native admission; each has a restored admitted control.
+// Claim: malformed or unapproved bounds, imported epoch/boot, plan generation, approval/context/input/group mismatches and unsafe attested access refuse before native admission; each has a restored admitted control.
 func TestLabStartAdmission(test *testing.T) {
 	type scenario struct {
 		name, code string
@@ -38,6 +38,15 @@ func TestLabStartAdmission(test *testing.T) {
 		after      func(*labAdmissionFixtureState)
 	}
 	cases := []scenario{
+		{name: "plan-generation", before: func(state *labAdmissionFixtureState) {
+			state.records["invocation"]["target_generation"] = strings.Repeat("a", 32)
+		}},
+		{name: "binding-epoch", before: func(state *labAdmissionFixtureState) {
+			state.binding.Epoch++
+		}},
+		{name: "binding-boot", before: func(state *labAdmissionFixtureState) {
+			state.binding.BootID = "22222222-2222-2222-2222-222222222222"
+		}},
 		{name: "manager-request", before: func(state *labAdmissionFixtureState) {
 			join := labMap(state.launch, "manager_join")
 			join["request_sha256"] = "sha256:" + strings.Repeat("a", 64)

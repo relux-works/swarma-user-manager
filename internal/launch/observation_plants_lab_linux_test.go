@@ -10,6 +10,10 @@ import (
 // Claim: each observation source-overlay gate deletion fails the named assertion with a green exact-source baseline and an unaffected parser or native control.
 func TestLabObservationPlants(test *testing.T) {
 	plants := []mappingProfilePlant{
+		{name: "observation-owner", source: "observation_lab_linux.go", before: "effect.Owner != binding.Owner", after: "false", test: "TestLabObservationBindingJoin/owner", assertion: "unsafe native join produced a socket frame"},
+		{name: "observation-duplicate-invalidation", source: "observation_lab_linux.go", before: "seen[invalidation] || invalidation.BootID != boot", after: "invalidation.BootID != boot", test: "TestLabObservationBindingJoin/duplicate-invalidation", assertion: "unsafe native join produced a socket frame"},
+		{name: "observation-daemon-uid-start", source: "observation_lab_linux.go", before: "start.UID == binding.DaemonUID", after: "false", test: "TestLabObservationBindingJoin/daemon-uid-start", assertion: "unsafe native join produced a socket frame"},
+		{name: "observation-receipt-boot", source: "observation_lab_linux.go", before: "receipt.Epoch != start.Epoch || receipt.BootID != boot", after: "receipt.Epoch != start.Epoch", test: "TestLabObservationBindingJoin/receipt-boot", assertion: "unsafe native join produced a socket frame"},
 		{name: "observation-request-closure", source: "observation_lab_linux.go", before: "manager.Strict(raw, &request) != nil", after: "func() bool { _ = manager.Strict(raw, &request); return false }()", test: "TestLabObservationRequestCatalogue", assertion: "request catalogue verdict"},
 		{name: "observation-request-literal", source: "observation_lab_linux.go", before: "request.Format != labObservationRequestFormat", after: "false", test: "TestLabObservationRequestCatalogue", assertion: "request catalogue verdict"},
 		{name: "observation-request-native-id", source: "observation_lab_linux.go", before: "!manager.ValidRequestID(request.StartID)", after: "false", test: "TestLabObservationRequestCatalogue", assertion: "request catalogue verdict"},

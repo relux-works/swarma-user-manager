@@ -7,6 +7,10 @@ import "testing"
 // Claim: isolated source overlays weaken individual admission gates and fail the named assertion while a valid approved start remains admitted; baseline and mutant statuses are checked separately.
 func TestLabStartPlants(test *testing.T) {
 	plants := []mappingProfilePlant{
+		{name: "start-frozen-target-domain", before: "if name != omit {", after: "if name != omit && name != \"format\" {", test: "TestLabStartFrozenDigests", assertion: "frozen contract digest changed"},
+		{name: "start-plan-generation", before: "labString(plan, \"target_generation\") != binding.Generation", after: "false", test: "TestLabStartAdmission/plan-generation"},
+		{name: "start-binding-epoch", before: "binding.Epoch != request.Epoch", after: "false", test: "TestLabStartAdmission/binding-epoch"},
+		{name: "start-binding-boot", before: "binding.BootID != boot", after: "false", test: "TestLabStartAdmission/binding-boot"},
 		{name: "start-clock-highwater", before: "now = currentMS\n\t\treturn true", after: "_ = currentMS\n\t\treturn true", test: "TestLabStartClockRegression/regression", assertion: "accepted clock high-water regressed at debit"},
 		{name: "start-manager-join", before: "!launcher.labNativeManagerJoin(plan, request.Generation, nativeHead)", after: "false", test: "TestLabStartAdmission/manager-request"},
 		{name: "start-price-pin", before: "binding.PriceSHA256 != \"sha256:ab24597d9db7e908b1127efcabe049637e8e70eea61b1ee318528b7e5bcaeebf\"", after: "false", test: "TestLabStartAdmission/price-pin"},
